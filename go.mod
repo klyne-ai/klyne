@@ -1,8 +1,12 @@
 module github.com/mohitpatell/agentdeck
 
-go 1.21
+go 1.21.0
+
+toolchain go1.21.3
 
 require (
+	github.com/fsnotify/fsnotify v1.7.0
+	github.com/pelletier/go-toml/v2 v2.3.1
 	github.com/spf13/cobra v1.10.2
 	modernc.org/sqlite v1.34.4
 )

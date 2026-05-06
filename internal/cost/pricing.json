@@ -1,0 +1,66 @@
+{
+  "_comment": "LiteLLM-style pricing table. Rates are USD per million tokens (per_mtok). Sources: Anthropic pricing page (https://www.anthropic.com/pricing), OpenAI pricing page (https://openai.com/pricing), Google AI pricing page (https://ai.google.dev/pricing). Rates are approximate as of 2025-05 and should be refreshed in W17 before launch. Local/self-hosted models (llama3.1:8b) are zero-cost.",
+  "version": 1,
+  "models": {
+    "claude-sonnet-4-5": {
+      "prompt_per_mtok": 3.00,
+      "completion_per_mtok": 15.00,
+      "cache_read_per_mtok": 0.30,
+      "cache_write_per_mtok": 3.75
+    },
+    "claude-haiku-4": {
+      "prompt_per_mtok": 0.80,
+      "completion_per_mtok": 4.00,
+      "cache_read_per_mtok": 0.08,
+      "cache_write_per_mtok": 1.00
+    },
+    "claude-opus-4-6": {
+      "prompt_per_mtok": 15.00,
+      "completion_per_mtok": 75.00,
+      "cache_read_per_mtok": 1.50,
+      "cache_write_per_mtok": 18.75
+    },
+    "gpt-5": {
+      "prompt_per_mtok": 10.00,
+      "completion_per_mtok": 30.00,
+      "cache_read_per_mtok": 5.00,
+      "cache_write_per_mtok": 0.00
+    },
+    "gpt-5-mini": {
+      "prompt_per_mtok": 0.40,
+      "completion_per_mtok": 1.60,
+      "cache_read_per_mtok": 0.20,
+      "cache_write_per_mtok": 0.00
+    },
+    "gpt-5-nano": {
+      "prompt_per_mtok": 0.10,
+      "completion_per_mtok": 0.40,
+      "cache_read_per_mtok": 0.05,
+      "cache_write_per_mtok": 0.00
+    },
+    "gemini-2.5-flash": {
+      "prompt_per_mtok": 0.075,
+      "completion_per_mtok": 0.30,
+      "cache_read_per_mtok": 0.01875,
+      "cache_write_per_mtok": 0.00
+    },
+    "gemini-2.5-flash-lite": {
+      "prompt_per_mtok": 0.0375,
+      "completion_per_mtok": 0.15,
+      "cache_read_per_mtok": 0.009375,
+      "cache_write_per_mtok": 0.00
+    },
+    "text-embedding-3-small": {
+      "prompt_per_mtok": 0.02,
+      "completion_per_mtok": 0.00,
+      "cache_read_per_mtok": 0.00,
+      "cache_write_per_mtok": 0.00
+    },
+    "llama3.1:8b": {
+      "prompt_per_mtok": 0.00,
+      "completion_per_mtok": 0.00,
+      "cache_read_per_mtok": 0.00,
+      "cache_write_per_mtok": 0.00
+    }
+  }
+}

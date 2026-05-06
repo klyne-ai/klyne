@@ -94,13 +94,13 @@ These apply to every agent dispatched against this plan. Each workstream file re
 | Wave | Workstream | Owner / agent | Branch | Status |
 |---|---|---|---|---|
 | 0 | W0  | Opus Lead + 2 Sonnet helpers | `main` | 🟢 merged (see [W0-INTEGRATION-NOTES.md](./W0-INTEGRATION-NOTES.md)) |
-| 1 | W1  | _unassigned_ | — | ⬜ not started |
-| 1 | W4  | _unassigned_ | — | ⬜ not started |
-| 1 | W5  | _unassigned_ | — | ⬜ not started |
-| 1 | W6  | _unassigned_ | — | ⬜ not started |
-| 1 | W9  | _unassigned_ | — | ⬜ not started |
-| 1 | W10 | _unassigned_ | — | ⬜ not started |
-| 1 | W13 | _unassigned_ | — | ⬜ not started |
+| 1 | W1  | Sonnet | `main` | 🟢 merged (78.8% cov) |
+| 1 | W4  | Sonnet | `main` | 🟢 merged (80.3% cov) |
+| 1 | W5  | Sonnet | `main` | 🟢 merged (82.7% cov) |
+| 1 | W6  | Sonnet | `main` | 🟢 merged (80.0% cov) |
+| 1 | W9  | Sonnet | `main` | 🟢 merged (88.1% cov) |
+| 1 | W10 | Sonnet | `main` | 🟢 merged (89.0% cov) |
+| 1 | W13 | Sonnet | `main` | 🟢 merged (97.8% cov, 49 tests) |
 | 2 | W2  | _unassigned_ | — | ⬜ not started |
 | 2 | W3  | _unassigned_ | — | ⬜ not started |
 | 2 | W7  | _unassigned_ | — | ⬜ not started |
