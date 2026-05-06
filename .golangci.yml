@@ -1,0 +1,21 @@
+version: "2"
+
+run:
+  timeout: 5m
+  # Match local Go toolchain version.
+  # CI runners use GOTOOLCHAIN=auto and download 1.23.
+  go: "1.21"
+
+linters:
+  enable:
+    - errcheck      # Check for unchecked errors
+    - gosec         # Security checks (OWASP-style)
+    - govet         # go vet checks
+    - staticcheck   # Comprehensive static analysis
+    - unused        # Unused code detection
+    - gocyclo       # Cyclomatic complexity
+    - goconst       # Repeated string literals that should be constants
+    - gofumpt       # Stricter gofmt formatting
+
+  # Nothing disabled — every enabled linter is intentional.
+  # Add disable entries only with a justifying comment.

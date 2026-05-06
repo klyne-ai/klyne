@@ -1,0 +1,34 @@
+# Go
+bin/
+*.test
+*.out
+cov.out
+*.exe
+
+# Node / SvelteKit
+node_modules/
+ui/build/
+ui/.svelte-kit/
+dist/
+
+# agentdeck runtime artifacts
+*.db
+*.db-shm
+*.db-wal
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# Environment / secrets
+.env
+.env.local
+*.pem
+
+# goreleaser
+dist/

@@ -93,7 +93,7 @@ These apply to every agent dispatched against this plan. Each workstream file re
 
 | Wave | Workstream | Owner / agent | Branch | Status |
 |---|---|---|---|---|
-| 0 | W0  | _unassigned_ | — | ⬜ not started |
+| 0 | W0  | Opus Lead + 2 Sonnet helpers | `main` | 🟢 merged (see [W0-INTEGRATION-NOTES.md](./W0-INTEGRATION-NOTES.md)) |
 | 1 | W1  | _unassigned_ | — | ⬜ not started |
 | 1 | W4  | _unassigned_ | — | ⬜ not started |
 | 1 | W5  | _unassigned_ | — | ⬜ not started |

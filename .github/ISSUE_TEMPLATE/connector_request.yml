@@ -1,0 +1,57 @@
+name: Request a CLI Connector
+description: Request support for a new AI coding CLI connector (v2 connector pattern).
+labels: ["connector-request"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        agentdeck v1 ships with Claude Code and Codex CLI connectors. Community connectors land in v2.
+
+        Any developer can implement a connector by satisfying the `Connector` Go interface (see `internal/connectors/connector.go`). PRs get merged once the v1 core is stable. This issue template maps to the **v2 connector PR pattern** described in spec §9.
+
+        **Please redact any API keys or secrets before submitting.**
+
+  - type: input
+    id: cli_name
+    attributes:
+      label: CLI Name
+      description: The name of the AI coding CLI you want a connector for.
+      placeholder: "e.g. OpenCode, Aider, Cursor, Cline, Gemini CLI"
+    validations:
+      required: true
+
+  - type: input
+    id: cli_url
+    attributes:
+      label: CLI Repository / Homepage URL
+      placeholder: "https://github.com/..."
+    validations:
+      required: true
+
+  - type: input
+    id: jsonl_path
+    attributes:
+      label: JSONL Log Path on Disk
+      description: Where does this CLI write its JSONL session files? Use ~ for home directory.
+      placeholder: "e.g. ~/.opencode/sessions/*.jsonl"
+    validations:
+      required: true
+
+  - type: textarea
+    id: sample_jsonl
+    attributes:
+      label: Sample JSONL
+      description: |
+        Paste a representative sample of the JSONL lines this CLI produces (5–20 lines is enough).
+        **Redact any API keys, tokens, or personal data before submitting.**
+      render: json
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: Why This Connector Matters
+      description: Who uses this CLI and what user pain does the connector solve?
+    validations:
+      required: true

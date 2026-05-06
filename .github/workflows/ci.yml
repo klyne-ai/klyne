@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+env:
+  GOTOOLCHAIN: auto
+  # Spec §5 locks the SQLite driver to modernc.org/sqlite (pure Go, no CGO).
+  # Force CGO off across the whole CI matrix so we never accidentally pull in
+  # cgo-sqlite on a runner with a C toolchain installed.
+  CGO_ENABLED: "0"
+
+jobs:
+  ci:
+    name: CI (${{ matrix.os }}, Go ${{ matrix.go-version }})
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        go-version: ["1.23"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          # Respects the `go` directive in go.mod; matrix go-version is the
+          # minimum version CI downloads if the module requires a newer one.
+          go-version-file: go.mod
+
+      - name: Set up Node (only when ui/package.json exists)
+        if: hashFiles('ui/package.json') != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Download Go modules
+        run: go mod download
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+
+      - name: go test (race + coverage)
+        run: go test ./... -race -coverprofile=cov.out
+
+      - name: UI checks (only when ui/package.json exists)
+        if: hashFiles('ui/package.json') != ''
+        run: |
+          cd ui
+          npm ci
+          npm run check
+          npm run test
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.os }}
+          path: cov.out
+          if-no-files-found: ignore
