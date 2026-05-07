@@ -54,11 +54,13 @@ func InsertMessage(ctx context.Context, db *DB, m *connectors.Message) error {
 INSERT INTO messages
     (id, session_id, parent_uuid, role, content,
      tool_calls_json, tool_results_json,
-     tokens_in, tokens_out, cost_usd, model, ts)
+     tokens_in, tokens_out, cached_read_tokens, cached_write_tokens,
+     cost_usd, model, ts)
 VALUES
     (?, ?, ?, ?, ?,
      ?, ?,
-     ?, ?, ?, ?, ?)`
+     ?, ?, ?, ?,
+     ?, ?, ?)`
 
 	if _, err := tx.ExecContext(ctx, insertMsg,
 		m.ID,
@@ -70,6 +72,8 @@ VALUES
 		toolResultsJSON,
 		m.TokensIn,
 		m.TokensOut,
+		m.CachedReadTokens,
+		m.CachedWriteTokens,
 		m.CostUSD,
 		nullableStr(m.Model),
 		m.Ts,
@@ -82,17 +86,21 @@ VALUES
 	// last_msg_at is kept as MAX so out-of-order ingestion is safe.
 	const updateSession = `
 UPDATE sessions SET
-    last_msg_at = MAX(last_msg_at, ?),
-    msg_count   = msg_count   + 1,
-    tokens_in   = tokens_in   + ?,
-    tokens_out  = tokens_out  + ?,
-    cost_usd    = cost_usd    + ?
+    last_msg_at         = MAX(last_msg_at, ?),
+    msg_count           = msg_count           + 1,
+    tokens_in           = tokens_in           + ?,
+    tokens_out          = tokens_out          + ?,
+    cached_read_tokens  = cached_read_tokens  + ?,
+    cached_write_tokens = cached_write_tokens + ?,
+    cost_usd            = cost_usd            + ?
 WHERE id = ?`
 
 	res, err := tx.ExecContext(ctx, updateSession,
 		m.Ts,
 		m.TokensIn,
 		m.TokensOut,
+		m.CachedReadTokens,
+		m.CachedWriteTokens,
 		m.CostUSD,
 		m.SessionID,
 	)
@@ -154,7 +162,8 @@ func ListMessagesBySession(
 		q = `
 SELECT id, session_id, parent_uuid, role, content,
        tool_calls_json, tool_results_json,
-       tokens_in, tokens_out, cost_usd, model, ts
+       tokens_in, tokens_out, cached_read_tokens, cached_write_tokens,
+       cost_usd, model, ts
 FROM messages
 WHERE session_id = ?
 ORDER BY ts ASC, id ASC
@@ -164,7 +173,8 @@ LIMIT ?`
 		q = `
 SELECT id, session_id, parent_uuid, role, content,
        tool_calls_json, tool_results_json,
-       tokens_in, tokens_out, cost_usd, model, ts
+       tokens_in, tokens_out, cached_read_tokens, cached_write_tokens,
+       cost_usd, model, ts
 FROM messages
 WHERE session_id = ? AND ts < ?
 ORDER BY ts ASC, id ASC
@@ -219,6 +229,8 @@ func scanMessage(r messageScanner) (*connectors.Message, error) {
 		&toolResultsJSON,
 		&m.TokensIn,
 		&m.TokensOut,
+		&m.CachedReadTokens,
+		&m.CachedWriteTokens,
 		&m.CostUSD,
 		&model,
 		&m.Ts,

@@ -186,19 +186,36 @@
       </div>
     </div>
 
-    <!-- Stats strip -->
+    <!-- Stats strip — input is broken down: fresh / cache_read / cache_write. -->
+    {@const cachedRead = session.cached_read_tokens ?? 0}
+    {@const cachedWrite = session.cached_write_tokens ?? 0}
+    {@const freshIn = Math.max(0, session.tokens_in - cachedRead - cachedWrite)}
+    {@const cachedPct = session.tokens_in > 0 ? Math.round(((cachedRead + cachedWrite) / session.tokens_in) * 100) : 0}
     <div class="ad-card" style="display: grid; grid-template-columns: repeat(4, 1fr); padding: 0; margin-bottom: 16px;">
-      {#each [
-        ['Messages', String(session.msg_count)],
-        ['↑ tokens', kfmt(session.tokens_in)],
-        ['↓ tokens', kfmt(session.tokens_out)],
-        ['Cost', costFmt(session.cost_usd, session.cost_usd > 0)],
-      ] as [label, value], i}
-        <div style="padding: 12px 16px; border-right: {i < 3 ? '1px solid var(--ad-border-soft)' : 'none'};">
-          <div style="font-size: 11px; color: var(--ad-faint); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 4px;">{label}</div>
-          <div class="ad-mono ad-tnum" style="font-size: 16px; font-weight: 600;">{value}</div>
-        </div>
-      {/each}
+      <div style="padding: 12px 16px; border-right: 1px solid var(--ad-border-soft);">
+        <div style="font-size: 11px; color: var(--ad-faint); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 4px;">Messages</div>
+        <div class="ad-mono ad-tnum" style="font-size: 16px; font-weight: 600;">{session.msg_count}</div>
+      </div>
+      <div style="padding: 12px 16px; border-right: 1px solid var(--ad-border-soft);">
+        <div style="font-size: 11px; color: var(--ad-faint); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 4px;">↑ tokens in</div>
+        <div class="ad-mono ad-tnum" style="font-size: 16px; font-weight: 600;">{kfmt(session.tokens_in)}</div>
+        {#if cachedRead > 0 || cachedWrite > 0}
+          <div class="ad-mono" style="font-size: 10px; color: var(--ad-faint); margin-top: 4px; line-height: 1.4;">
+            fresh {kfmt(freshIn)}
+            {#if cachedRead > 0} · cache↻ {kfmt(cachedRead)}{/if}
+            {#if cachedWrite > 0} · cache+ {kfmt(cachedWrite)}{/if}
+            <br />{cachedPct}% cached
+          </div>
+        {/if}
+      </div>
+      <div style="padding: 12px 16px; border-right: 1px solid var(--ad-border-soft);">
+        <div style="font-size: 11px; color: var(--ad-faint); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 4px;">↓ tokens out</div>
+        <div class="ad-mono ad-tnum" style="font-size: 16px; font-weight: 600;">{kfmt(session.tokens_out)}</div>
+      </div>
+      <div style="padding: 12px 16px;">
+        <div style="font-size: 11px; color: var(--ad-faint); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 4px;">Cost</div>
+        <div class="ad-mono ad-tnum" style="font-size: 16px; font-weight: 600; color: {session.cost_usd > 0 ? 'var(--ad-active)' : 'var(--ad-fg)'};">{costFmt(session.cost_usd, session.cost_usd > 0)}</div>
+      </div>
     </div>
 
     <!-- Compact banner -->

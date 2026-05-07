@@ -36,6 +36,10 @@ type fileMeta struct {
 	// on the correct session-wide totals.
 	prevTokensIn  int64
 	prevTokensOut int64
+	// prevCachedRead tracks the last cumulative cached_input_tokens value
+	// (the cache-hit subset of input_tokens) so we can emit per-event
+	// deltas alongside the input/output deltas.
+	prevCachedRead int64
 }
 
 // Connector implements connectors.Connector for the Codex CLI.

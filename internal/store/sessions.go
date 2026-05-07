@@ -39,10 +39,12 @@ func UpsertSession(ctx context.Context, db *DB, s *connectors.Session) error {
 	const q = `
 INSERT INTO sessions
     (id, cli, project_path, encoded_cwd, started_at, last_msg_at,
-     msg_count, tokens_in, tokens_out, cost_usd, model, status, raw_path)
+     msg_count, tokens_in, tokens_out, cached_read_tokens, cached_write_tokens,
+     cost_usd, model, status, raw_path)
 VALUES
     (?, ?, ?, ?, ?, ?,
-     ?, ?, ?, ?, ?, ?, ?)
+     ?, ?, ?, ?, ?,
+     ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
     last_msg_at  = excluded.last_msg_at,
     status       = excluded.status,
@@ -60,6 +62,8 @@ ON CONFLICT(id) DO UPDATE SET
 		s.MsgCount,
 		s.TokensIn,
 		s.TokensOut,
+		s.CachedReadTokens,
+		s.CachedWriteTokens,
 		s.CostUSD,
 		s.Model,
 		string(s.Status),
@@ -85,7 +89,8 @@ func ListSessions(ctx context.Context, db *DB, filter SessionFilter) ([]*connect
 	// Build query dynamically to avoid redundant WHERE clauses.
 	q := `
 SELECT id, cli, project_path, encoded_cwd, started_at, last_msg_at,
-       msg_count, tokens_in, tokens_out, cost_usd, model, status, raw_path
+       msg_count, tokens_in, tokens_out, cached_read_tokens, cached_write_tokens,
+       cost_usd, model, status, raw_path
 FROM sessions
 WHERE 1=1`
 
@@ -125,7 +130,8 @@ WHERE 1=1`
 func GetSession(ctx context.Context, db *DB, id string) (*connectors.Session, error) {
 	const q = `
 SELECT id, cli, project_path, encoded_cwd, started_at, last_msg_at,
-       msg_count, tokens_in, tokens_out, cost_usd, model, status, raw_path
+       msg_count, tokens_in, tokens_out, cached_read_tokens, cached_write_tokens,
+       cost_usd, model, status, raw_path
 FROM sessions
 WHERE id = ?`
 
@@ -157,6 +163,8 @@ func scanSession(r sessionScanner) (*connectors.Session, error) {
 		&s.MsgCount,
 		&s.TokensIn,
 		&s.TokensOut,
+		&s.CachedReadTokens,
+		&s.CachedWriteTokens,
 		&s.CostUSD,
 		&s.Model,
 		&status,

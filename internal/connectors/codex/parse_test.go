@@ -340,6 +340,59 @@ func TestParse_TokenCount_Emits_DeltaSystemMessage(t *testing.T) {
 	}
 }
 
+// TestParse_TokenCount_CachedReadDelta verifies that cached_input_tokens
+// flows into Message.CachedReadTokens as a delta across consecutive events
+// — and that CachedWriteTokens is always 0 for Codex (OpenAI does not expose
+// a comparable cache-write counter).
+func TestParse_TokenCount_CachedReadDelta(t *testing.T) {
+	meta, mu := newMeta()
+	sessionLine := []byte(`{"timestamp":"2026-05-06T10:00:00.000Z","type":"session_meta","payload":{"id":"sess-cached-codex","cwd":"/Users/dev/cachedproj"}}`)
+	if _, err := parseLine(sessionLine, fakePath, meta, mu); err != nil {
+		t.Fatalf("session_meta: %v", err)
+	}
+
+	// First event: cumulative in=1000 cached=400 out=50 → delta = (1000, 400, 50).
+	tc1 := []byte(`{"timestamp":"2026-05-06T10:00:01.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"cached_input_tokens":400,"output_tokens":50,"reasoning_output_tokens":0,"total_tokens":1050},"last_token_usage":{"input_tokens":1000,"cached_input_tokens":400,"output_tokens":50,"reasoning_output_tokens":0,"total_tokens":1050},"model_context_window":272000}}}`)
+	msg1, err := parseLine(tc1, fakePath, meta, mu)
+	if err != nil {
+		t.Fatalf("tc1: %v", err)
+	}
+	if msg1 == nil {
+		t.Fatal("expected non-nil msg1")
+	}
+	if msg1.TokensIn != 1000 {
+		t.Errorf("tc1 TokensIn = %d; want 1000 (deltaIn already includes cached)", msg1.TokensIn)
+	}
+	if msg1.CachedReadTokens != 400 {
+		t.Errorf("tc1 CachedReadTokens = %d; want 400", msg1.CachedReadTokens)
+	}
+	if msg1.CachedWriteTokens != 0 {
+		t.Errorf("tc1 CachedWriteTokens = %d; want 0 (codex never reports cache writes)", msg1.CachedWriteTokens)
+	}
+
+	// Second event: cumulative in=2500 cached=1500 out=80 → delta = (1500, 1100, 30).
+	tc2 := []byte(`{"timestamp":"2026-05-06T10:00:02.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":2500,"cached_input_tokens":1500,"output_tokens":80,"reasoning_output_tokens":0,"total_tokens":2580},"last_token_usage":{"input_tokens":2500,"cached_input_tokens":1500,"output_tokens":80,"reasoning_output_tokens":0,"total_tokens":2580},"model_context_window":272000}}}`)
+	msg2, err := parseLine(tc2, fakePath, meta, mu)
+	if err != nil {
+		t.Fatalf("tc2: %v", err)
+	}
+	if msg2 == nil {
+		t.Fatal("expected non-nil msg2")
+	}
+	if msg2.TokensIn != 1500 {
+		t.Errorf("tc2 TokensIn = %d; want 1500", msg2.TokensIn)
+	}
+	if msg2.CachedReadTokens != 1100 {
+		t.Errorf("tc2 CachedReadTokens = %d; want 1100", msg2.CachedReadTokens)
+	}
+	if msg2.CachedWriteTokens != 0 {
+		t.Errorf("tc2 CachedWriteTokens = %d; want 0", msg2.CachedWriteTokens)
+	}
+	if msg2.TokensOut != 30 {
+		t.Errorf("tc2 TokensOut = %d; want 30", msg2.TokensOut)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // 14. token_count computes deltas across consecutive events
 // ---------------------------------------------------------------------------
@@ -508,7 +561,7 @@ func TestParse_RealFixture_ProducesNonZeroSessionTotals(t *testing.T) {
 	meta, mu := newMeta()
 	scanner := bufio.NewScanner(f)
 
-	var totalIn, totalOut int64
+	var totalIn, totalOut, totalCachedRead, totalCachedWrite int64
 	lineNum := 0
 	for scanner.Scan() {
 		lineNum++
@@ -527,19 +580,31 @@ func TestParse_RealFixture_ProducesNonZeroSessionTotals(t *testing.T) {
 		if msg != nil {
 			totalIn += msg.TokensIn
 			totalOut += msg.TokensOut
+			totalCachedRead += msg.CachedReadTokens
+			totalCachedWrite += msg.CachedWriteTokens
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		t.Fatalf("scanner error: %v", err)
 	}
 
-	t.Logf("fixture token totals: in=%d out=%d (across %d lines)", totalIn, totalOut, lineNum)
+	t.Logf("fixture token totals: in=%d out=%d cached_read=%d cached_write=%d (across %d lines)",
+		totalIn, totalOut, totalCachedRead, totalCachedWrite, lineNum)
 
 	if totalIn == 0 {
 		t.Error("expected totalIn > 0 after parsing real fixture")
 	}
 	if totalOut == 0 {
 		t.Error("expected totalOut > 0 after parsing real fixture")
+	}
+	// The fixture's last token_count event carries cached_input_tokens=4096
+	// (extended in this fix); confirm the parser surfaces it.
+	if totalCachedRead == 0 {
+		t.Error("expected totalCachedRead > 0 — fixture has cached_input_tokens=4096")
+	}
+	// Codex never reports cache writes; this must remain zero.
+	if totalCachedWrite != 0 {
+		t.Errorf("totalCachedWrite = %d; want 0 (codex has no cache_write counter)", totalCachedWrite)
 	}
 }
 

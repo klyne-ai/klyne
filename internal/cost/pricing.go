@@ -85,22 +85,37 @@ func (e *Engine) Lookup(model string) (PerTokenRates, bool) {
 }
 
 // Cost returns the USD cost for the given token counts and model.
+//
+// tokensIn is the TOTAL prompt-side token count (fresh + cache_read +
+// cache_write). cachedRead and cachedWrite are the cached subsets of
+// tokensIn so the engine can apply differentiated rates. The fresh
+// portion (the remainder) is billed at the full prompt rate.
+//
 // Formula:
 //
-//	cost = (tokensIn  / 1_000_000) * rates.PromptPerMtok
-//	     + (tokensOut / 1_000_000) * rates.CompletionPerMtok
+//	fresh = max(tokensIn - cachedRead - cachedWrite, 0)
+//	cost  = (fresh        / 1_000_000) * rates.PromptPerMtok
+//	      + (tokensOut    / 1_000_000) * rates.CompletionPerMtok
+//	      + (cachedRead   / 1_000_000) * rates.CacheReadPerMtok
+//	      + (cachedWrite  / 1_000_000) * rates.CacheWritePerMtok
 //
 // If the model is not found in the pricing table, Cost logs a warning and
 // returns 0 (not an error — matches spec §10 behaviour for unknown models).
-func (e *Engine) Cost(tokensIn, tokensOut int64, model string) float64 {
+func (e *Engine) Cost(tokensIn, tokensOut, cachedRead, cachedWrite int64, model string) float64 {
 	r, ok := e.rates[model]
 	if !ok {
 		log.Printf("cost: unknown model %q — returning $0.00 (add to pricing.json to resolve)", model)
 		return 0
 	}
+	fresh := tokensIn - cachedRead - cachedWrite
+	if fresh < 0 {
+		fresh = 0
+	}
 	const perMillion = 1_000_000.0
-	return float64(tokensIn)/perMillion*r.PromptPerMtok +
-		float64(tokensOut)/perMillion*r.CompletionPerMtok
+	return float64(fresh)/perMillion*r.PromptPerMtok +
+		float64(tokensOut)/perMillion*r.CompletionPerMtok +
+		float64(cachedRead)/perMillion*r.CacheReadPerMtok +
+		float64(cachedWrite)/perMillion*r.CacheWritePerMtok
 }
 
 // ---------------------------------------------------------------------------
@@ -115,7 +130,9 @@ func (e *Engine) Cost(tokensIn, tokensOut int64, model string) float64 {
 // RollupSession returns the total cost in USD for all messages in sessionID.
 func (e *Engine) RollupSession(ctx context.Context, db *sql.DB, sessionID string) (float64, error) {
 	rows, err := db.QueryContext(ctx,
-		`SELECT COALESCE(tokens_in, 0), COALESCE(tokens_out, 0), COALESCE(model, '')
+		`SELECT COALESCE(tokens_in, 0), COALESCE(tokens_out, 0),
+		        COALESCE(cached_read_tokens, 0), COALESCE(cached_write_tokens, 0),
+		        COALESCE(model, '')
 		   FROM messages
 		  WHERE session_id = ?`,
 		sessionID)
@@ -132,7 +149,9 @@ func (e *Engine) RollupSession(ctx context.Context, db *sql.DB, sessionID string
 // Pass since=0 to include all time.
 func (e *Engine) RollupProject(ctx context.Context, db *sql.DB, path string, since int64) (float64, error) {
 	rows, err := db.QueryContext(ctx,
-		`SELECT COALESCE(m.tokens_in, 0), COALESCE(m.tokens_out, 0), COALESCE(m.model, '')
+		`SELECT COALESCE(m.tokens_in, 0), COALESCE(m.tokens_out, 0),
+		        COALESCE(m.cached_read_tokens, 0), COALESCE(m.cached_write_tokens, 0),
+		        COALESCE(m.model, '')
 		   FROM messages m
 		   JOIN sessions s ON s.id = m.session_id
 		  WHERE s.project_path = ?
@@ -152,7 +171,9 @@ func (e *Engine) RollupProject(ctx context.Context, db *sql.DB, path string, sin
 func (e *Engine) RollupDaily(ctx context.Context, db *sql.DB, dayStartMs int64) (float64, error) {
 	dayEndMs := dayStartMs + 86_400_000
 	rows, err := db.QueryContext(ctx,
-		`SELECT COALESCE(tokens_in, 0), COALESCE(tokens_out, 0), COALESCE(model, '')
+		`SELECT COALESCE(tokens_in, 0), COALESCE(tokens_out, 0),
+		        COALESCE(cached_read_tokens, 0), COALESCE(cached_write_tokens, 0),
+		        COALESCE(model, '')
 		   FROM messages
 		  WHERE ts >= ? AND ts < ?`,
 		dayStartMs, dayEndMs)
@@ -169,7 +190,9 @@ func (e *Engine) RollupDaily(ctx context.Context, db *sql.DB, dayStartMs int64) 
 // Models with zero total cost are omitted from the result map.
 func (e *Engine) RollupByModel(ctx context.Context, db *sql.DB, since int64) (map[string]float64, error) {
 	rows, err := db.QueryContext(ctx,
-		`SELECT COALESCE(tokens_in, 0), COALESCE(tokens_out, 0), COALESCE(model, '')
+		`SELECT COALESCE(tokens_in, 0), COALESCE(tokens_out, 0),
+		        COALESCE(cached_read_tokens, 0), COALESCE(cached_write_tokens, 0),
+		        COALESCE(model, '')
 		   FROM messages
 		  WHERE ts >= ?`,
 		since)
@@ -180,12 +203,12 @@ func (e *Engine) RollupByModel(ctx context.Context, db *sql.DB, since int64) (ma
 
 	result := make(map[string]float64)
 	for rows.Next() {
-		var tokIn, tokOut int64
+		var tokIn, tokOut, cachedRead, cachedWrite int64
 		var model string
-		if err := rows.Scan(&tokIn, &tokOut, &model); err != nil {
+		if err := rows.Scan(&tokIn, &tokOut, &cachedRead, &cachedWrite, &model); err != nil {
 			return nil, fmt.Errorf("cost: RollupByModel scan: %w", err)
 		}
-		c := e.Cost(tokIn, tokOut, model)
+		c := e.Cost(tokIn, tokOut, cachedRead, cachedWrite, model)
 		if c != 0 {
 			result[model] += c
 		}
@@ -197,16 +220,17 @@ func (e *Engine) RollupByModel(ctx context.Context, db *sql.DB, since int64) (ma
 }
 
 // sumMessageRows is a helper that iterates a *sql.Rows result set of
-// (tokens_in, tokens_out, model) and accumulates total cost.
+// (tokens_in, tokens_out, cached_read_tokens, cached_write_tokens, model)
+// and accumulates total cost.
 func sumMessageRows(e *Engine, rows *sql.Rows) (float64, error) {
 	var total float64
 	for rows.Next() {
-		var tokIn, tokOut int64
+		var tokIn, tokOut, cachedRead, cachedWrite int64
 		var model string
-		if err := rows.Scan(&tokIn, &tokOut, &model); err != nil {
+		if err := rows.Scan(&tokIn, &tokOut, &cachedRead, &cachedWrite, &model); err != nil {
 			return 0, fmt.Errorf("cost: scan message row: %w", err)
 		}
-		total += e.Cost(tokIn, tokOut, model)
+		total += e.Cost(tokIn, tokOut, cachedRead, cachedWrite, model)
 	}
 	if err := rows.Err(); err != nil {
 		return 0, fmt.Errorf("cost: iterate message rows: %w", err)

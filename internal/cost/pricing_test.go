@@ -73,21 +73,37 @@ func TestLookup_UnknownModel(t *testing.T) {
 
 // ---------------------------------------------------------------------------
 // TestCost_KnownModel — table-driven; asserts correct USD output.
-// Formula: (tokensIn/1e6 * promptRate) + (tokensOut/1e6 * completionRate)
+// Formula:
+//
+//	fresh = max(tokensIn - cachedRead - cachedWrite, 0)
+//	cost  = fresh*promptRate + tokensOut*completionRate
+//	      + cachedRead*cacheReadRate + cachedWrite*cacheWriteRate
+//	(all rates are per-million)
 // ---------------------------------------------------------------------------
 
 func TestCost_KnownModel(t *testing.T) {
 	e := newTestEngine(t)
 
+	// Look up a couple of rate cards so cached cases can be expressed in
+	// terms of the engine's actual rates.
+	sonnetRates, ok := e.Lookup("claude-sonnet-4-5")
+	if !ok {
+		t.Fatal("claude-sonnet-4-5 missing from pricing table")
+	}
+
 	tests := []struct {
-		model     string
-		tokensIn  int64
-		tokensOut int64
-		wantUSD   float64
+		name        string
+		model       string
+		tokensIn    int64
+		tokensOut   int64
+		cachedRead  int64
+		cachedWrite int64
+		wantUSD     float64
 	}{
 		{
 			// 1 000 000 input tokens @ $3.00/mtok = $3.00
 			// 500 000 output tokens @ $15.00/mtok = $7.50
+			name:      "sonnet/no-cache",
 			model:     "claude-sonnet-4-5",
 			tokensIn:  1_000_000,
 			tokensOut: 500_000,
@@ -96,6 +112,7 @@ func TestCost_KnownModel(t *testing.T) {
 		{
 			// 200 000 input @ $0.80/mtok = $0.16
 			// 100 000 output @ $4.00/mtok = $0.40
+			name:      "haiku/no-cache",
 			model:     "claude-haiku-4",
 			tokensIn:  200_000,
 			tokensOut: 100_000,
@@ -104,6 +121,7 @@ func TestCost_KnownModel(t *testing.T) {
 		{
 			// 500 000 input @ $10.00/mtok = $5.00
 			// 250 000 output @ $30.00/mtok = $7.50
+			name:      "gpt-5/no-cache",
 			model:     "gpt-5",
 			tokensIn:  500_000,
 			tokensOut: 250_000,
@@ -112,6 +130,7 @@ func TestCost_KnownModel(t *testing.T) {
 		{
 			// 1 000 000 input @ $0.075/mtok = $0.075
 			// 1 000 000 output @ $0.30/mtok = $0.30
+			name:      "gemini-flash/no-cache",
 			model:     "gemini-2.5-flash",
 			tokensIn:  1_000_000,
 			tokensOut: 1_000_000,
@@ -119,20 +138,59 @@ func TestCost_KnownModel(t *testing.T) {
 		},
 		{
 			// llama3.1:8b is free
+			name:      "llama-free",
 			model:     "llama3.1:8b",
 			tokensIn:  1_000_000,
 			tokensOut: 1_000_000,
 			wantUSD:   0.00,
 		},
+		{
+			// Cached-read covers entire prompt: nothing billed at the
+			// fresh prompt rate. fresh=0; output unchanged.
+			//   tokensIn = cachedRead = 1_000_000
+			//   cost = 1*sonnet.CacheReadPerMtok + 0.5*sonnet.CompletionPerMtok
+			name:       "sonnet/full-cache-read",
+			model:      "claude-sonnet-4-5",
+			tokensIn:   1_000_000,
+			tokensOut:  500_000,
+			cachedRead: 1_000_000,
+			wantUSD: 1.0*sonnetRates.CacheReadPerMtok +
+				0.5*sonnetRates.CompletionPerMtok,
+		},
+		{
+			// Mixed: 800k cache-read + 100k cache-write + 100k fresh, plus 200k completion.
+			name:        "sonnet/mixed-cache",
+			model:       "claude-sonnet-4-5",
+			tokensIn:    1_000_000,
+			tokensOut:   200_000,
+			cachedRead:  800_000,
+			cachedWrite: 100_000,
+			wantUSD: 0.1*sonnetRates.PromptPerMtok +
+				0.2*sonnetRates.CompletionPerMtok +
+				0.8*sonnetRates.CacheReadPerMtok +
+				0.1*sonnetRates.CacheWritePerMtok,
+		},
+		{
+			// Cached subsets exceed tokensIn (defensive): fresh clamped to 0.
+			name:       "sonnet/over-cache-clamped",
+			model:      "claude-sonnet-4-5",
+			tokensIn:   500_000,
+			tokensOut:  100_000,
+			cachedRead: 1_000_000, // larger than tokensIn
+			wantUSD: 0.0*sonnetRates.PromptPerMtok +
+				0.1*sonnetRates.CompletionPerMtok +
+				1.0*sonnetRates.CacheReadPerMtok,
+		},
 	}
 
 	for _, tc := range tests {
 		tc := tc
-		t.Run(tc.model, func(t *testing.T) {
-			got := e.Cost(tc.tokensIn, tc.tokensOut, tc.model)
+		t.Run(tc.name, func(t *testing.T) {
+			got := e.Cost(tc.tokensIn, tc.tokensOut, tc.cachedRead, tc.cachedWrite, tc.model)
 			if math.Abs(got-tc.wantUSD) > 1e-9 {
-				t.Errorf("Cost(%d, %d, %q) = %v; want %v",
-					tc.tokensIn, tc.tokensOut, tc.model, got, tc.wantUSD)
+				t.Errorf("Cost(in=%d out=%d cr=%d cw=%d %q) = %v; want %v",
+					tc.tokensIn, tc.tokensOut, tc.cachedRead, tc.cachedWrite,
+					tc.model, got, tc.wantUSD)
 			}
 		})
 	}
@@ -146,7 +204,7 @@ func TestCost_KnownModel(t *testing.T) {
 
 func TestCost_UnknownModel_LogsAndReturnsZero(t *testing.T) {
 	e := newTestEngine(t)
-	got := e.Cost(100_000, 50_000, "totally-fake-model")
+	got := e.Cost(100_000, 50_000, 0, 0, "totally-fake-model")
 	if got != 0 {
 		t.Errorf("Cost(unknown model): expected 0, got %v", got)
 	}
@@ -221,7 +279,7 @@ func TestOverride_FromConfigDir(t *testing.T) {
 
 func TestCost_ZeroTokens(t *testing.T) {
 	e := newTestEngine(t)
-	got := e.Cost(0, 0, "claude-sonnet-4-5")
+	got := e.Cost(0, 0, 0, 0, "claude-sonnet-4-5")
 	if got != 0 {
 		t.Errorf("Cost(0, 0, model): expected 0, got %v", got)
 	}
@@ -235,7 +293,7 @@ func TestCost_LargeTokenCounts(t *testing.T) {
 	e := newTestEngine(t)
 	// 200 million input + 100 million output tokens for claude-opus-4-6
 	// prompt: 200 * 15.00 = $3000, completion: 100 * 75.00 = $7500
-	got := e.Cost(200_000_000, 100_000_000, "claude-opus-4-6")
+	got := e.Cost(200_000_000, 100_000_000, 0, 0, "claude-opus-4-6")
 	want := 200.0*15.00 + 100.0*75.00
 	if math.Abs(got-want) > 1e-6 {
 		t.Errorf("Cost large: got %v, want %v", got, want)
@@ -281,17 +339,19 @@ CREATE TABLE IF NOT EXISTS sessions (
     raw_path     TEXT    NOT NULL
 );
 CREATE TABLE IF NOT EXISTS messages (
-    id          TEXT    NOT NULL PRIMARY KEY,
-    session_id  TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-    parent_uuid TEXT,
-    role        TEXT    NOT NULL,
-    content     TEXT    NOT NULL,
-    tool_name   TEXT,
-    tokens_in   INTEGER,
-    tokens_out  INTEGER,
-    cost_usd    REAL,
-    model       TEXT,
-    ts          INTEGER NOT NULL
+    id                  TEXT    NOT NULL PRIMARY KEY,
+    session_id          TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    parent_uuid         TEXT,
+    role                TEXT    NOT NULL,
+    content             TEXT    NOT NULL,
+    tool_name           TEXT,
+    tokens_in           INTEGER,
+    tokens_out          INTEGER,
+    cached_read_tokens  INTEGER NOT NULL DEFAULT 0,
+    cached_write_tokens INTEGER NOT NULL DEFAULT 0,
+    cost_usd            REAL,
+    model               TEXT,
+    ts                  INTEGER NOT NULL
 );
 `
 	if _, err := db.ExecContext(context.Background(), schema); err != nil {

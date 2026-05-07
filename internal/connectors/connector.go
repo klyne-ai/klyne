@@ -156,12 +156,24 @@ type Message struct {
 	// ToolResults is the (possibly empty) list of tool outputs attached
 	// to this message. Only meaningful for tool/user messages.
 	ToolResults []ToolResult `json:"tool_results,omitempty"`
-	// TokensIn is the prompt-side token count for this message, when
-	// reported by the CLI. Zero means "unknown".
+	// TokensIn is the TOTAL prompt-side token count for this message,
+	// inclusive of fresh, cache-read, and cache-write portions. Zero
+	// means "unknown". Cached subsets are exposed separately below so
+	// the cost engine can apply differentiated rates; the fresh portion
+	// is derived as TokensIn - CachedReadTokens - CachedWriteTokens.
 	TokensIn int64 `json:"tokens_in"`
 	// TokensOut is the completion-side token count for this message.
 	// Zero means "unknown".
 	TokensOut int64 `json:"tokens_out"`
+	// CachedReadTokens is the subset of TokensIn served from the
+	// provider's prompt cache (Anthropic cache_read_input_tokens /
+	// OpenAI cached_input_tokens). Billed at the cache-read rate.
+	CachedReadTokens int64 `json:"cached_read_tokens"`
+	// CachedWriteTokens is the subset of TokensIn that wrote new entries
+	// to the provider's prompt cache (Anthropic
+	// cache_creation_input_tokens). OpenAI does not currently expose a
+	// directly comparable value, so this is always 0 for Codex.
+	CachedWriteTokens int64 `json:"cached_write_tokens"`
 	// CostUSD is the connector- or cost-engine-computed dollar cost for
 	// this message. Zero means "unknown / free".
 	CostUSD float64 `json:"cost_usd"`
@@ -191,10 +203,16 @@ type Session struct {
 	MsgCount    int64         `json:"msg_count"`
 	TokensIn    int64         `json:"tokens_in"`
 	TokensOut   int64         `json:"tokens_out"`
-	CostUSD     float64       `json:"cost_usd"`
-	Model       string        `json:"model"`
-	Status      SessionStatus `json:"status"`
-	RawPath     string        `json:"raw_path"`
+	// CachedReadTokens is the cumulative cache-read subset of TokensIn
+	// across all messages in the session. Mirrors Message.CachedReadTokens.
+	CachedReadTokens  int64 `json:"cached_read_tokens"`
+	// CachedWriteTokens is the cumulative cache-write subset of TokensIn
+	// across all messages in the session. Mirrors Message.CachedWriteTokens.
+	CachedWriteTokens int64         `json:"cached_write_tokens"`
+	CostUSD           float64       `json:"cost_usd"`
+	Model             string        `json:"model"`
+	Status            SessionStatus `json:"status"`
+	RawPath           string        `json:"raw_path"`
 }
 
 // PricingTable is the contract returned by Connector.Pricing(). v1

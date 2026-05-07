@@ -53,6 +53,8 @@ describe('TestFetchSessions_HappyPath', () => {
           msg_count: 5,
           tokens_in: 100,
           tokens_out: 200,
+          cached_read_tokens: 0,
+          cached_write_tokens: 0,
           cost_usd: 0.01,
           model: 'claude-sonnet-4.5',
           status: 'idle',
@@ -182,6 +184,8 @@ describe('TestFetchSession_HappyPath', () => {
         msg_count: 0,
         tokens_in: 0,
         tokens_out: 0,
+        cached_read_tokens: 0,
+        cached_write_tokens: 0,
         cost_usd: 0,
         model: '',
         status: 'active',
@@ -195,7 +199,7 @@ describe('TestFetchSession_HappyPath', () => {
   });
 
   it('URL-encodes the session id', async () => {
-    mockFetch(200, { session: { id: 'a/b', cli: 'claude', project_path: '', encoded_cwd: '', started_at: 0, last_msg_at: 0, msg_count: 0, tokens_in: 0, tokens_out: 0, cost_usd: 0, model: '', status: 'idle', raw_path: '' } });
+    mockFetch(200, { session: { id: 'a/b', cli: 'claude', project_path: '', encoded_cwd: '', started_at: 0, last_msg_at: 0, msg_count: 0, tokens_in: 0, tokens_out: 0, cached_read_tokens: 0, cached_write_tokens: 0, cost_usd: 0, model: '', status: 'idle', raw_path: '' } });
     await fetchSession('a/b');
     const url = (vi.mocked(fetch).mock.calls[0][0] as string);
     expect(url).toContain('a%2Fb');
@@ -221,6 +225,8 @@ describe('TestFetchMessages_HappyPath', () => {
           content: 'Hello',
           tokens_in: 10,
           tokens_out: 0,
+          cached_read_tokens: 0,
+          cached_write_tokens: 0,
           cost_usd: 0,
           model: '',
           ts: 1700000000000

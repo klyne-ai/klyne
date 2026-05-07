@@ -474,6 +474,86 @@ WHERE id = 'bulk-sess'`,
 	}
 }
 
+// TestInsertMessage_CachedTokens_RoundTrip verifies that
+// CachedReadTokens / CachedWriteTokens flow through the store at both the
+// message and session level, and that session-level cached counters
+// accumulate across multiple inserts.
+func TestInsertMessage_CachedTokens_RoundTrip(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+
+	sess := makeSession("cached-sess", "claude", "/proj/cached")
+	upsertSession(t, ctx, db, sess)
+
+	m1 := &connectors.Message{
+		ID:                "cached-msg-1",
+		SessionID:         "cached-sess",
+		CLI:               connectors.CLIClaude,
+		Role:              connectors.RoleAssistant,
+		Content:           "first cached msg",
+		Ts:                1_700_000_001_000,
+		TokensIn:          1000,
+		TokensOut:         100,
+		CachedReadTokens:  600,
+		CachedWriteTokens: 200,
+		CostUSD:           0.0001,
+		Model:             "claude-opus-4-7",
+	}
+	if err := store.InsertMessage(ctx, db, m1); err != nil {
+		t.Fatalf("InsertMessage m1: %v", err)
+	}
+
+	m2 := &connectors.Message{
+		ID:                "cached-msg-2",
+		SessionID:         "cached-sess",
+		CLI:               connectors.CLIClaude,
+		Role:              connectors.RoleAssistant,
+		Content:           "second cached msg",
+		Ts:                1_700_000_002_000,
+		TokensIn:          500,
+		TokensOut:         50,
+		CachedReadTokens:  300,
+		CachedWriteTokens: 0,
+		CostUSD:           0.0001,
+		Model:             "claude-opus-4-7",
+	}
+	if err := store.InsertMessage(ctx, db, m2); err != nil {
+		t.Fatalf("InsertMessage m2: %v", err)
+	}
+
+	// Message-level round-trip.
+	msgs, err := store.ListMessagesBySession(ctx, db, "cached-sess", 10, 0)
+	if err != nil {
+		t.Fatalf("ListMessagesBySession: %v", err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(msgs))
+	}
+	if msgs[0].CachedReadTokens != 600 || msgs[0].CachedWriteTokens != 200 {
+		t.Errorf("msg[0] cached = (%d,%d); want (600,200)",
+			msgs[0].CachedReadTokens, msgs[0].CachedWriteTokens)
+	}
+	if msgs[1].CachedReadTokens != 300 || msgs[1].CachedWriteTokens != 0 {
+		t.Errorf("msg[1] cached = (%d,%d); want (300,0)",
+			msgs[1].CachedReadTokens, msgs[1].CachedWriteTokens)
+	}
+
+	// Session-level accumulation.
+	got, err := store.GetSession(ctx, db, "cached-sess")
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if got.CachedReadTokens != 900 {
+		t.Errorf("session CachedReadTokens = %d; want 900 (600+300)", got.CachedReadTokens)
+	}
+	if got.CachedWriteTokens != 200 {
+		t.Errorf("session CachedWriteTokens = %d; want 200 (200+0)", got.CachedWriteTokens)
+	}
+	if got.TokensIn != 1500 {
+		t.Errorf("session TokensIn = %d; want 1500", got.TokensIn)
+	}
+}
+
 // TestInsertMessage_AssistantRoleFields verifies that role, model, and
 // parent_uuid are round-tripped correctly for an assistant message.
 func TestInsertMessage_AssistantRoleFields(t *testing.T) {

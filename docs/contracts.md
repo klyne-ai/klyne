@@ -42,6 +42,11 @@ file is the *implementation index*; that file is the *spec*.
   epoch-milliseconds. Connectors do not pick a different unit.
 - `Message.Role` is one of the four `Role*` constants.
 - `Message.CLI` is one of the two `CLI*` constants.
+- As of migration 005, both `Message` and `Session` carry
+  `cached_read_tokens` and `cached_write_tokens` int64 fields (cached
+  subsets of `tokens_in`); the cost engine subtracts them to bill the
+  fresh portion at the prompt rate and the cached portions at the
+  cache_read / cache_write rates.
 
 ---
 

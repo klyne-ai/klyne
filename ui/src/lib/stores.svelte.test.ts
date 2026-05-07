@@ -46,6 +46,8 @@ function makeSession(id: string, overrides?: Partial<Session>): Session {
     msg_count: 5,
     tokens_in: 100,
     tokens_out: 200,
+    cached_read_tokens: 0,
+    cached_write_tokens: 0,
     cost_usd: 0.01,
     model: 'claude-sonnet-4.5',
     status: 'idle',

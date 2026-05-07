@@ -520,7 +520,13 @@ func (a *App) processRawEvent(ctx context.Context, ev connectors.RawEvent, byNam
 
 	// Compute cost via the engine if the parser did not populate it.
 	if msg.CostUSD == 0 && (msg.TokensIn > 0 || msg.TokensOut > 0) && msg.Model != "" {
-		msg.CostUSD = a.cost.Cost(msg.TokensIn, msg.TokensOut, msg.Model)
+		msg.CostUSD = a.cost.Cost(
+			msg.TokensIn,
+			msg.TokensOut,
+			msg.CachedReadTokens,
+			msg.CachedWriteTokens,
+			msg.Model,
+		)
 	}
 
 	// Ensure the session exists. UpsertSession is idempotent and cheap.

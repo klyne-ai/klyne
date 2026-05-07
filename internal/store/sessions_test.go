@@ -232,19 +232,21 @@ func TestGetSession_RoundTrips(t *testing.T) {
 	db := openTestDB(t)
 
 	s := &connectors.Session{
-		ID:          "rt-sess-1",
-		CLI:         connectors.CLICodex,
-		ProjectPath: "/home/user/codex-proj",
-		EncodedCWD:  "/home/user/codex-proj",
-		StartedAt:   1_700_000_000_001,
-		LastMsgAt:   1_700_000_000_999,
-		MsgCount:    42,
-		TokensIn:    1000,
-		TokensOut:   500,
-		CostUSD:     0.0123,
-		Model:       "gpt-4o",
-		Status:      connectors.SessionStatusCompacted,
-		RawPath:     "/home/user/.codex/sessions/rt-sess-1.jsonl",
+		ID:                "rt-sess-1",
+		CLI:               connectors.CLICodex,
+		ProjectPath:       "/home/user/codex-proj",
+		EncodedCWD:        "/home/user/codex-proj",
+		StartedAt:         1_700_000_000_001,
+		LastMsgAt:         1_700_000_000_999,
+		MsgCount:          42,
+		TokensIn:          1000,
+		TokensOut:         500,
+		CachedReadTokens:  300,
+		CachedWriteTokens: 100,
+		CostUSD:           0.0123,
+		Model:             "gpt-4o",
+		Status:            connectors.SessionStatusCompacted,
+		RawPath:           "/home/user/.codex/sessions/rt-sess-1.jsonl",
 	}
 
 	if err := store.UpsertSession(ctx, db, s); err != nil {
@@ -273,6 +275,12 @@ func TestGetSession_RoundTrips(t *testing.T) {
 	}
 	if got.Model != s.Model {
 		t.Errorf("Model = %q; want %q", got.Model, s.Model)
+	}
+	if got.CachedReadTokens != s.CachedReadTokens {
+		t.Errorf("CachedReadTokens = %d; want %d", got.CachedReadTokens, s.CachedReadTokens)
+	}
+	if got.CachedWriteTokens != s.CachedWriteTokens {
+		t.Errorf("CachedWriteTokens = %d; want %d", got.CachedWriteTokens, s.CachedWriteTokens)
 	}
 }
 

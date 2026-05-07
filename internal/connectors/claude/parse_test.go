@@ -276,6 +276,37 @@ func TestParse_UnknownTypeLine(t *testing.T) {
 	}
 }
 
+// TestParse_AssistantCachedTokens verifies that an assistant message with
+// non-zero cache_read_input_tokens and cache_creation_input_tokens populates
+// Message.CachedReadTokens and Message.CachedWriteTokens, and that
+// Message.TokensIn is the SUM of fresh + cache_read + cache_write.
+//
+// This is the W4 fix for the bug where Claude sessions undercounted prompt
+// tokens by 99%+: the parser previously read only input_tokens (the fresh
+// portion).
+func TestParse_AssistantCachedTokens(t *testing.T) {
+	// 100 fresh + 50_000 cache_read + 25_000 cache_creation
+	line := `{"message":{"content":[{"text":"hello cached","type":"text"}],"id":"msg_cached_001","model":"claude-opus-4-7","role":"assistant","stop_reason":"end_turn","usage":{"input_tokens":100,"output_tokens":42,"cache_read_input_tokens":50000,"cache_creation_input_tokens":25000}},"parentUuid":"usr-cached","sessionId":"sess-cached-01","timestamp":"2026-05-06T10:00:00.000Z","type":"assistant","uuid":"ast-cached-001"}`
+	msg := mustParse(t, line)
+
+	if msg.Role != connectors.RoleAssistant {
+		t.Errorf("role = %q; want assistant", msg.Role)
+	}
+	wantTokensIn := int64(100 + 50000 + 25000)
+	if msg.TokensIn != wantTokensIn {
+		t.Errorf("TokensIn = %d; want %d (fresh+cache_read+cache_write)", msg.TokensIn, wantTokensIn)
+	}
+	if msg.TokensOut != 42 {
+		t.Errorf("TokensOut = %d; want 42", msg.TokensOut)
+	}
+	if msg.CachedReadTokens != 50000 {
+		t.Errorf("CachedReadTokens = %d; want 50000", msg.CachedReadTokens)
+	}
+	if msg.CachedWriteTokens != 25000 {
+		t.Errorf("CachedWriteTokens = %d; want 25000", msg.CachedWriteTokens)
+	}
+}
+
 func TestConnector_NameAndPricing(t *testing.T) {
 	c := New("/tmp/test")
 	if c.Name() != "claude" {

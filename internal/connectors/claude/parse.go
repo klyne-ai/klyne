@@ -227,8 +227,20 @@ func parseAssistant(msg *connectors.Message, raw rawLine) (*connectors.Message, 
 	}
 
 	if m.Usage != nil {
-		msg.TokensIn = m.Usage.InputTokens
+		// Claude reports the prompt token count split into three buckets:
+		// input_tokens (the fresh portion this turn), cache_read_input_tokens
+		// (served from prompt cache), and cache_creation_input_tokens (newly
+		// written cache entries). Real Claude Code sessions lean heavily on
+		// the prompt cache, so dropping the cached buckets undercounts
+		// prompt tokens by 99%+. TokensIn is the canonical TOTAL across all
+		// three buckets; the cached subsets are reported separately so the
+		// cost engine can apply differentiated rates.
+		msg.TokensIn = m.Usage.InputTokens +
+			m.Usage.CacheReadInputTokens +
+			m.Usage.CacheCreationInputTokens
 		msg.TokensOut = m.Usage.OutputTokens
+		msg.CachedReadTokens = m.Usage.CacheReadInputTokens
+		msg.CachedWriteTokens = m.Usage.CacheCreationInputTokens
 	}
 
 	items, err := decodeContent(m.Content)

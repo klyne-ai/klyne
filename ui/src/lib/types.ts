@@ -52,8 +52,21 @@ export interface Message {
   tool_calls?: ToolCall[];
   /** May be absent (omitempty in Go) — treat as empty array when missing. */
   tool_results?: ToolResult[];
+  /**
+   * Total input tokens — fresh + cached_read + cached_write.
+   * Use this for "input tokens" display.
+   */
   tokens_in: number;
   tokens_out: number;
+  /**
+   * Cached-read portion of tokens_in (cache hits, billed at ~10× discount).
+   */
+  cached_read_tokens: number;
+  /**
+   * Cached-write portion of tokens_in (cache creation, billed at ~25% premium
+   * over fresh on Anthropic; OpenAI does not expose this, so always 0 for codex).
+   */
+  cached_write_tokens: number;
   cost_usd: number;
   model: string;
   /** Epoch-milliseconds. */
@@ -75,8 +88,13 @@ export interface Session {
   /** Epoch-milliseconds. */
   last_msg_at: number;
   msg_count: number;
+  /** Total input tokens — fresh + cached_read + cached_write. */
   tokens_in: number;
   tokens_out: number;
+  /** Cached-read aggregate over all messages in this session. */
+  cached_read_tokens: number;
+  /** Cached-write aggregate (Anthropic only; always 0 on codex). */
+  cached_write_tokens: number;
   cost_usd: number;
   model: string;
   status: SessionStatus;

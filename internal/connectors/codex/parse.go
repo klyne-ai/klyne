@@ -86,9 +86,15 @@ type eventMsgPayload struct {
 }
 
 // tokenUsage holds the per-million-token counters inside a token_count event.
+//
+// Per OpenAI's API, InputTokens already INCLUDES the CachedInputTokens
+// subset — they are not additive. We expose CachedInputTokens separately so
+// the cost engine can bill the cache-hit portion at the cache_read rate
+// while billing the remainder at the full prompt rate.
 type tokenUsage struct {
-	InputTokens  int64 `json:"input_tokens"`
-	OutputTokens int64 `json:"output_tokens"`
+	InputTokens        int64 `json:"input_tokens"`
+	CachedInputTokens  int64 `json:"cached_input_tokens"`
+	OutputTokens       int64 `json:"output_tokens"`
 }
 
 // tokenCountInfo is the "info" sub-object of a token_count event_msg payload.
@@ -269,17 +275,20 @@ func handleTokenCount(raw json.RawMessage, line []byte, meta *fileMeta, mu *sync
 
 	cumIn := p.Info.TotalTokenUsage.InputTokens
 	cumOut := p.Info.TotalTokenUsage.OutputTokens
+	cumCachedRead := p.Info.TotalTokenUsage.CachedInputTokens
 
-	// Both zero means the "info" field was null or absent — nothing to emit.
-	if cumIn == 0 && cumOut == 0 {
+	// All zero means the "info" field was null or absent — nothing to emit.
+	if cumIn == 0 && cumOut == 0 && cumCachedRead == 0 {
 		return nil, nil
 	}
 
 	mu.Lock()
 	prevIn := meta.prevTokensIn
 	prevOut := meta.prevTokensOut
+	prevCachedRead := meta.prevCachedRead
 	meta.prevTokensIn = cumIn
 	meta.prevTokensOut = cumOut
+	meta.prevCachedRead = cumCachedRead
 	sessionID = meta.sessionID
 	projectPath := meta.projectPath
 	model := meta.model
@@ -287,6 +296,7 @@ func handleTokenCount(raw json.RawMessage, line []byte, meta *fileMeta, mu *sync
 
 	deltaIn := cumIn - prevIn
 	deltaOut := cumOut - prevOut
+	deltaCachedRead := cumCachedRead - prevCachedRead
 
 	// Guard against negative deltas (rare: file truncated, race, etc.).
 	if deltaIn < 0 {
@@ -295,23 +305,33 @@ func handleTokenCount(raw json.RawMessage, line []byte, meta *fileMeta, mu *sync
 	if deltaOut < 0 {
 		deltaOut = 0
 	}
+	if deltaCachedRead < 0 {
+		deltaCachedRead = 0
+	}
 
-	// If both deltas are zero after clamping there is nothing useful to emit.
-	if deltaIn == 0 && deltaOut == 0 {
+	// If all deltas are zero after clamping there is nothing useful to emit.
+	if deltaIn == 0 && deltaOut == 0 && deltaCachedRead == 0 {
 		return nil, nil
 	}
 
+	// Note: per OpenAI's API, deltaIn already INCLUDES deltaCachedRead — we
+	// keep them separate (TokensIn = deltaIn, CachedReadTokens =
+	// deltaCachedRead) so the cost engine can subtract and apply the
+	// cache_read rate. CachedWriteTokens is always 0: OpenAI does not
+	// expose a comparable cache-write counter.
 	return &connectors.Message{
-		ID:          messageID(sessionID, line),
-		SessionID:   sessionID,
-		CLI:         connectors.CLICodex,
-		ProjectPath: projectPath,
-		Role:        connectors.RoleSystem,
-		Content:     "",
-		TokensIn:    deltaIn,
-		TokensOut:   deltaOut,
-		Model:       model,
-		Ts:          ts,
+		ID:                messageID(sessionID, line),
+		SessionID:         sessionID,
+		CLI:               connectors.CLICodex,
+		ProjectPath:       projectPath,
+		Role:              connectors.RoleSystem,
+		Content:           "",
+		TokensIn:          deltaIn,
+		TokensOut:         deltaOut,
+		CachedReadTokens:  deltaCachedRead,
+		CachedWriteTokens: 0,
+		Model:             model,
+		Ts:                ts,
 	}, nil
 }
 
