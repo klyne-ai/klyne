@@ -12,6 +12,8 @@ import { fetchSessions } from '$lib/api.js';
 // Types
 // ---------------------------------------------------------------------------
 
+export type Cli = 'claude' | 'codex';
+
 export interface ProjectAggregate {
   name: string;          // basename of project_path
   project_path: string;  // full path
@@ -23,7 +25,9 @@ export interface ProjectAggregate {
   lastMsAt: number;      // max last_msg_at (epoch-ms)
   lastMsAgo: number;     // Date.now() - lastMsAt
   model: string;         // most common model
-  cli: 'claude' | 'codex';
+  cli: Cli;              // dominant CLI (most sessions). Use `clis` for filters.
+  clis: Cli[];           // sorted unique CLIs present in this project
+  sessionsByCli: Record<Cli, number>; // session counts per CLI for tooltips/details
   priced: boolean;       // cost > 0
   status: 'active' | 'idle' | 'compacted';
 }
@@ -80,7 +84,12 @@ function aggregateProjects(sessions: Session[]): ProjectAggregate[] {
     const tokensOut = group.reduce((a, s) => a + s.tokens_out, 0);
     const cost = group.reduce((a, s) => a + s.cost_usd, 0);
     const lastMsAt = group.reduce((a, s) => Math.max(a, s.last_msg_at), 0);
-    const cli = (mostCommon(group.map((s) => s.cli)) || 'claude') as 'claude' | 'codex';
+    const cliCounts: Record<Cli, number> = { claude: 0, codex: 0 };
+    for (const s of group) {
+      if (s.cli === 'claude' || s.cli === 'codex') cliCounts[s.cli]++;
+    }
+    const clis: Cli[] = (['claude', 'codex'] as const).filter((c) => cliCounts[c] > 0);
+    const cli: Cli = (mostCommon(group.map((s) => s.cli)) || 'claude') as Cli;
     const model = mostCommon(group.map((s) => s.model));
 
     result.push({
@@ -95,6 +104,8 @@ function aggregateProjects(sessions: Session[]): ProjectAggregate[] {
       lastMsAgo: now - lastMsAt,
       model,
       cli,
+      clis,
+      sessionsByCli: cliCounts,
       priced: cost > 0,
       status: deriveStatus(group),
     });

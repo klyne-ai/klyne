@@ -14,7 +14,12 @@
 
   const sorted = $derived.by(() => {
     let p = projects;
-    if (cliFilter !== 'all') p = p.filter((x) => x.cli === cliFilter);
+    // Use clis[] membership so projects with both Claude AND Codex sessions
+    // (e.g. trackIt: 39 claude + 20 codex) show up under either filter.
+    if (cliFilter !== 'all') {
+      const want = cliFilter; // narrow to 'claude' | 'codex' for the closure
+      p = p.filter((x) => x.clis.includes(want));
+    }
     if (nameFilter) p = p.filter((x) => x.name.toLowerCase().includes(nameFilter.toLowerCase()));
     const sorters: Record<string, (a: typeof p[0], b: typeof p[0]) => number> = {
       recent: (a, b) => a.lastMsAgo - b.lastMsAgo,
@@ -113,7 +118,13 @@
             <tr onclick={() => goto(`/projects/${encodeURIComponent(p.name)}`)}>
               <td><span class="ad-dot ad-dot--{p.status}"></span></td>
               <td style="font-weight: 500; color: var(--ad-fg);">{p.name}</td>
-              <td><CliBadge cli={p.cli} /></td>
+              <td>
+                <span style="display: inline-flex; gap: 4px; flex-wrap: wrap;">
+                  {#each p.clis as c}
+                    <CliBadge cli={c} />
+                  {/each}
+                </span>
+              </td>
               <td class="ad-mono" style="font-size: 11px; color: var(--ad-muted);">{p.model}</td>
               <td class="num">{p.sessions}</td>
               <td class="num">{p.msgs}</td>

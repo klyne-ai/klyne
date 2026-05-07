@@ -100,7 +100,9 @@
               style="font-weight: 600; font-size: 15px; color: var(--ad-fg);"
               onclick={() => goto(`/projects/${encodeURIComponent(activeProj.name)}`)}
             >{activeProj.name}</button>
-            <CliBadge cli={activeProj.cli} />
+            {#each activeProj.clis as c}
+              <CliBadge cli={c} />
+            {/each}
             <span class="ad-badge ad-badge--ghost ad-mono" style="font-size: 11px;">{activeProj.model}</span>
           </div>
           <div style="display: flex; gap: 16px; font-size: 12px; color: var(--ad-muted);">
@@ -140,7 +142,9 @@
           <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
             <span class="ad-dot ad-dot--{p.status}"></span>
             <span style="font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{p.name}</span>
-            <CliBadge cli={p.cli} />
+            {#each p.clis as c}
+              <CliBadge cli={c} />
+            {/each}
           </div>
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; font-size: 12px;">
             <div>

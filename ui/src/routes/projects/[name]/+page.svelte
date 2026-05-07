@@ -65,7 +65,14 @@
         <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 6px;">
           <span class="ad-dot ad-dot--{project.status}"></span>
           <h1 style="font-size: var(--ad-fs-2xl); font-weight: 600; letter-spacing: -0.02em; margin: 0;">{project.name}</h1>
-          <CliBadge cli={project.cli} />
+          {#each project.clis as c}
+            <CliBadge cli={c} />
+          {/each}
+          {#if project.clis.length > 1}
+            <span class="ad-mono ad-faint" style="font-size: 11px;">
+              · claude {project.sessionsByCli.claude} / codex {project.sessionsByCli.codex}
+            </span>
+          {/if}
         </div>
         <div class="ad-mono ad-muted" style="font-size: 12px;">{project.project_path}</div>
       </div>
