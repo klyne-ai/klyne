@@ -1,3 +1,204 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* ============================================================
+   agentdeck — design tokens
+   Dark-first, dense, utilitarian. Reuse via var(--ad-*).
+   ============================================================ */
+
+:root {
+  /* ---- Color: surfaces ---- */
+  --ad-bg:          oklch(0.18 0.010 260);  /* page */
+  --ad-bg-2:        oklch(0.21 0.011 260);  /* sidebar / sub-panel */
+  --ad-panel:       oklch(0.23 0.012 260);  /* card */
+  --ad-panel-hi:    oklch(0.27 0.013 260);  /* hover / selected */
+  --ad-border:      oklch(0.30 0.012 260);
+  --ad-border-soft: oklch(0.26 0.011 260);
+
+  /* ---- Color: text ---- */
+  --ad-fg:          oklch(0.96 0.005 260);
+  --ad-fg-2:        oklch(0.78 0.008 260);
+  --ad-muted:       oklch(0.62 0.010 260);
+  --ad-faint:       oklch(0.48 0.010 260);
+
+  /* ---- Color: status (used sparingly per spec §8) ---- */
+  --ad-active:      oklch(0.78 0.16 150);
+  --ad-active-bg:   oklch(0.30 0.06 150);
+  --ad-idle:        oklch(0.65 0.010 260);
+  --ad-idle-bg:     oklch(0.28 0.011 260);
+  --ad-compact:     oklch(0.80 0.13 75);
+  --ad-compact-bg:  oklch(0.32 0.06 75);
+  --ad-error:       oklch(0.70 0.16 25);
+
+  /* ---- Color: CLI badges ---- */
+  --ad-claude:      oklch(0.78 0.14 305);
+  --ad-claude-bg:   oklch(0.30 0.06 305);
+  --ad-codex:       oklch(0.78 0.13 240);
+  --ad-codex-bg:    oklch(0.30 0.06 240);
+
+  /* ---- Type ---- */
+  --ad-font-ui:     "Inter", system-ui, -apple-system, sans-serif;
+  --ad-font-mono:   "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --ad-fs-xs:   11px;
+  --ad-fs-sm:   12px;
+  --ad-fs-md:   13px;
+  --ad-fs-base: 14px;
+  --ad-fs-lg:   16px;
+  --ad-fs-xl:   20px;
+  --ad-fs-2xl:  28px;
+  --ad-fs-3xl:  40px;
+
+  --ad-lh-tight: 1.25;
+  --ad-lh-base:  1.45;
+
+  /* ---- Spacing (4px grid) ---- */
+  --ad-s1: 4px;
+  --ad-s2: 8px;
+  --ad-s3: 12px;
+  --ad-s4: 16px;
+  --ad-s5: 20px;
+  --ad-s6: 24px;
+  --ad-s8: 32px;
+  --ad-s10: 40px;
+  --ad-s12: 48px;
+
+  /* ---- Radius ---- */
+  --ad-r-sm: 4px;
+  --ad-r-md: 6px;
+  --ad-r-lg: 10px;
+
+  /* ---- Layout ---- */
+  --ad-nav-h: 48px;
+  --ad-side-w: 240px;
+}
+
+/* ---- Reset-ish ---- */
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; height: 100%; }
+body {
+  background: var(--ad-bg);
+  color: var(--ad-fg);
+  font-family: var(--ad-font-ui);
+  font-size: var(--ad-fs-base);
+  line-height: var(--ad-lh-base);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; padding: 0; }
+input, select, textarea { font: inherit; color: inherit; }
+a { color: inherit; text-decoration: none; }
+::selection { background: var(--ad-claude-bg); color: var(--ad-fg); }
+
+/* ---- Custom scrollbar ---- */
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb { background: var(--ad-border); border-radius: 6px; border: 2px solid transparent; background-clip: padding-box; }
+*::-webkit-scrollbar-thumb:hover { background: var(--ad-panel-hi); background-clip: padding-box; }
+*::-webkit-scrollbar-track { background: transparent; }
+
+/* ---- Utility primitives ---- */
+.ad-mono { font-family: var(--ad-font-mono); font-feature-settings: "tnum" 1, "calt" 0; }
+.ad-tnum { font-variant-numeric: tabular-nums; }
+.ad-truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ad-stack { display: flex; flex-direction: column; }
+.ad-row { display: flex; align-items: center; }
+.ad-grow { flex: 1 1 auto; min-width: 0; }
+.ad-muted { color: var(--ad-muted); }
+.ad-faint { color: var(--ad-faint); }
+.ad-divider { height: 1px; background: var(--ad-border-soft); }
+
+/* ---- Card ---- */
+.ad-card {
+  background: var(--ad-panel);
+  border: 1px solid var(--ad-border);
+  border-radius: var(--ad-r-md);
+}
+
+/* ---- Badge ---- */
+.ad-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: var(--ad-fs-xs); font-weight: 500;
+  padding: 2px 6px; border-radius: var(--ad-r-sm);
+  background: var(--ad-idle-bg); color: var(--ad-fg-2);
+  font-family: var(--ad-font-mono);
+  letter-spacing: 0.01em;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.ad-badge--active  { background: var(--ad-active-bg);  color: var(--ad-active); }
+.ad-badge--idle    { background: var(--ad-idle-bg);    color: var(--ad-muted); }
+.ad-badge--compact { background: var(--ad-compact-bg); color: var(--ad-compact); }
+.ad-badge--claude  { background: var(--ad-claude-bg);  color: var(--ad-claude); }
+.ad-badge--codex   { background: var(--ad-codex-bg);   color: var(--ad-codex); }
+.ad-badge--ghost   { background: transparent; border: 1px solid var(--ad-border); color: var(--ad-fg-2); }
+
+/* dot for status */
+.ad-dot {
+  width: 6px; height: 6px; border-radius: 50%; display: inline-block;
+  background: var(--ad-idle);
+}
+.ad-dot--active  { background: var(--ad-active);  box-shadow: 0 0 0 3px color-mix(in oklch, var(--ad-active) 18%, transparent); }
+.ad-dot--idle    { background: var(--ad-idle); }
+.ad-dot--compact { background: var(--ad-compact); }
+
+/* ---- Button ---- */
+.ad-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 28px; padding: 0 10px;
+  background: var(--ad-panel); border: 1px solid var(--ad-border);
+  border-radius: var(--ad-r-sm); color: var(--ad-fg);
+  font-size: var(--ad-fs-sm); font-weight: 500;
+  transition: background 80ms;
+}
+.ad-btn:hover { background: var(--ad-panel-hi); }
+.ad-btn--primary { background: var(--ad-fg); color: var(--ad-bg); border-color: var(--ad-fg); }
+.ad-btn--primary:hover { background: var(--ad-fg-2); }
+.ad-btn--ghost { background: transparent; border-color: transparent; color: var(--ad-fg-2); }
+.ad-btn--ghost:hover { background: var(--ad-panel); color: var(--ad-fg); }
+.ad-btn--sm { height: 22px; padding: 0 6px; font-size: var(--ad-fs-xs); }
+
+/* ---- Input ---- */
+.ad-input {
+  height: 30px; width: 100%;
+  background: var(--ad-bg-2); border: 1px solid var(--ad-border);
+  border-radius: var(--ad-r-sm); padding: 0 10px;
+  color: var(--ad-fg); font-size: var(--ad-fs-sm);
+  outline: none; transition: border-color 80ms;
+}
+.ad-input:focus { border-color: var(--ad-claude); }
+.ad-input::placeholder { color: var(--ad-faint); }
+
+/* ---- Kbd chip ---- */
+.ad-kbd {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 20px; height: 20px; padding: 0 5px;
+  background: var(--ad-bg-2); border: 1px solid var(--ad-border);
+  border-bottom-width: 2px;
+  border-radius: 4px; font-size: 10px; font-weight: 600;
+  font-family: var(--ad-font-mono); color: var(--ad-fg-2);
+}
+
+/* ---- Section header ---- */
+.ad-section-h {
+  font-size: var(--ad-fs-xs); font-weight: 600;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--ad-muted);
+}
+
+/* ---- Table ---- */
+.ad-table { width: 100%; border-collapse: collapse; font-size: var(--ad-fs-sm); }
+.ad-table th {
+  text-align: left; font-weight: 500; color: var(--ad-muted);
+  font-size: var(--ad-fs-xs); text-transform: uppercase; letter-spacing: 0.06em;
+  padding: 8px 12px; border-bottom: 1px solid var(--ad-border);
+  background: var(--ad-bg-2);
+  position: sticky; top: 0; z-index: 1;
+}
+.ad-table td {
+  padding: 10px 12px; border-bottom: 1px solid var(--ad-border-soft);
+  color: var(--ad-fg-2); vertical-align: middle;
+}
+.ad-table tr:hover td { background: var(--ad-panel); color: var(--ad-fg); }
+.ad-table tr { cursor: pointer; }
+.ad-table .num { font-family: var(--ad-font-mono); font-variant-numeric: tabular-nums; text-align: right; }

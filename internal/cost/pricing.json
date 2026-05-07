@@ -3,64 +3,70 @@
   "version": 1,
   "models": {
     "claude-sonnet-4-5": {
-      "prompt_per_mtok": 3.00,
-      "completion_per_mtok": 15.00,
-      "cache_read_per_mtok": 0.30,
+      "prompt_per_mtok": 3.0,
+      "completion_per_mtok": 15.0,
+      "cache_read_per_mtok": 0.3,
       "cache_write_per_mtok": 3.75
     },
     "claude-haiku-4": {
-      "prompt_per_mtok": 0.80,
-      "completion_per_mtok": 4.00,
+      "prompt_per_mtok": 0.8,
+      "completion_per_mtok": 4.0,
       "cache_read_per_mtok": 0.08,
-      "cache_write_per_mtok": 1.00
+      "cache_write_per_mtok": 1.0
     },
     "claude-opus-4-6": {
-      "prompt_per_mtok": 15.00,
-      "completion_per_mtok": 75.00,
-      "cache_read_per_mtok": 1.50,
+      "prompt_per_mtok": 15.0,
+      "completion_per_mtok": 75.0,
+      "cache_read_per_mtok": 1.5,
       "cache_write_per_mtok": 18.75
     },
     "gpt-5": {
-      "prompt_per_mtok": 10.00,
-      "completion_per_mtok": 30.00,
-      "cache_read_per_mtok": 5.00,
-      "cache_write_per_mtok": 0.00
+      "prompt_per_mtok": 10.0,
+      "completion_per_mtok": 30.0,
+      "cache_read_per_mtok": 5.0,
+      "cache_write_per_mtok": 0.0
     },
     "gpt-5-mini": {
-      "prompt_per_mtok": 0.40,
-      "completion_per_mtok": 1.60,
-      "cache_read_per_mtok": 0.20,
-      "cache_write_per_mtok": 0.00
+      "prompt_per_mtok": 0.4,
+      "completion_per_mtok": 1.6,
+      "cache_read_per_mtok": 0.2,
+      "cache_write_per_mtok": 0.0
     },
     "gpt-5-nano": {
-      "prompt_per_mtok": 0.10,
-      "completion_per_mtok": 0.40,
+      "prompt_per_mtok": 0.1,
+      "completion_per_mtok": 0.4,
       "cache_read_per_mtok": 0.05,
-      "cache_write_per_mtok": 0.00
+      "cache_write_per_mtok": 0.0
     },
     "gemini-2.5-flash": {
       "prompt_per_mtok": 0.075,
-      "completion_per_mtok": 0.30,
+      "completion_per_mtok": 0.3,
       "cache_read_per_mtok": 0.01875,
-      "cache_write_per_mtok": 0.00
+      "cache_write_per_mtok": 0.0
     },
     "gemini-2.5-flash-lite": {
       "prompt_per_mtok": 0.0375,
       "completion_per_mtok": 0.15,
       "cache_read_per_mtok": 0.009375,
-      "cache_write_per_mtok": 0.00
+      "cache_write_per_mtok": 0.0
     },
     "text-embedding-3-small": {
       "prompt_per_mtok": 0.02,
-      "completion_per_mtok": 0.00,
-      "cache_read_per_mtok": 0.00,
-      "cache_write_per_mtok": 0.00
+      "completion_per_mtok": 0.0,
+      "cache_read_per_mtok": 0.0,
+      "cache_write_per_mtok": 0.0
     },
     "llama3.1:8b": {
-      "prompt_per_mtok": 0.00,
-      "completion_per_mtok": 0.00,
-      "cache_read_per_mtok": 0.00,
-      "cache_write_per_mtok": 0.00
+      "prompt_per_mtok": 0.0,
+      "completion_per_mtok": 0.0,
+      "cache_read_per_mtok": 0.0,
+      "cache_write_per_mtok": 0.0
+    },
+    "claude-opus-4-7": {
+      "prompt_per_mtok": 15.0,
+      "completion_per_mtok": 75.0,
+      "cache_read_per_mtok": 1.5,
+      "cache_write_per_mtok": 18.75
     }
   }
 }
