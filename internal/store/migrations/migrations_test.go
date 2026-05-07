@@ -31,7 +31,12 @@ func TestMigrationsApply(t *testing.T) {
 		sqlFiles = append(sqlFiles, e.Name())
 	}
 
-	expected := []string{"001_init.sql", "002_fts.sql", "003_summaries.sql"}
+	expected := []string{
+		"001_init.sql",
+		"002_fts.sql",
+		"003_summaries.sql",
+		"004_messages_tool_columns.sql", // W2: Option-A tool-call JSON columns
+	}
 	if len(sqlFiles) != len(expected) {
 		t.Fatalf("expected %d migrations, found %d: %v", len(expected), len(sqlFiles), sqlFiles)
 	}
