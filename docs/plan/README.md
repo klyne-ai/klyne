@@ -109,8 +109,8 @@ These apply to every agent dispatched against this plan. Each workstream file re
 | 2 | W14 | Sonnet | `main` | 🟢 merged (96.26% cov, 140 tests) |
 | 3 | W12 | Opus | `main` | 🟢 merged (78.5% cov; daemon binary works end-to-end) |
 | 3 | W15 | Sonnet | `main` | 🟢 merged (83.1% backend, 174 UI tests, 100% resume cov) |
-| 4 | W16 | _unassigned_ | — | ⬜ not started |
-| 4 | W17 | _unassigned_ | — | ⬜ not started |
+| 4 | W16 | Sonnet | `main` | 🟢 merged (all 9 §12 budgets PASS) |
+| 4 | W17 | _deferred_ | — | ⬜ deferred — packaging is a manual step |
 | 5 | W18 | _unassigned_ | — | ⬜ not started |
 
 Legend: ⬜ not started · 🟡 in progress · 🟢 merged · 🔴 blocked

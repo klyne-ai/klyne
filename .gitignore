@@ -4,6 +4,7 @@ bin/
 *.out
 cov.out
 *.exe
+bench-output.json
 
 # Node / SvelteKit
 node_modules/
