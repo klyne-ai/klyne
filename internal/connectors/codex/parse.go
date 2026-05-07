@@ -4,89 +4,92 @@
 //
 //	~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl
 //
-// The format is experimental (spec §13 risk #2). This parser is designed to be
-// forward-compatible: unknown fields are silently ignored and unknown type values
-// are treated as system-equivalent messages rather than causing panics.
+// Every line is a JSON object: {"timestamp":"ISO-8601","type":"...","payload":{...}}
 //
-// Field-name decisions:
-//   - session_id  (snake_case — Codex convention, differs from Claude's sessionId)
-//   - usage.prompt_tokens    → Message.TokensIn
-//   - usage.completion_tokens → Message.TokensOut
-//   - compact_event lines are treated as system messages (W15 will add proper
-//     detection once the real Codex compact signal is confirmed).
+// Top-level types:
+//   - session_meta  — first line; payload.id = session UUID, payload.cwd = working dir
+//   - turn_context  — per-turn metadata; payload.model = model in use
+//   - response_item — actual messages and tool calls; payload.type disambiguates
+//   - event_msg     — high-level events (duplicates of response_item); skipped
+//
+// This parser is stateful per file: session_meta and turn_context lines update
+// a *fileMeta value, which is then applied to message-emitting lines.
+// Unknown top-level types are silently skipped for forward-compatibility.
 package codex
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"log"
-	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mohitpatell/agentdeck/internal/connectors"
 )
 
-// rawLine is the union of all fields that may appear in a Codex JSONL line.
-// Unknown fields are absorbed by the embedded json.RawMessage map (via
-// json.Decoder DisallowUnknownFields is intentionally NOT set).
-type rawLine struct {
-	// Common fields
-	Type      string `json:"type"`
-	SessionID string `json:"session_id"`
-	Timestamp string `json:"timestamp"`
-	Model     string `json:"model"`
+// ---------------------------------------------------------------------------
+// Wire types — minimal structs to decode real Codex JSONL.
+// ---------------------------------------------------------------------------
 
-	// session_meta
+// envelope is the top-level wrapper present on every line.
+type envelope struct {
+	Timestamp string          `json:"timestamp"`
+	Type      string          `json:"type"`
+	Payload   json.RawMessage `json:"payload"`
+}
+
+// metaPayload decodes payload of a session_meta line.
+type metaPayload struct {
+	ID  string `json:"id"`
 	CWD string `json:"cwd"`
+}
 
-	// input / output
-	Role    string `json:"role"`
-	Content string `json:"content"`
+// contextPayload decodes payload of a turn_context line.
+type contextPayload struct {
+	Model string `json:"model"`
+	CWD   string `json:"cwd"`
+}
 
-	// output only
-	Usage *rawUsage `json:"usage,omitempty"`
+// itemPayload is the union of all response_item payload shapes.
+type itemPayload struct {
+	// Discriminator
+	Type string `json:"type"`
 
-	// function_call
-	CallID    string          `json:"call_id"`
-	Name      string          `json:"name"`
-	Arguments json.RawMessage `json:"arguments,omitempty"`
+	// message fields
+	Role    string           `json:"role"`
+	Content []contentItem    `json:"content"`
 
-	// function_call_output
+	// function_call fields
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+	CallID    string `json:"call_id"`
+
+	// function_call_output fields
 	Output string `json:"output"`
 
-	// compact_event (synthetic — verify against real sessions in Wave 1)
-	BeforeTokens int64  `json:"before_tokens"`
-	AfterTokens  int64  `json:"after_tokens"`
-	Summary      string `json:"summary"`
+	// reasoning — no fields we use; payload.type == "reasoning" means skip
 }
 
-// rawUsage represents the token accounting block in Codex output lines.
-type rawUsage struct {
-	PromptTokens     int64 `json:"prompt_tokens"`
-	CompletionTokens int64 `json:"completion_tokens"`
-	TotalTokens      int64 `json:"total_tokens"`
+// contentItem is a single element of a message's content array.
+type contentItem struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
 }
 
-// sessionIDFromPath derives the session ID from the JSONL file path when the
-// line itself does not carry one. The file name is used as a fallback.
-// Codex path: ~/.codex/sessions/YYYY/MM/DD/rollout-<id>.jsonl
-func sessionIDFromPath(path string) string {
-	base := filepath.Base(path)
-	// Strip extension
-	base = strings.TrimSuffix(base, filepath.Ext(base))
-	return base
-}
+// ---------------------------------------------------------------------------
+// parseTimestamp converts an ISO 8601 string to epoch milliseconds.
+// Returns 0 on failure; caller substitutes wall-clock time.
+// ---------------------------------------------------------------------------
 
-// parseTimestamp converts an ISO 8601 timestamp string to epoch milliseconds.
-// Returns 0 on parse failure (caller falls back to wall-clock time).
 func parseTimestamp(ts string) int64 {
 	if ts == "" {
 		return 0
 	}
 	t, err := time.Parse(time.RFC3339Nano, ts)
 	if err != nil {
-		// Try without nanoseconds
+		// Try millisecond-only precision ("2006-01-02T15:04:05.000Z")
 		t, err = time.Parse("2006-01-02T15:04:05.000Z", ts)
 		if err != nil {
 			return 0
@@ -95,133 +98,246 @@ func parseTimestamp(ts string) int64 {
 	return t.UnixMilli()
 }
 
-// normalizeRole maps Codex role strings onto canonical connectors.Role values.
-func normalizeRole(codexRole, codexType string) connectors.Role {
-	switch codexType {
-	case "input":
-		return connectors.RoleUser
-	case "output":
-		return connectors.RoleAssistant
-	case "function_call":
-		return connectors.RoleTool
-	case "function_call_output":
-		return connectors.RoleTool
-	case "session_meta":
-		return connectors.RoleSystem
-	case "compact_event":
-		// Treat as system message; W15 will handle proper compact detection.
-		return connectors.RoleSystem
-	}
-	// Fall back to the role field if present.
-	switch codexRole {
-	case "user":
-		return connectors.RoleUser
-	case "assistant":
-		return connectors.RoleAssistant
-	case "system":
-		return connectors.RoleSystem
-	}
-	// Unknown type — emit as system rather than panicking (forward-compat).
-	return connectors.RoleSystem
+// ---------------------------------------------------------------------------
+// messageID derives a deterministic ID for a message.
+// Format: <sessionID>-<sha256(line)[:12]>
+// This is stable across restarts and avoids storing offsets externally.
+// ---------------------------------------------------------------------------
+
+func messageID(sessionID string, line []byte) string {
+	h := sha256.Sum256(line)
+	return fmt.Sprintf("%s-%x", sessionID, h[:6])
 }
 
-// ParseLine converts a single raw JSONL line from a Codex session file into a
-// canonical connectors.Message. The path is used to derive the session_id and
-// project_path when the line does not carry them.
+// ---------------------------------------------------------------------------
+// joinText concatenates all content items whose type matches wantType.
+// Whitespace-trims the result.
+// ---------------------------------------------------------------------------
+
+func joinText(items []contentItem, wantType string) string {
+	var parts []string
+	for _, item := range items {
+		if item.Type == wantType && item.Text != "" {
+			parts = append(parts, item.Text)
+		}
+	}
+	return strings.TrimSpace(strings.Join(parts, "\n"))
+}
+
+// ---------------------------------------------------------------------------
+// parseLine is the core stateful parse function. It is called by
+// Connector.Parse with the per-file *fileMeta and the Connector's mutex.
 //
-// Malformed lines (non-JSON, missing required fields) are skipped with a
-// warning log; the caller receives (nil, error) and should continue to the
-// next line rather than aborting.
-func ParseLine(line []byte, path string) (*connectors.Message, error) {
-	var raw rawLine
-	if err := json.Unmarshal(line, &raw); err != nil {
-		log.Printf("codex: skipping malformed line in %s: %v", path, err)
+// The mutex is used only to guard writes to meta; the caller holds no lock
+// when calling parseLine. This keeps the critical section small.
+// ---------------------------------------------------------------------------
+
+func parseLine(line []byte, path string, meta *fileMeta, mu *sync.Mutex) (*connectors.Message, error) {
+	if len(line) == 0 {
+		return nil, fmt.Errorf("codex: empty line in %s", path)
+	}
+
+	var env envelope
+	if err := json.Unmarshal(line, &env); err != nil {
+		log.Printf("codex: malformed json in %s: %v", path, err)
 		return nil, fmt.Errorf("codex: malformed json: %w", err)
 	}
 
-	// Derive session ID — prefer line value, fall back to filename.
-	sessionID := raw.SessionID
-	if sessionID == "" {
-		sessionID = sessionIDFromPath(path)
-	}
-
-	// Derive timestamp.
-	ts := parseTimestamp(raw.Timestamp)
+	ts := parseTimestamp(env.Timestamp)
 	if ts == 0 {
 		ts = time.Now().UnixMilli()
 	}
 
-	role := normalizeRole(raw.Role, raw.Type)
-
-	msg := &connectors.Message{
-		SessionID: sessionID,
-		CLI:       connectors.CLICodex,
-		Role:      role,
-		Ts:        ts,
-		Model:     raw.Model,
-	}
-
-	// Extract project path from session_meta lines or derive from path.
-	if raw.CWD != "" {
-		msg.ProjectPath = raw.CWD
-	} else {
-		// Best-effort: walk up from .../YYYY/MM/DD/rollout-*.jsonl to find cwd.
-		// Not available in all lines; store empty and let the store backfill.
-		msg.ProjectPath = ""
-	}
-
-	switch raw.Type {
+	switch env.Type {
 	case "session_meta":
-		// Session metadata — synthesize a system message.
-		msg.Content = fmt.Sprintf("[session_meta] model=%s cwd=%s", raw.Model, raw.CWD)
+		return handleSessionMeta(env.Payload, meta, mu, path)
 
-	case "input":
-		msg.Content = raw.Content
+	case "turn_context":
+		return handleTurnContext(env.Payload, meta, mu, path)
 
-	case "output":
-		msg.Content = raw.Content
-		if raw.Usage != nil {
-			msg.TokensIn = raw.Usage.PromptTokens
-			msg.TokensOut = raw.Usage.CompletionTokens
-		}
+	case "response_item":
+		return handleResponseItem(env.Payload, line, meta, mu, path, ts)
 
-	case "function_call":
-		// Represent the tool call in ToolCalls; Content carries a summary.
-		inputStr := ""
-		if len(raw.Arguments) > 0 {
-			inputStr = string(raw.Arguments)
-		}
-		msg.ToolCalls = []connectors.ToolCall{
-			{
-				ID:    raw.CallID,
-				Name:  raw.Name,
-				Input: inputStr,
-			},
-		}
-		msg.Content = fmt.Sprintf("[function_call] %s(%s)", raw.Name, inputStr)
-
-	case "function_call_output":
-		msg.ToolResults = []connectors.ToolResult{
-			{
-				ID:     raw.CallID,
-				Output: raw.Output,
-			},
-		}
-		msg.Content = raw.Output
-
-	case "compact_event":
-		// Synthetic marker — treated as system. W15 will refine.
-		// Log a notice so operators can see compact events in the daemon logs.
-		log.Printf("codex: compact_event detected in session %s (before=%d after=%d)",
-			sessionID, raw.BeforeTokens, raw.AfterTokens)
-		msg.Content = fmt.Sprintf("[compact_event] before_tokens=%d after_tokens=%d summary=%s",
-			raw.BeforeTokens, raw.AfterTokens, raw.Summary)
+	case "event_msg":
+		// All event_msg subtypes are skipped — canonical data lives in response_item.
+		return nil, nil
 
 	default:
-		// Unknown type — forward-compat: emit as system with raw type in content.
-		log.Printf("codex: unknown line type %q in %s — treating as system message", raw.Type, path)
-		msg.Content = fmt.Sprintf("[%s] %s", raw.Type, raw.Content)
+		log.Printf("codex: unknown line type %q in %s — skipping (forward-compat)", env.Type, path)
+		return nil, nil
+	}
+}
+
+// handleSessionMeta updates meta.sessionID and meta.projectPath.
+func handleSessionMeta(raw json.RawMessage, meta *fileMeta, mu *sync.Mutex, path string) (*connectors.Message, error) {
+	var p metaPayload
+	if err := json.Unmarshal(raw, &p); err != nil {
+		log.Printf("codex: failed to decode session_meta payload in %s: %v", path, err)
+		return nil, nil
+	}
+	mu.Lock()
+	meta.sessionID = p.ID
+	meta.projectPath = p.CWD
+	mu.Unlock()
+	return nil, nil
+}
+
+// handleTurnContext updates meta.model. The first session_meta's cwd wins;
+// we do not overwrite projectPath here.
+func handleTurnContext(raw json.RawMessage, meta *fileMeta, mu *sync.Mutex, path string) (*connectors.Message, error) {
+	var p contextPayload
+	if err := json.Unmarshal(raw, &p); err != nil {
+		log.Printf("codex: failed to decode turn_context payload in %s: %v", path, err)
+		return nil, nil
+	}
+	if p.Model == "" {
+		return nil, nil
+	}
+	mu.Lock()
+	meta.model = p.Model
+	mu.Unlock()
+	return nil, nil
+}
+
+// handleResponseItem dispatches on payload.type within a response_item line.
+func handleResponseItem(raw json.RawMessage, line []byte, meta *fileMeta, mu *sync.Mutex, path string, ts int64) (*connectors.Message, error) {
+	var p itemPayload
+	if err := json.Unmarshal(raw, &p); err != nil {
+		log.Printf("codex: failed to decode response_item payload in %s: %v", path, err)
+		return nil, nil
 	}
 
-	return msg, nil
+	switch p.Type {
+	case "message":
+		return handleMessage(p, line, meta, mu, path, ts)
+
+	case "function_call":
+		return handleFunctionCall(p, line, meta, mu, path, ts)
+
+	case "function_call_output":
+		return handleFunctionCallOutput(p, line, meta, mu, path, ts)
+
+	case "reasoning":
+		// Chain-of-thought — not user-visible; skip.
+		return nil, nil
+
+	default:
+		log.Printf("codex: unknown response_item type %q in %s — skipping", p.Type, path)
+		return nil, nil
+	}
+}
+
+// stateSnapshot safely reads a copy of meta's fields.
+func stateSnapshot(meta *fileMeta, mu *sync.Mutex) (sessionID, projectPath, model string) {
+	mu.Lock()
+	sessionID = meta.sessionID
+	projectPath = meta.projectPath
+	model = meta.model
+	mu.Unlock()
+	return
+}
+
+// handleMessage handles response_item with payload.type == "message".
+func handleMessage(p itemPayload, line []byte, meta *fileMeta, mu *sync.Mutex, path string, ts int64) (*connectors.Message, error) {
+	sessionID, projectPath, model := stateSnapshot(meta, mu)
+
+	if sessionID == "" {
+		log.Printf("codex: user/assistant message before session_meta in %s — skipping", path)
+		return nil, nil
+	}
+
+	switch p.Role {
+	case "user":
+		content := joinText(p.Content, "input_text")
+		if content == "" {
+			// Skip empty/environment-context-only user messages.
+			return nil, nil
+		}
+		return &connectors.Message{
+			ID:          messageID(sessionID, line),
+			SessionID:   sessionID,
+			CLI:         connectors.CLICodex,
+			ProjectPath: projectPath,
+			Role:        connectors.RoleUser,
+			Content:     content,
+			Model:       model,
+			Ts:          ts,
+		}, nil
+
+	case "assistant":
+		content := joinText(p.Content, "output_text")
+		return &connectors.Message{
+			ID:          messageID(sessionID, line),
+			SessionID:   sessionID,
+			CLI:         connectors.CLICodex,
+			ProjectPath: projectPath,
+			Role:        connectors.RoleAssistant,
+			Content:     content,
+			Model:       model,
+			Ts:          ts,
+		}, nil
+
+	case "developer":
+		// System-injected developer context — skip.
+		return nil, nil
+
+	default:
+		log.Printf("codex: unknown message role %q in %s — skipping", p.Role, path)
+		return nil, nil
+	}
+}
+
+// handleFunctionCall handles response_item with payload.type == "function_call".
+func handleFunctionCall(p itemPayload, line []byte, meta *fileMeta, mu *sync.Mutex, path string, ts int64) (*connectors.Message, error) {
+	sessionID, projectPath, model := stateSnapshot(meta, mu)
+
+	if sessionID == "" {
+		log.Printf("codex: function_call before session_meta in %s — skipping", path)
+		return nil, nil
+	}
+
+	return &connectors.Message{
+		ID:          messageID(sessionID, line),
+		SessionID:   sessionID,
+		CLI:         connectors.CLICodex,
+		ProjectPath: projectPath,
+		Role:        connectors.RoleAssistant,
+		Content:     "",
+		ToolCalls: []connectors.ToolCall{
+			{
+				ID:    p.CallID,
+				Name:  p.Name,
+				Input: p.Arguments,
+			},
+		},
+		Model: model,
+		Ts:    ts,
+	}, nil
+}
+
+// handleFunctionCallOutput handles response_item with payload.type == "function_call_output".
+func handleFunctionCallOutput(p itemPayload, line []byte, meta *fileMeta, mu *sync.Mutex, path string, ts int64) (*connectors.Message, error) {
+	sessionID, projectPath, model := stateSnapshot(meta, mu)
+
+	if sessionID == "" {
+		log.Printf("codex: function_call_output before session_meta in %s — skipping", path)
+		return nil, nil
+	}
+
+	return &connectors.Message{
+		ID:          messageID(sessionID, line),
+		SessionID:   sessionID,
+		CLI:         connectors.CLICodex,
+		ProjectPath: projectPath,
+		Role:        connectors.RoleTool,
+		Content:     p.Output,
+		ToolResults: []connectors.ToolResult{
+			{
+				ID:     p.CallID,
+				Output: p.Output,
+			},
+		},
+		Model: model,
+		Ts:    ts,
+	}, nil
 }

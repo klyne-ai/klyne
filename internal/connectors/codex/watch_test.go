@@ -115,9 +115,12 @@ func TestDiscover_EmptyRoot(t *testing.T) {
 	}
 }
 
-// TestWatch_NoDoubleEmit_OnWarmup verifies that lines present in files before
-// Watch starts are NOT re-emitted after warmup (deduplication requirement).
-func TestWatch_NoDoubleEmit_OnWarmup(t *testing.T) {
+// TestWatch_WarmupReplaysExistingLines verifies that lines present in files
+// before Watch starts ARE replayed on warm-up. Earlier semantics skipped
+// existing content (only emitted new appends), but that broke first-run
+// ingestion of historical sessions on disk. Dedup now happens at the store
+// layer (Message ID PK), so re-emitting on every Watch start is safe.
+func TestWatch_WarmupReplaysExistingLines(t *testing.T) {
 	root := t.TempDir()
 	dir := mkDateDir(t, root, "2026", "05", "06")
 	p := filepath.Join(dir, "rollout-001.jsonl")
@@ -133,15 +136,14 @@ func TestWatch_NoDoubleEmit_OnWarmup(t *testing.T) {
 		_ = New(root).Watch(ctx, events)
 	}()
 
-	// Give Watch time to warm up.
-	time.Sleep(60 * time.Millisecond)
+	// Give Watch time to warm up + replay.
+	time.Sleep(80 * time.Millisecond)
 
-	// Append a new line — this is the ONLY line that should appear.
+	// Append a new line — should also be picked up via fsnotify tail.
 	appendFile(t, p, validLine2)
 
-	// Collect events for up to 200ms.
 	var received []connectors.RawEvent
-	timeout := time.After(200 * time.Millisecond)
+	timeout := time.After(300 * time.Millisecond)
 collect:
 	for {
 		select {
@@ -155,9 +157,10 @@ collect:
 	cancel()
 	wg.Wait()
 
-	// Should have received exactly 1 event (the appended line), not the warmup line.
-	if len(received) != 1 {
-		t.Errorf("expected 1 event after warmup, got %d", len(received))
+	// Should receive BOTH the existing line (warmup replay) and the appended
+	// line (live tail). Allow ≥2 — fsnotify may also re-fire on the same line.
+	if len(received) < 2 {
+		t.Errorf("expected at least 2 events (warmup + append), got %d", len(received))
 		for i, ev := range received {
 			t.Logf("  event[%d]: %s", i, ev.Line)
 		}
@@ -563,15 +566,17 @@ func TestConnector_Pricing(t *testing.T) {
 	}
 }
 
-// TestConnector_Parse_Delegates verifies Connector.Parse delegates to ParseLine.
-func TestConnector_Parse_Delegates(t *testing.T) {
+// TestConnector_Parse_ViaWatch verifies Connector.Parse wires through the
+// per-file state map (covered more thoroughly in parse_test.go).
+func TestConnector_Parse_ViaWatch(t *testing.T) {
 	c := New("/tmp")
-	line := []byte(`{"type":"input","session_id":"cx-x","content":"hi","timestamp":"2026-05-06T10:00:05.000Z"}`)
+	// Without session_meta, a response_item returns (nil, nil).
+	line := []byte(`{"timestamp":"2026-05-06T10:00:01.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}}`)
 	msg, err := c.Parse(line, fakePath)
 	if err != nil {
-		t.Fatalf("Parse: %v", err)
+		t.Fatalf("Parse: unexpected error: %v", err)
 	}
-	if msg.Content != "hi" {
-		t.Errorf("content: got %q, want hi", msg.Content)
+	if msg != nil {
+		t.Fatalf("expected nil before session_meta, got %+v", msg)
 	}
 }

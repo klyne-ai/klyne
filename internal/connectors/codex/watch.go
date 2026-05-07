@@ -138,12 +138,15 @@ func (w *watcher) emitNew(path string) {
 	}
 }
 
-// warmupOffsets performs an initial scan of all existing files to record their
-// current byte offsets. It does NOT emit any events — this prevents re-emitting
-// lines that were already present before Watch started (deduplication, risk R5).
+// warmupOffsets back-fills any existing JSONL content on Watch start.
+// Earlier this function only recorded the end-of-file offset (no emission)
+// to avoid re-emitting lines already on disk; that broke first-run ingestion
+// because nothing ever reads historical lines. Now we replay each existing
+// file from byte 0 — store.InsertMessage deduplicates by Message ID PK so
+// repeated runs are safe.
 func (w *watcher) warmupOffsets(files []string) {
 	for _, path := range files {
-		w.advanceOffset(path)
+		w.emitNew(path)
 	}
 }
 

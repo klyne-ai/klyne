@@ -22,9 +22,10 @@ examples/sample-jsonl/
 │   ├── session-002-with-tools.jsonl    (13 lines: 3 tool uses — Read, Bash, Edit — with paired tool_results)
 │   └── session-003-with-compact.jsonl  (30 lines: tool-heavy session, summary marker, 5 post-compact messages)
 └── codex/
-    ├── session-001-simple.jsonl        (7 lines: input/output text only)
-    ├── session-002-with-tools.jsonl    (14 lines: 4 function_call + function_call_output pairs)
-    └── session-003-with-compact.jsonl  (28 lines: function calls, compact_event marker, post-compact messages)
+    └── session-real-001.jsonl          (18 lines: sanitized real Codex JSONL — session_meta, turn_context,
+                                         response_item/{message/user, message/assistant, function_call,
+                                         function_call_output, reasoning}, event_msg/{token_count, agent_message,
+                                         task_started, task_complete})
 ```
 
 ## Regenerating
@@ -81,42 +82,49 @@ W15 detects compaction by looking for this line **and** a dramatic drop in `mess
 
 ## Format Assumptions — Codex CLI
 
-Codex CLI writes sessions to `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`. The format is experimental (spec §13 risk #2) and has changed between versions. These fixtures reflect a plausible shape inferred from public Codex documentation as of May 2026.
-
-| Field | Type | Notes |
-|-------|------|-------|
-| `type` | string | `"session_meta"`, `"input"`, `"output"`, `"function_call"`, `"function_call_output"`, `"compact_event"` |
-| `session_id` | string | Session identifier (snake_case — differs from Claude's `sessionId`) |
-| `model` | string | Model name on `session_meta` and `output` lines |
-| `timestamp` | string | ISO 8601 with milliseconds and `Z` suffix |
-| `usage.prompt_tokens` | int | Present on `output` lines |
-| `usage.completion_tokens` | int | Present on `output` lines |
-| `usage.total_tokens` | int | Present on `output` lines |
-
-### Function call shape
+Codex CLI writes sessions to `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`. The real format
+(audited against live sessions in Wave 1) uses a top-level envelope on every line:
 
 ```json
-{"type": "function_call", "call_id": "…", "name": "shell", "arguments": {"command": "…"}, "timestamp": "…"}
-{"type": "function_call_output", "call_id": "…", "output": "…", "timestamp": "…"}
+{"timestamp": "ISO-8601", "type": "...", "payload": {...}}
 ```
 
-### Compact event marker (SYNTHETIC — must be verified in Wave 1)
+### Top-level `type` values
 
-Codex's compact signal is not publicly documented. This fixture uses an invented marker:
-```json
-{"type": "compact_event", "session_id": "…", "before_tokens": 18420, "after_tokens": 2180, "summary": "…", "timestamp": "…"}
-```
+| `type` | Purpose | Parser action |
+|--------|---------|---------------|
+| `session_meta` | First line; `payload.id` = session UUID, `payload.cwd` = working dir | Update per-file state; return nil |
+| `turn_context` | Per-turn metadata; `payload.model` = model in use | Update per-file model; return nil |
+| `response_item` | Messages and tool calls; `payload.type` disambiguates | See below |
+| `event_msg` | High-level lifecycle events (duplicates of response_item) | Skip |
 
-W15 detects compaction by looking for this line **and** a dramatic drop in `usage.prompt_tokens` on the first `output` message after the event.
+### `response_item` payload types
 
-**W5 must verify**: When real Codex sessions with compaction are available in Wave 1, replace this invented marker with the actual signal. Update `session-003-with-compact.jsonl` and the generator accordingly.
+| `payload.type` | Notes | Emitted `Role` |
+|----------------|-------|----------------|
+| `message` with `role=user` | `content[*].type=input_text` | `user` |
+| `message` with `role=assistant` | `content[*].type=output_text` | `assistant` |
+| `message` with `role=developer` | System-injected context | skipped |
+| `function_call` | `payload.name`, `payload.arguments`, `payload.call_id` | `assistant` (ToolCalls populated) |
+| `function_call_output` | `payload.call_id`, `payload.output` | `tool` (ToolResults populated) |
+| `reasoning` | GPT-5 chain-of-thought; encrypted | skipped |
+
+### State model
+
+The parser is **stateful per file**: `session_meta` and `turn_context` lines accumulate
+metadata (sessionID, projectPath, model). Message-emitting lines inherit this metadata.
+A message line seen before `session_meta` is silently skipped.
 
 ## Known Fragility
 
-1. **Codex format is experimental** — field names, line types, and compact signal may change between Codex CLI versions. W5 should treat these fixtures as a starting point and replace them with real captured sessions as soon as they are available.
+1. **Codex format is experimental** — field names and line types may change between Codex CLI
+   versions. W5 treats `session-real-001.jsonl` as the canonical reference; update this file
+   and the parser if the real schema changes.
 
-2. **Claude Code `parentUuid` on tool-result lines** — public observation suggests tool_result `user` lines set `parentUuid` to the preceding `assistant` line's `uuid`. This fixture follows that convention; W4 should verify against real sessions.
+2. **Claude Code `parentUuid` on tool-result lines** — public observation suggests tool_result
+   `user` lines set `parentUuid` to the preceding `assistant` line's `uuid`. W4 should verify
+   against real sessions.
 
-3. **Token counts are realistic but invented** — actual token counts depend on model, prompt, and cache state. The values here are plausible for the conversation length but are not derived from real API calls.
-
-4. **`session-003-with-compact.jsonl` (both CLIs)** — the post-compact messages have their `parentUuid` pointing to the last pre-compact assistant message (not the summary line). This is the observed behavior for Claude Code; Codex behavior is assumed to be similar.
+3. **Token counts** — Codex token counts appear only in `event_msg/token_count` lines, which
+   are currently skipped. W9 (cost engine) will add token extraction from these lines in a
+   future workstream.

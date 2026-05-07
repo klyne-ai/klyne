@@ -1,116 +1,234 @@
 package codex
 
 import (
+	"bufio"
+	"os"
+	"path/filepath"
+	"sync"
 	"testing"
-	"time"
 
 	"github.com/mohitpatell/agentdeck/internal/connectors"
 )
 
+// fakePath is the default path used in parse tests.
 const fakePath = "/home/dev/.codex/sessions/2026/05/06/rollout-abc.jsonl"
 
-// TestParse_SessionMeta verifies session_meta lines produce system messages.
-func TestParse_SessionMeta(t *testing.T) {
-	line := []byte(`{"type":"session_meta","session_id":"cx-001","model":"gpt-5","cwd":"/Users/dev/project","timestamp":"2026-05-06T10:00:00.000Z"}`)
-	msg, err := ParseLine(line, fakePath)
+// realFixtureFilePath returns the absolute path to the sanitized real-format fixture.
+// go test sets the working directory to the package directory
+// (.../agentdeck/internal/connectors/codex), so 3 levels up reaches the repo root.
+func realFixtureFilePath(t *testing.T) string {
+	t.Helper()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("cannot get working directory: %v", err)
+	}
+	// wd = .../agentdeck/internal/connectors/codex
+	// repo root = 3 levels up
+	p := filepath.Join(wd, "..", "..", "..", "examples", "sample-jsonl", "codex", "session-real-001.jsonl")
+	return filepath.Clean(p)
+}
+
+// newMeta returns a fresh fileMeta and a mutex for tests.
+func newMeta() (*fileMeta, *sync.Mutex) {
+	return &fileMeta{}, &sync.Mutex{}
+}
+
+// newConnectorForTest builds a Connector with a fresh state map for use in
+// tests that call c.Parse directly.
+func newConnectorForTest() *Connector {
+	return New("/tmp/test-root")
+}
+
+// ---------------------------------------------------------------------------
+// 1. session_meta updates state and returns (nil, nil)
+// ---------------------------------------------------------------------------
+
+func TestParse_SessionMeta_UpdatesState(t *testing.T) {
+	meta, mu := newMeta()
+	line := []byte(`{"timestamp":"2026-05-06T10:00:00.000Z","type":"session_meta","payload":{"id":"test-session-id","cwd":"/Users/dev/myproject"}}`)
+	msg, err := parseLine(line, fakePath, meta, mu)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if msg.Role != connectors.RoleSystem {
-		t.Errorf("role: got %q, want %q", msg.Role, connectors.RoleSystem)
+	if msg != nil {
+		t.Fatalf("expected nil message for session_meta, got %+v", msg)
 	}
-	if msg.CLI != connectors.CLICodex {
-		t.Errorf("cli: got %q, want %q", msg.CLI, connectors.CLICodex)
+	if meta.sessionID != "test-session-id" {
+		t.Errorf("sessionID: got %q, want test-session-id", meta.sessionID)
 	}
-	if msg.SessionID != "cx-001" {
-		t.Errorf("session_id: got %q, want cx-001", msg.SessionID)
-	}
-	if msg.ProjectPath != "/Users/dev/project" {
-		t.Errorf("project_path: got %q, want /Users/dev/project", msg.ProjectPath)
-	}
-	if msg.Ts == 0 {
-		t.Error("ts should be non-zero")
+	if meta.projectPath != "/Users/dev/myproject" {
+		t.Errorf("projectPath: got %q, want /Users/dev/myproject", meta.projectPath)
 	}
 }
 
-// TestParse_Input verifies input (user) lines.
-func TestParse_Input(t *testing.T) {
-	line := []byte(`{"type":"input","session_id":"cx-001","role":"user","content":"Hello world","timestamp":"2026-05-06T10:00:05.000Z"}`)
-	msg, err := ParseLine(line, fakePath)
+// ---------------------------------------------------------------------------
+// 2. turn_context updates model
+// ---------------------------------------------------------------------------
+
+func TestParse_TurnContext_UpdatesModel(t *testing.T) {
+	meta, mu := newMeta()
+	// Prime with session_meta first.
+	sessionLine := []byte(`{"timestamp":"2026-05-06T10:00:00.000Z","type":"session_meta","payload":{"id":"sid-abc","cwd":"/Users/dev/proj"}}`)
+	if _, err := parseLine(sessionLine, fakePath, meta, mu); err != nil {
+		t.Fatalf("session_meta parse: %v", err)
+	}
+
+	contextLine := []byte(`{"timestamp":"2026-05-06T10:00:01.000Z","type":"turn_context","payload":{"model":"gpt-5","cwd":"/Users/dev/proj"}}`)
+	msg, err := parseLine(contextLine, fakePath, meta, mu)
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("turn_context parse: %v", err)
+	}
+	if msg != nil {
+		t.Fatalf("expected nil message for turn_context, got %+v", msg)
+	}
+	if meta.model != "gpt-5" {
+		t.Errorf("model: got %q, want gpt-5", meta.model)
+	}
+	// Ensure session_meta's cwd was not overwritten.
+	if meta.projectPath != "/Users/dev/proj" {
+		t.Errorf("projectPath should remain from session_meta, got %q", meta.projectPath)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 3. User message emits correct Message
+// ---------------------------------------------------------------------------
+
+func TestParse_UserMessage(t *testing.T) {
+	meta, mu := newMeta()
+	// Set state via session_meta then turn_context.
+	sessionLine := []byte(`{"timestamp":"2026-05-06T10:00:00.000Z","type":"session_meta","payload":{"id":"sess-user-01","cwd":"/Users/dev/userproj"}}`)
+	if _, err := parseLine(sessionLine, fakePath, meta, mu); err != nil {
+		t.Fatalf("session_meta: %v", err)
+	}
+	ctxLine := []byte(`{"timestamp":"2026-05-06T10:00:01.000Z","type":"turn_context","payload":{"model":"gpt-5-mini","cwd":"/Users/dev/userproj"}}`)
+	if _, err := parseLine(ctxLine, fakePath, meta, mu); err != nil {
+		t.Fatalf("turn_context: %v", err)
+	}
+
+	userLine := []byte(`{"timestamp":"2026-05-06T10:00:02.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Hello, fix the bug"}]}}`)
+	msg, err := parseLine(userLine, fakePath, meta, mu)
+	if err != nil {
+		t.Fatalf("user message: %v", err)
+	}
+	if msg == nil {
+		t.Fatal("expected non-nil message for user message")
 	}
 	if msg.Role != connectors.RoleUser {
 		t.Errorf("role: got %q, want %q", msg.Role, connectors.RoleUser)
 	}
-	if msg.Content != "Hello world" {
-		t.Errorf("content: got %q, want %q", msg.Content, "Hello world")
+	if msg.Content != "Hello, fix the bug" {
+		t.Errorf("content: got %q, want %q", msg.Content, "Hello, fix the bug")
+	}
+	if msg.SessionID != "sess-user-01" {
+		t.Errorf("session_id: got %q, want sess-user-01", msg.SessionID)
+	}
+	if msg.ProjectPath != "/Users/dev/userproj" {
+		t.Errorf("project_path: got %q, want /Users/dev/userproj", msg.ProjectPath)
+	}
+	if msg.Model != "gpt-5-mini" {
+		t.Errorf("model: got %q, want gpt-5-mini", msg.Model)
+	}
+	if msg.CLI != connectors.CLICodex {
+		t.Errorf("cli: got %q, want %q", msg.CLI, connectors.CLICodex)
+	}
+	if msg.Ts == 0 {
+		t.Error("ts should be non-zero")
+	}
+	if msg.ID == "" {
+		t.Error("id should be non-empty")
 	}
 }
 
-// TestParse_Output verifies output (assistant) lines.
-func TestParse_Output(t *testing.T) {
-	line := []byte(`{"type":"output","session_id":"cx-001","role":"assistant","content":"Hi there","model":"gpt-5","timestamp":"2026-05-06T10:00:08.000Z","usage":{"prompt_tokens":95,"completion_tokens":118,"total_tokens":213}}`)
-	msg, err := ParseLine(line, fakePath)
+// ---------------------------------------------------------------------------
+// 4. Assistant message (output_text)
+// ---------------------------------------------------------------------------
+
+func TestParse_AssistantMessage(t *testing.T) {
+	meta, mu := newMeta()
+	sessionLine := []byte(`{"timestamp":"2026-05-06T10:00:00.000Z","type":"session_meta","payload":{"id":"sess-asst-01","cwd":"/Users/dev/asstproj"}}`)
+	if _, err := parseLine(sessionLine, fakePath, meta, mu); err != nil {
+		t.Fatalf("session_meta: %v", err)
+	}
+	ctxLine := []byte(`{"timestamp":"2026-05-06T10:00:01.000Z","type":"turn_context","payload":{"model":"gpt-5","cwd":"/Users/dev/asstproj"}}`)
+	if _, err := parseLine(ctxLine, fakePath, meta, mu); err != nil {
+		t.Fatalf("turn_context: %v", err)
+	}
+
+	asstLine := []byte(`{"timestamp":"2026-05-06T10:00:02.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"I found the bug on line 42."}]}}`)
+	msg, err := parseLine(asstLine, fakePath, meta, mu)
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("assistant message: %v", err)
+	}
+	if msg == nil {
+		t.Fatal("expected non-nil message")
 	}
 	if msg.Role != connectors.RoleAssistant {
 		t.Errorf("role: got %q, want %q", msg.Role, connectors.RoleAssistant)
 	}
+	if msg.Content != "I found the bug on line 42." {
+		t.Errorf("content: got %q", msg.Content)
+	}
 	if msg.Model != "gpt-5" {
 		t.Errorf("model: got %q, want gpt-5", msg.Model)
 	}
-	if msg.Content != "Hi there" {
-		t.Errorf("content: got %q, want %q", msg.Content, "Hi there")
-	}
 }
 
-// TestParse_TokenExtraction verifies that usage.prompt_tokens and
-// usage.completion_tokens are mapped to Message.TokensIn / TokensOut.
-func TestParse_TokenExtraction(t *testing.T) {
-	line := []byte(`{"type":"output","session_id":"cx-001","content":"answer","model":"gpt-5","timestamp":"2026-05-06T10:00:08.000Z","usage":{"prompt_tokens":95,"completion_tokens":118,"total_tokens":213}}`)
-	msg, err := ParseLine(line, fakePath)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if msg.TokensIn != 95 {
-		t.Errorf("tokens_in: got %d, want 95", msg.TokensIn)
-	}
-	if msg.TokensOut != 118 {
-		t.Errorf("tokens_out: got %d, want 118", msg.TokensOut)
-	}
-}
+// ---------------------------------------------------------------------------
+// 5. function_call emits ToolCalls
+// ---------------------------------------------------------------------------
 
-// TestParse_FunctionCall verifies function_call lines produce tool messages
-// with a populated ToolCalls slice.
-func TestParse_FunctionCall(t *testing.T) {
-	line := []byte(`{"type":"function_call","session_id":"cx-002","call_id":"cx-call-001","name":"shell","arguments":{"command":"ls -la"},"timestamp":"2026-05-06T11:00:07.000Z"}`)
-	msg, err := ParseLine(line, fakePath)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+func TestParse_FunctionCall_Emits(t *testing.T) {
+	meta, mu := newMeta()
+	sessionLine := []byte(`{"timestamp":"2026-05-06T10:00:00.000Z","type":"session_meta","payload":{"id":"sess-fc-01","cwd":"/Users/dev/fcproj"}}`)
+	if _, err := parseLine(sessionLine, fakePath, meta, mu); err != nil {
+		t.Fatalf("session_meta: %v", err)
 	}
-	if msg.Role != connectors.RoleTool {
-		t.Errorf("role: got %q, want %q", msg.Role, connectors.RoleTool)
+
+	fcLine := []byte(`{"timestamp":"2026-05-06T10:00:03.000Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"ls -la\"}","call_id":"call_abc123"}}`)
+	msg, err := parseLine(fcLine, fakePath, meta, mu)
+	if err != nil {
+		t.Fatalf("function_call: %v", err)
+	}
+	if msg == nil {
+		t.Fatal("expected non-nil message for function_call")
+	}
+	if msg.Role != connectors.RoleAssistant {
+		t.Errorf("role: got %q, want %q", msg.Role, connectors.RoleAssistant)
 	}
 	if len(msg.ToolCalls) != 1 {
 		t.Fatalf("tool_calls len: got %d, want 1", len(msg.ToolCalls))
 	}
 	tc := msg.ToolCalls[0]
-	if tc.ID != "cx-call-001" {
-		t.Errorf("tool_call id: got %q, want cx-call-001", tc.ID)
+	if tc.ID != "call_abc123" {
+		t.Errorf("tool call id: got %q, want call_abc123", tc.ID)
 	}
-	if tc.Name != "shell" {
-		t.Errorf("tool_call name: got %q, want shell", tc.Name)
+	if tc.Name != "exec_command" {
+		t.Errorf("tool call name: got %q, want exec_command", tc.Name)
+	}
+	if tc.Input != `{"cmd":"ls -la"}` {
+		t.Errorf("tool call input: got %q", tc.Input)
 	}
 }
 
-// TestParse_FunctionCallOutput verifies function_call_output lines.
-func TestParse_FunctionCallOutput(t *testing.T) {
-	line := []byte(`{"type":"function_call_output","session_id":"cx-002","call_id":"cx-call-001","output":"total 0\ndrwxr-xr-x  2 dev dev 40 Jan  1 00:00 .","timestamp":"2026-05-06T11:00:08.000Z"}`)
-	msg, err := ParseLine(line, fakePath)
+// ---------------------------------------------------------------------------
+// 6. function_call_output emits ToolResults
+// ---------------------------------------------------------------------------
+
+func TestParse_FunctionCallOutput_Emits(t *testing.T) {
+	meta, mu := newMeta()
+	sessionLine := []byte(`{"timestamp":"2026-05-06T10:00:00.000Z","type":"session_meta","payload":{"id":"sess-fco-01","cwd":"/Users/dev/fcoproj"}}`)
+	if _, err := parseLine(sessionLine, fakePath, meta, mu); err != nil {
+		t.Fatalf("session_meta: %v", err)
+	}
+
+	fcoLine := []byte(`{"timestamp":"2026-05-06T10:00:04.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call_abc123","output":"total 0\ndrwxr-xr-x 2 dev staff 64 May 6 10:00 ."}}`)
+	msg, err := parseLine(fcoLine, fakePath, meta, mu)
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("function_call_output: %v", err)
+	}
+	if msg == nil {
+		t.Fatal("expected non-nil message for function_call_output")
 	}
 	if msg.Role != connectors.RoleTool {
 		t.Errorf("role: got %q, want %q", msg.Role, connectors.RoleTool)
@@ -119,59 +237,88 @@ func TestParse_FunctionCallOutput(t *testing.T) {
 		t.Fatalf("tool_results len: got %d, want 1", len(msg.ToolResults))
 	}
 	tr := msg.ToolResults[0]
-	if tr.ID != "cx-call-001" {
-		t.Errorf("tool_result id: got %q, want cx-call-001", tr.ID)
+	if tr.ID != "call_abc123" {
+		t.Errorf("tool_result id: got %q, want call_abc123", tr.ID)
+	}
+	if tr.Output == "" {
+		t.Error("tool_result output should not be empty")
+	}
+	if msg.Content != tr.Output {
+		t.Errorf("message content should match tool_result output")
 	}
 }
 
-// TestParse_CompactEvent verifies the synthetic compact_event line is
-// parsed as a system message without panicking.
-func TestParse_CompactEvent(t *testing.T) {
-	line := []byte(`{"type":"compact_event","session_id":"cx-003","before_tokens":18420,"after_tokens":2180,"summary":"Working on webhookservice.","timestamp":"2026-05-06T12:15:02.000Z"}`)
-	msg, err := ParseLine(line, fakePath)
+// ---------------------------------------------------------------------------
+// 7. reasoning is skipped
+// ---------------------------------------------------------------------------
+
+func TestParse_Reasoning_Skipped(t *testing.T) {
+	meta, mu := newMeta()
+	sessionLine := []byte(`{"timestamp":"2026-05-06T10:00:00.000Z","type":"session_meta","payload":{"id":"sess-r-01","cwd":"/Users/dev/rproj"}}`)
+	if _, err := parseLine(sessionLine, fakePath, meta, mu); err != nil {
+		t.Fatalf("session_meta: %v", err)
+	}
+
+	reasoningLine := []byte(`{"timestamp":"2026-05-06T10:00:02.000Z","type":"response_item","payload":{"type":"reasoning","summary":[],"content":null,"encrypted_content":"REDACTED"}}`)
+	msg, err := parseLine(reasoningLine, fakePath, meta, mu)
+	if err != nil {
+		t.Fatalf("unexpected error for reasoning: %v", err)
+	}
+	if msg != nil {
+		t.Fatalf("expected nil for reasoning, got %+v", msg)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 8. event_msg (any subtype) is skipped
+// ---------------------------------------------------------------------------
+
+func TestParse_EventMsg_Skipped(t *testing.T) {
+	meta, mu := newMeta()
+	subtypes := []string{
+		`{"timestamp":"2026-05-06T10:00:01.000Z","type":"event_msg","payload":{"type":"token_count","info":null}}`,
+		`{"timestamp":"2026-05-06T10:00:02.000Z","type":"event_msg","payload":{"type":"agent_message","message":"hello"}}`,
+		`{"timestamp":"2026-05-06T10:00:03.000Z","type":"event_msg","payload":{"type":"task_started"}}`,
+		`{"timestamp":"2026-05-06T10:00:04.000Z","type":"event_msg","payload":{"type":"task_complete"}}`,
+		`{"timestamp":"2026-05-06T10:00:05.000Z","type":"event_msg","payload":{"type":"turn_aborted"}}`,
+		`{"timestamp":"2026-05-06T10:00:06.000Z","type":"event_msg","payload":{"type":"error","message":"something failed"}}`,
+	}
+	for _, raw := range subtypes {
+		msg, err := parseLine([]byte(raw), fakePath, meta, mu)
+		if err != nil {
+			t.Errorf("event_msg should not error: %v", err)
+		}
+		if msg != nil {
+			t.Errorf("event_msg should return nil, got %+v (line: %s)", msg, raw[:60])
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 9. Message before session_meta returns (nil, nil) without panic
+// ---------------------------------------------------------------------------
+
+func TestParse_MessageBeforeSessionMeta_Skipped(t *testing.T) {
+	meta, mu := newMeta() // fresh meta — no session_meta seen yet
+	// Attempt to parse an assistant message before any session_meta.
+	asstLine := []byte(`{"timestamp":"2026-05-06T10:00:02.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Early response"}]}}`)
+	msg, err := parseLine(asstLine, fakePath, meta, mu)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if msg.Role != connectors.RoleSystem {
-		t.Errorf("role: got %q, want %q", msg.Role, connectors.RoleSystem)
-	}
-	// Content should mention the token counts.
-	if msg.Content == "" {
-		t.Error("content should not be empty for compact_event")
+	if msg != nil {
+		t.Fatalf("expected nil for message before session_meta, got %+v", msg)
 	}
 }
 
-// TestParse_UnknownField_Tolerated verifies that extra unknown fields do not
-// cause parse errors (forward-compatibility requirement).
-func TestParse_UnknownField_Tolerated(t *testing.T) {
-	line := []byte(`{"type":"output","session_id":"cx-001","content":"ok","model":"gpt-5","timestamp":"2026-05-06T10:00:08.000Z","future_field":"some_value","nested":{"a":1}}`)
-	msg, err := ParseLine(line, fakePath)
-	if err != nil {
-		t.Fatalf("unexpected error on unknown fields: %v", err)
-	}
-	if msg == nil {
-		t.Fatal("expected non-nil message")
-	}
-}
+// ---------------------------------------------------------------------------
+// 10. Malformed JSON returns error
+// ---------------------------------------------------------------------------
 
-// TestParse_UnknownType verifies that a line with an unknown type value is
-// returned as a system message rather than causing a panic or error.
-func TestParse_UnknownType(t *testing.T) {
-	line := []byte(`{"type":"totally_new_type","session_id":"cx-001","content":"mystery","timestamp":"2026-05-06T10:00:08.000Z"}`)
-	msg, err := ParseLine(line, fakePath)
-	if err != nil {
-		t.Fatalf("unexpected error on unknown type: %v", err)
-	}
-	if msg.Role != connectors.RoleSystem {
-		t.Errorf("unknown type should map to RoleSystem, got %q", msg.Role)
-	}
-}
-
-// TestParse_MalformedLine_Skipped verifies that non-JSON input returns an
-// error and does not panic.
-func TestParse_MalformedLine_Skipped(t *testing.T) {
-	line := []byte(`this is not json {{{`)
-	msg, err := ParseLine(line, fakePath)
+func TestParse_MalformedLine_Returns_Error(t *testing.T) {
+	meta, mu := newMeta()
+	line := []byte(`this is not {{{ json`)
+	msg, err := parseLine(line, fakePath, meta, mu)
 	if err == nil {
 		t.Fatal("expected error for malformed JSON, got nil")
 	}
@@ -180,111 +327,423 @@ func TestParse_MalformedLine_Skipped(t *testing.T) {
 	}
 }
 
-// TestParse_EmptyLine_Skipped verifies that an empty line returns an error
-// rather than a nil dereference.
-func TestParse_EmptyLine_Skipped(t *testing.T) {
-	_, err := ParseLine([]byte{}, fakePath)
-	if err == nil {
-		t.Fatal("expected error for empty line")
-	}
-}
+// ---------------------------------------------------------------------------
+// 11. Real fixture file: parse all lines, collect messages, assert invariants
+// ---------------------------------------------------------------------------
 
-// TestParse_SessionIDFromPath verifies fallback when session_id is absent.
-func TestParse_SessionIDFromPath(t *testing.T) {
-	line := []byte(`{"type":"input","content":"hello","timestamp":"2026-05-06T10:00:05.000Z"}`)
-	path := "/home/dev/.codex/sessions/2026/05/06/rollout-myid.jsonl"
-	msg, err := ParseLine(line, path)
+func TestParse_RealFixtureFile(t *testing.T) {
+	fixturePath := realFixtureFilePath(t)
+	f, err := os.Open(fixturePath)
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("cannot open real fixture %s: %v", fixturePath, err)
 	}
-	if msg.SessionID != "rollout-myid" {
-		t.Errorf("session_id fallback: got %q, want rollout-myid", msg.SessionID)
-	}
-}
+	defer f.Close()
 
-// TestParse_TimestampParsing verifies ISO 8601 timestamps are converted to epoch-ms.
-func TestParse_TimestampParsing(t *testing.T) {
-	line := []byte(`{"type":"input","session_id":"cx-001","content":"x","timestamp":"2026-05-06T10:00:05.000Z"}`)
-	msg, err := ParseLine(line, fakePath)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	// 2026-05-06T10:00:05.000Z in epoch-ms = 1778061605000
-	const want int64 = 1778061605000
-	if msg.Ts != want {
-		t.Errorf("ts: got %d, want %d", msg.Ts, want)
-	}
-}
+	meta, mu := newMeta()
+	scanner := bufio.NewScanner(f)
 
-// TestParse_TimestampFallback verifies that a missing timestamp still yields
-// a non-zero Ts (wall-clock fallback).
-func TestParse_TimestampFallback(t *testing.T) {
-	line := []byte(`{"type":"input","session_id":"cx-001","content":"no-ts"}`)
-	before := time.Now().UnixMilli()
-	msg, err := ParseLine(line, fakePath)
-	after := time.Now().UnixMilli()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if msg.Ts < before || msg.Ts > after {
-		t.Errorf("ts fallback out of expected range: got %d (before=%d after=%d)", msg.Ts, before, after)
-	}
-}
-
-// TestParse_TimestampRFC3339Nano verifies that RFC3339Nano timestamps parse.
-func TestParse_TimestampRFC3339Nano(t *testing.T) {
-	line := []byte(`{"type":"input","session_id":"cx-001","content":"x","timestamp":"2026-05-06T10:00:05.123456789Z"}`)
-	msg, err := ParseLine(line, fakePath)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if msg.Ts == 0 {
-		t.Error("ts should be non-zero for RFC3339Nano timestamp")
-	}
-}
-
-// TestNormalizeRole_DirectRoleFields exercises role fallback paths in
-// normalizeRole when type is empty or unrecognized.
-func TestNormalizeRole_DirectRoleFields(t *testing.T) {
-	tests := []struct {
-		role     string
-		typ      string
-		wantRole connectors.Role
-	}{
-		{"user", "", connectors.RoleUser},
-		{"assistant", "", connectors.RoleAssistant},
-		{"system", "", connectors.RoleSystem},
-		{"unknown", "unknown_type", connectors.RoleSystem},
-	}
-	for _, tt := range tests {
-		got := normalizeRole(tt.role, tt.typ)
-		if got != tt.wantRole {
-			t.Errorf("normalizeRole(%q, %q): got %q, want %q", tt.role, tt.typ, got, tt.wantRole)
-		}
-	}
-}
-
-// TestParse_FixtureSimple exercises session-001-simple.jsonl by parsing each
-// type found in the simplest fixture.
-func TestParse_FixtureSimple(t *testing.T) {
-	lines := [][]byte{
-		[]byte(`{"cwd":"/Users/dev/projects/webhookservice","model":"gpt-5","session_id":"cx-0001-0001-0001-0001-000000000001","timestamp":"2026-05-06T10:00:00.000Z","type":"session_meta"}`),
-		[]byte(`{"content":"Why does my Go webhook return 500?","role":"user","timestamp":"2026-05-06T10:00:05.000Z","type":"input"}`),
-		[]byte(`{"content":"The cause is...","model":"gpt-5","role":"assistant","timestamp":"2026-05-06T10:00:08.000Z","type":"output","usage":{"prompt_tokens":95,"completion_tokens":118,"total_tokens":213}}`),
-	}
-	wantRoles := []connectors.Role{
-		connectors.RoleSystem,
-		connectors.RoleUser,
-		connectors.RoleAssistant,
-	}
-	for i, line := range lines {
-		msg, err := ParseLine(line, fakePath)
-		if err != nil {
-			t.Errorf("line %d: unexpected error: %v", i, err)
+	var messages []*connectors.Message
+	lineNum := 0
+	for scanner.Scan() {
+		lineNum++
+		raw := scanner.Bytes()
+		if len(raw) == 0 {
 			continue
 		}
-		if msg.Role != wantRoles[i] {
-			t.Errorf("line %d role: got %q, want %q", i, msg.Role, wantRoles[i])
+		lineCopy := make([]byte, len(raw))
+		copy(lineCopy, raw)
+
+		msg, err := parseLine(lineCopy, fixturePath, meta, mu)
+		if err != nil {
+			t.Errorf("line %d: unexpected error: %v", lineNum, err)
+			continue
 		}
+		if msg != nil {
+			messages = append(messages, msg)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("scanner error: %v", err)
+	}
+
+	t.Logf("parsed %d messages from real fixture (total lines: %d)", len(messages), lineNum)
+
+	// Require at least 1 user, 1 assistant, 1 tool call, 1 tool result.
+	var userCount, asstCount, toolCallCount, toolResultCount int
+	for _, m := range messages {
+		switch m.Role {
+		case connectors.RoleUser:
+			userCount++
+		case connectors.RoleAssistant:
+			if len(m.ToolCalls) > 0 {
+				toolCallCount++
+			} else {
+				asstCount++
+			}
+		case connectors.RoleTool:
+			toolResultCount++
+		}
+		// Every message must have SessionID, ProjectPath, CLI populated.
+		if m.SessionID == "" {
+			t.Errorf("message missing SessionID: %+v", m)
+		}
+		if m.ProjectPath == "" {
+			t.Errorf("message missing ProjectPath: %+v", m)
+		}
+		if m.CLI != connectors.CLICodex {
+			t.Errorf("message CLI: got %q, want %q", m.CLI, connectors.CLICodex)
+		}
+	}
+
+	if userCount < 1 {
+		t.Errorf("expected at least 1 user message, got %d", userCount)
+	}
+	if asstCount < 1 {
+		t.Errorf("expected at least 1 assistant message, got %d", asstCount)
+	}
+	if toolCallCount < 1 {
+		t.Errorf("expected at least 1 function_call message, got %d", toolCallCount)
+	}
+	if toolResultCount < 1 {
+		t.Errorf("expected at least 1 function_call_output message, got %d", toolResultCount)
+	}
+
+	// SessionID should be consistent across all messages.
+	if len(messages) > 1 {
+		firstSID := messages[0].SessionID
+		for i, m := range messages[1:] {
+			if m.SessionID != firstSID {
+				t.Errorf("message[%d] SessionID %q != first message SessionID %q", i+1, m.SessionID, firstSID)
+			}
+		}
+	}
+
+	t.Logf("message breakdown: user=%d assistant=%d tool_calls=%d tool_results=%d total=%d",
+		userCount, asstCount, toolCallCount, toolResultCount, len(messages))
+}
+
+// ---------------------------------------------------------------------------
+// 12. Per-file state isolation: two paths don't share state
+// ---------------------------------------------------------------------------
+
+func TestParse_PerFileStateIsolation(t *testing.T) {
+	c := newConnectorForTest()
+
+	pathA := "/home/dev/.codex/sessions/2026/05/06/rollout-fileA.jsonl"
+	pathB := "/home/dev/.codex/sessions/2026/05/06/rollout-fileB.jsonl"
+
+	sessionMetaA := []byte(`{"timestamp":"2026-05-06T10:00:00.000Z","type":"session_meta","payload":{"id":"session-AAA","cwd":"/Users/dev/projectA"}}`)
+	sessionMetaB := []byte(`{"timestamp":"2026-05-06T10:00:00.000Z","type":"session_meta","payload":{"id":"session-BBB","cwd":"/Users/dev/projectB"}}`)
+
+	// Parse session_meta for each path.
+	if _, err := c.Parse(sessionMetaA, pathA); err != nil {
+		t.Fatalf("pathA session_meta: %v", err)
+	}
+	if _, err := c.Parse(sessionMetaB, pathB); err != nil {
+		t.Fatalf("pathB session_meta: %v", err)
+	}
+
+	// Now parse a user message on each path and verify isolation.
+	userMsgA := []byte(`{"timestamp":"2026-05-06T10:00:01.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Message for project A"}]}}`)
+	userMsgB := []byte(`{"timestamp":"2026-05-06T10:00:01.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Message for project B"}]}}`)
+
+	msgA, err := c.Parse(userMsgA, pathA)
+	if err != nil {
+		t.Fatalf("pathA user message: %v", err)
+	}
+	msgB, err := c.Parse(userMsgB, pathB)
+	if err != nil {
+		t.Fatalf("pathB user message: %v", err)
+	}
+
+	if msgA == nil {
+		t.Fatal("expected non-nil message for pathA")
+	}
+	if msgB == nil {
+		t.Fatal("expected non-nil message for pathB")
+	}
+
+	// SessionID must differ.
+	if msgA.SessionID == msgB.SessionID {
+		t.Errorf("state leaked: both paths got same SessionID %q", msgA.SessionID)
+	}
+	if msgA.SessionID != "session-AAA" {
+		t.Errorf("pathA SessionID: got %q, want session-AAA", msgA.SessionID)
+	}
+	if msgB.SessionID != "session-BBB" {
+		t.Errorf("pathB SessionID: got %q, want session-BBB", msgB.SessionID)
+	}
+
+	// ProjectPath must differ.
+	if msgA.ProjectPath == msgB.ProjectPath {
+		t.Errorf("state leaked: both paths got same ProjectPath %q", msgA.ProjectPath)
+	}
+	if msgA.ProjectPath != "/Users/dev/projectA" {
+		t.Errorf("pathA ProjectPath: got %q", msgA.ProjectPath)
+	}
+	if msgB.ProjectPath != "/Users/dev/projectB" {
+		t.Errorf("pathB ProjectPath: got %q", msgB.ProjectPath)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Additional: empty line returns error
+// ---------------------------------------------------------------------------
+
+func TestParse_EmptyLine_Error(t *testing.T) {
+	meta, mu := newMeta()
+	_, err := parseLine([]byte{}, fakePath, meta, mu)
+	if err == nil {
+		t.Fatal("expected error for empty line, got nil")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Additional: developer role message is skipped
+// ---------------------------------------------------------------------------
+
+func TestParse_DeveloperMessage_Skipped(t *testing.T) {
+	meta, mu := newMeta()
+	sessionLine := []byte(`{"timestamp":"2026-05-06T10:00:00.000Z","type":"session_meta","payload":{"id":"sess-dev-01","cwd":"/Users/dev/devproj"}}`)
+	if _, err := parseLine(sessionLine, fakePath, meta, mu); err != nil {
+		t.Fatalf("session_meta: %v", err)
+	}
+	devLine := []byte(`{"timestamp":"2026-05-06T10:00:01.000Z","type":"response_item","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":"System instructions here"}]}}`)
+	msg, err := parseLine(devLine, fakePath, meta, mu)
+	if err != nil {
+		t.Fatalf("unexpected error for developer message: %v", err)
+	}
+	if msg != nil {
+		t.Fatalf("expected nil for developer message, got %+v", msg)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Additional: unknown top-level type is skipped without error
+// ---------------------------------------------------------------------------
+
+func TestParse_UnknownTopLevelType_Skipped(t *testing.T) {
+	meta, mu := newMeta()
+	line := []byte(`{"timestamp":"2026-05-06T10:00:00.000Z","type":"future_type_v2","payload":{"data":"xyz"}}`)
+	msg, err := parseLine(line, fakePath, meta, mu)
+	if err != nil {
+		t.Fatalf("unexpected error for unknown type: %v", err)
+	}
+	if msg != nil {
+		t.Fatalf("expected nil for unknown type, got %+v", msg)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Additional: Connector.Parse delegates correctly and maintains per-file state
+// ---------------------------------------------------------------------------
+
+func TestConnector_Parse_Delegates(t *testing.T) {
+	c := newConnectorForTest()
+	// Without session_meta, message-emitting lines should return nil.
+	line := []byte(`{"timestamp":"2026-05-06T10:00:01.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}}`)
+	msg, err := c.Parse(line, fakePath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if msg != nil {
+		t.Fatalf("expected nil before session_meta, got %+v", msg)
+	}
+
+	// After session_meta, same message path should emit.
+	sessionLine := []byte(`{"timestamp":"2026-05-06T10:00:00.000Z","type":"session_meta","payload":{"id":"cx-delegate","cwd":"/Users/dev/dp"}}`)
+	if _, err := c.Parse(sessionLine, fakePath); err != nil {
+		t.Fatalf("session_meta: %v", err)
+	}
+	msg2, err := c.Parse(line, fakePath)
+	if err != nil {
+		t.Fatalf("unexpected error after session_meta: %v", err)
+	}
+	if msg2 == nil {
+		t.Fatal("expected non-nil message after session_meta")
+	}
+	if msg2.Content != "hi" {
+		t.Errorf("content: got %q, want hi", msg2.Content)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Additional: DropPath clears per-file state
+// ---------------------------------------------------------------------------
+
+func TestConnector_DropPath(t *testing.T) {
+	c := newConnectorForTest()
+	path := "/tmp/test.jsonl"
+	sessionLine := []byte(`{"timestamp":"2026-05-06T10:00:00.000Z","type":"session_meta","payload":{"id":"cx-drop","cwd":"/Users/dev/dropproj"}}`)
+	if _, err := c.Parse(sessionLine, path); err != nil {
+		t.Fatalf("session_meta: %v", err)
+	}
+	// State should exist.
+	c.mu.Lock()
+	_, exists := c.state[path]
+	c.mu.Unlock()
+	if !exists {
+		t.Fatal("state should exist after session_meta")
+	}
+
+	c.DropPath(path)
+
+	// State should be gone.
+	c.mu.Lock()
+	_, exists = c.state[path]
+	c.mu.Unlock()
+	if exists {
+		t.Fatal("state should be removed after DropPath")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Additional: user message with only environment context text is skipped
+// (content after joinText is empty)
+// ---------------------------------------------------------------------------
+
+func TestParse_UserMessage_EmptyContent_Skipped(t *testing.T) {
+	meta, mu := newMeta()
+	sessionLine := []byte(`{"timestamp":"2026-05-06T10:00:00.000Z","type":"session_meta","payload":{"id":"sess-empty","cwd":"/Users/dev/emptyproj"}}`)
+	if _, err := parseLine(sessionLine, fakePath, meta, mu); err != nil {
+		t.Fatalf("session_meta: %v", err)
+	}
+	// A user message whose only content items are of type other than input_text.
+	userLine := []byte(`{"timestamp":"2026-05-06T10:00:01.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"other_type","text":"skip me"}]}}`)
+	msg, err := parseLine(userLine, fakePath, meta, mu)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if msg != nil {
+		t.Fatalf("expected nil for empty-content user message, got %+v", msg)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Coverage boosters: exercise uncovered branches
+// ---------------------------------------------------------------------------
+
+// TestParse_FunctionCall_BeforeSessionMeta_Skipped covers the early-exit
+// path in handleFunctionCall when no session_meta has been seen.
+func TestParse_FunctionCall_BeforeSessionMeta_Skipped(t *testing.T) {
+	meta, mu := newMeta()
+	fcLine := []byte(`{"timestamp":"2026-05-06T10:00:03.000Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{}","call_id":"call_early"}}`)
+	msg, err := parseLine(fcLine, fakePath, meta, mu)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if msg != nil {
+		t.Fatalf("expected nil for function_call before session_meta, got %+v", msg)
+	}
+}
+
+// TestParse_FunctionCallOutput_BeforeSessionMeta_Skipped covers the early-exit
+// path in handleFunctionCallOutput when no session_meta has been seen.
+func TestParse_FunctionCallOutput_BeforeSessionMeta_Skipped(t *testing.T) {
+	meta, mu := newMeta()
+	fcoLine := []byte(`{"timestamp":"2026-05-06T10:00:04.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call_early","output":"result"}}`)
+	msg, err := parseLine(fcoLine, fakePath, meta, mu)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if msg != nil {
+		t.Fatalf("expected nil for function_call_output before session_meta, got %+v", msg)
+	}
+}
+
+// TestParse_UnknownResponseItemType_Skipped covers the default case in
+// handleResponseItem for an unknown payload.type.
+func TestParse_UnknownResponseItemType_Skipped(t *testing.T) {
+	meta, mu := newMeta()
+	sessionLine := []byte(`{"timestamp":"2026-05-06T10:00:00.000Z","type":"session_meta","payload":{"id":"sess-unknown-ri","cwd":"/Users/dev/proj"}}`)
+	if _, err := parseLine(sessionLine, fakePath, meta, mu); err != nil {
+		t.Fatalf("session_meta: %v", err)
+	}
+	unknownLine := []byte(`{"timestamp":"2026-05-06T10:00:01.000Z","type":"response_item","payload":{"type":"future_response_type","data":"ignored"}}`)
+	msg, err := parseLine(unknownLine, fakePath, meta, mu)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if msg != nil {
+		t.Fatalf("expected nil for unknown response_item type, got %+v", msg)
+	}
+}
+
+// TestParse_UnknownMessageRole_Skipped covers the default case in handleMessage
+// for an unknown role (not user, assistant, or developer).
+func TestParse_UnknownMessageRole_Skipped(t *testing.T) {
+	meta, mu := newMeta()
+	sessionLine := []byte(`{"timestamp":"2026-05-06T10:00:00.000Z","type":"session_meta","payload":{"id":"sess-role","cwd":"/Users/dev/proj"}}`)
+	if _, err := parseLine(sessionLine, fakePath, meta, mu); err != nil {
+		t.Fatalf("session_meta: %v", err)
+	}
+	line := []byte(`{"timestamp":"2026-05-06T10:00:01.000Z","type":"response_item","payload":{"type":"message","role":"system","content":[{"type":"input_text","text":"system msg"}]}}`)
+	msg, err := parseLine(line, fakePath, meta, mu)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if msg != nil {
+		t.Fatalf("expected nil for unknown role, got %+v", msg)
+	}
+}
+
+// TestParse_TurnContext_EmptyModel_NoUpdate covers the early-return path
+// in handleTurnContext when payload.model is empty.
+func TestParse_TurnContext_EmptyModel_NoUpdate(t *testing.T) {
+	meta, mu := newMeta()
+	sessionLine := []byte(`{"timestamp":"2026-05-06T10:00:00.000Z","type":"session_meta","payload":{"id":"sess-em","cwd":"/Users/dev/proj"}}`)
+	if _, err := parseLine(sessionLine, fakePath, meta, mu); err != nil {
+		t.Fatalf("session_meta: %v", err)
+	}
+	// turn_context without a model field.
+	ctxLine := []byte(`{"timestamp":"2026-05-06T10:00:01.000Z","type":"turn_context","payload":{"cwd":"/Users/dev/proj"}}`)
+	msg, err := parseLine(ctxLine, fakePath, meta, mu)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if msg != nil {
+		t.Fatalf("expected nil for turn_context, got %+v", msg)
+	}
+	// Model should remain empty since turn_context had no model.
+	if meta.model != "" {
+		t.Errorf("model should remain empty, got %q", meta.model)
+	}
+}
+
+// TestParse_Timestamp_MsFormat covers the millisecond-format timestamp path.
+func TestParse_Timestamp_MsFormat(t *testing.T) {
+	meta, mu := newMeta()
+	sessionLine := []byte(`{"timestamp":"2026-05-06T10:00:00.000Z","type":"session_meta","payload":{"id":"sess-ts","cwd":"/Users/dev/proj"}}`)
+	if _, err := parseLine(sessionLine, fakePath, meta, mu); err != nil {
+		t.Fatalf("session_meta: %v", err)
+	}
+	// Use the "2006-01-02T15:04:05.000Z" format (no timezone offset, only Z).
+	line := []byte(`{"timestamp":"2026-05-06T10:00:05.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"ts test"}]}}`)
+	msg, err := parseLine(line, fakePath, meta, mu)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if msg == nil {
+		t.Fatal("expected non-nil message")
+	}
+	if msg.Ts == 0 {
+		t.Error("Ts should be non-zero")
+	}
+}
+
+// TestParse_MissingTimestamp_FallsBackToWallClock covers the wall-clock fallback.
+func TestParse_MissingTimestamp_FallsBackToWallClock(t *testing.T) {
+	meta, mu := newMeta()
+	sessionLine := []byte(`{"timestamp":"","type":"session_meta","payload":{"id":"sess-no-ts","cwd":"/Users/dev/proj"}}`)
+	msg, err := parseLine(sessionLine, fakePath, meta, mu)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if msg != nil {
+		t.Fatalf("expected nil for session_meta, got %+v", msg)
+	}
+	// meta should still be updated even without a timestamp.
+	if meta.sessionID != "sess-no-ts" {
+		t.Errorf("session_id: got %q", meta.sessionID)
 	}
 }

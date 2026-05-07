@@ -23,12 +23,21 @@ import (
 	"github.com/mohitpatell/agentdeck/internal/connectors"
 )
 
+// fileMeta holds the per-file state accumulated while parsing a JSONL file.
+// Fields are populated from session_meta and turn_context lines.
+type fileMeta struct {
+	sessionID   string
+	projectPath string
+	model       string
+}
+
 // Connector implements connectors.Connector for the Codex CLI.
 type Connector struct {
 	root string
 
-	// mu guards state used by Watch (tails, watched dirs).
+	// mu guards state (per-file metadata) and the watcher maps.
 	mu      sync.Mutex
+	state   map[string]*fileMeta // path → accumulated metadata
 	_tails  map[string]*tailState
 	_watched map[string]struct{}
 }
@@ -42,6 +51,7 @@ var _ connectors.Connector = (*Connector)(nil)
 func New(root string) *Connector {
 	return &Connector{
 		root:     root,
+		state:    make(map[string]*fileMeta),
 		_tails:   make(map[string]*tailState),
 		_watched: make(map[string]struct{}),
 	}
@@ -79,10 +89,31 @@ func (c *Connector) Watch(ctx context.Context, events chan<- connectors.RawEvent
 }
 
 // Parse converts a single raw JSONL line into a canonical connectors.Message.
+// It uses per-file state (keyed by path) to accumulate session metadata from
+// session_meta and turn_context lines, then applies that metadata to message-
+// emitting lines.
+//
 // Unknown fields are silently ignored; malformed JSON returns a non-nil error
 // and the caller should skip the line.
 func (c *Connector) Parse(line []byte, path string) (*connectors.Message, error) {
-	return ParseLine(line, path)
+	c.mu.Lock()
+	meta, ok := c.state[path]
+	if !ok {
+		meta = &fileMeta{}
+		c.state[path] = meta
+	}
+	c.mu.Unlock()
+
+	return parseLine(line, path, meta, &c.mu)
+}
+
+// DropPath removes per-file state for path. Call this when the watcher
+// detects that a file has been removed or when replaying a file from byte 0
+// (warm-up re-read) to force a fresh re-parse of session_meta.
+func (c *Connector) DropPath(path string) {
+	c.mu.Lock()
+	delete(c.state, path)
+	c.mu.Unlock()
 }
 
 // Pricing returns an empty pricing table. Codex does not embed pricing hints
