@@ -46,20 +46,25 @@
     session ? (session.project_path.split('/').filter(Boolean).pop() ?? session.project_path) : ''
   );
 
-  // Issue 4: count hidden messages (tool + empty system)
-  const hiddenCount = $derived(
-    messages.filter(
-      (m) => m.role === 'tool' || (m.role === 'system' && !m.content?.trim())
-    ).length
-  );
+  // A "pure tool-call" assistant message has no text content but carries
+  // tool_use blocks (Claude Code records each tool invocation as an assistant
+  // message containing only tool_use content blocks). Hide these by default
+  // alongside role=tool and empty system rows.
+  function isPureToolCallAssistant(m: Message): boolean {
+    return m.role === 'assistant'
+      && !m.content?.trim()
+      && (m.tool_calls?.length ?? 0) > 0;
+  }
+  function isHiddenByDefault(m: Message): boolean {
+    return m.role === 'tool'
+      || (m.role === 'system' && !m.content?.trim())
+      || isPureToolCallAssistant(m);
+  }
 
-  // Issue 4: filtered visible messages
+  const hiddenCount = $derived(messages.filter(isHiddenByDefault).length);
+
   const visibleMessages = $derived(
-    showTools
-      ? messages
-      : messages.filter(
-          (m) => m.role !== 'tool' && !(m.role === 'system' && !m.content?.trim())
-        )
+    showTools ? messages : messages.filter((m) => !isHiddenByDefault(m))
   );
 
   // Helper to safely parse JSON for tool inputs
@@ -282,7 +287,26 @@
           <!-- Row body -->
           <div style="padding: 10px 12px;">
 
-            {#if m.role === 'tool' && (m.tool_calls?.length ?? 0) > 0}
+            {#if m.role === 'assistant' && (m.tool_calls?.length ?? 0) > 0}
+              <!-- Assistant message that includes tool_use blocks. Render the
+                   tool calls. If there is also text content alongside the
+                   tool_use blocks, render the text below. (When the page
+                   toggle is OFF and content is empty, this row is filtered
+                   out by isPureToolCallAssistant; this branch only fires when
+                   the user opted in to seeing tool calls.) -->
+              {#each m.tool_calls ?? [] as tc (tc.id)}
+                <div style="margin-bottom: {(m.tool_calls?.length ?? 0) > 1 ? '10px' : '0'};">
+                  <div style="font-size: 11px; font-weight: 600; color: var(--ad-fg-2); font-family: var(--ad-font-mono); margin-bottom: 6px;">
+                    → {tc.name}
+                  </div>
+                  <pre style="margin: 0; font-family: var(--ad-font-mono); font-size: 11px; color: var(--ad-fg); white-space: pre-wrap; line-height: 1.5; background: var(--ad-bg); padding: 8px 10px; border-radius: var(--ad-r-sm); border: 1px solid var(--ad-border-soft);">{safeParseJson(tc.input || '{}')}</pre>
+                </div>
+              {/each}
+              {#if m.content?.trim()}
+                <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--ad-border-soft); font-size: 13px; line-height: 1.55; white-space: pre-wrap;">{m.content}</div>
+              {/if}
+
+            {:else if m.role === 'tool' && (m.tool_calls?.length ?? 0) > 0}
               <!-- Issue 2: tool_use — show tool name + pretty-printed input -->
               {#each m.tool_calls ?? [] as tc (tc.id)}
                 <div style="margin-bottom: {(m.tool_calls?.length ?? 0) > 1 ? '10px' : '0'};">
