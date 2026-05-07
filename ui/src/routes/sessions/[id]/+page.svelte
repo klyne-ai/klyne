@@ -5,7 +5,7 @@
   import { fetchSession, fetchMessages, fetchRestore } from '$lib/api.js';
   import { subscribe } from '$lib/sse.js';
   import { kfmt, costFmt, relAgo } from '$lib/format.js';
-  import type { Session, Message, RestoreResponse } from '$lib/types.js';
+  import type { Session, Message, RestoreResponse, ToolCall, ToolResult } from '$lib/types.js';
   import CliBadge from '$lib/ui/CliBadge.svelte';
   import StatusBadge from '$lib/ui/StatusBadge.svelte';
 
@@ -18,10 +18,65 @@
   let loadError = $state<string | null>(null);
   let copyFeedback = $state(false);
 
+  // Issue 4: page-level toggle for tool/system messages, default OFF
+  let showTools = $state(false);
+
+  // Issue 3: per-message expanded state keyed by message id
+  let expandedIds = $state<Set<string>>(new Set());
+
+  function toggleExpanded(id: string): void {
+    const next = new Set(expandedIds);
+    if (next.has(id)) {
+      next.delete(id);
+    } else {
+      next.add(id);
+    }
+    expandedIds = next;
+  }
+
+  // Heuristic: messages with >=6 newlines OR >=480 chars are considered "long"
+  function isLong(text: string): boolean {
+    if (!text) return false;
+    const newlineCount = (text.match(/\n/g) || []).length;
+    return newlineCount >= 6 || text.length >= 480;
+  }
+
   const isCompacted = $derived(session?.status === 'compacted');
   const projectName = $derived(
     session ? (session.project_path.split('/').filter(Boolean).pop() ?? session.project_path) : ''
   );
+
+  // Issue 4: count hidden messages (tool + empty system)
+  const hiddenCount = $derived(
+    messages.filter(
+      (m) => m.role === 'tool' || (m.role === 'system' && !m.content?.trim())
+    ).length
+  );
+
+  // Issue 4: filtered visible messages
+  const visibleMessages = $derived(
+    showTools
+      ? messages
+      : messages.filter(
+          (m) => m.role !== 'tool' && !(m.role === 'system' && !m.content?.trim())
+        )
+  );
+
+  // Helper to safely parse JSON for tool inputs
+  function safeParseJson(raw: string): string {
+    try {
+      return JSON.stringify(JSON.parse(raw), null, 2);
+    } catch {
+      return raw;
+    }
+  }
+
+  // Truncate tool output to first N lines
+  function truncateLines(text: string, maxLines: number): string {
+    const lines = text.split('\n');
+    if (lines.length <= maxLines) return text;
+    return lines.slice(0, maxLines).join('\n') + '\n…';
+  }
 
   async function loadData(id: string): Promise<void> {
     if (!id) return;
@@ -158,34 +213,118 @@
       </div>
     {/if}
 
+    <!-- Issue 4: Tool calls toggle bar -->
+    <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 10px; padding: 8px 12px; background: var(--ad-bg-2); border: 1px solid var(--ad-border-soft); border-radius: var(--ad-r-sm);">
+      <label style="display: inline-flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; user-select: none;">
+        <input type="checkbox" bind:checked={showTools} style="cursor: pointer;" />
+        <span>Show tool calls + system messages</span>
+      </label>
+      <span class="ad-mono ad-faint" style="font-size: 11px;">
+        {#if !showTools && hiddenCount > 0}
+          {hiddenCount} hidden
+        {:else if showTools}
+          Showing all
+        {/if}
+      </span>
+    </div>
+
     <!-- Messages -->
     <div class="ad-stack" style="gap: 8px;">
-      {#each messages as m}
+      {#each visibleMessages as m (m.id)}
+        {@const cliLabel = session?.cli === 'codex' ? 'codex' : 'claude'}
+        {@const cliColor = session?.cli === 'codex' ? 'var(--ad-codex)' : 'var(--ad-claude)'}
         {@const palette = m.role === 'user'
-          ? { lab: 'you', color: 'var(--ad-fg)', bg: 'var(--ad-panel)' }
+          ? { lab: 'you',     color: 'var(--ad-fg)',      bg: 'var(--ad-panel)' }
           : m.role === 'assistant'
-          ? { lab: 'claude', color: 'var(--ad-claude)', bg: 'var(--ad-panel)' }
+          ? { lab: cliLabel,  color: cliColor,            bg: 'var(--ad-panel)' }
           : m.role === 'tool'
-          ? { lab: m.tool_calls?.[0]?.name ?? 'tool', color: 'var(--ad-fg-2)', bg: 'var(--ad-bg-2)' }
+          ? { lab: m.tool_calls?.[0]?.name ?? m.tool_results?.[0]?.id ?? 'tool', color: 'var(--ad-fg-2)', bg: 'var(--ad-bg-2)' }
           : m.role === 'system'
-          ? { lab: 'system', color: 'var(--ad-compact)', bg: 'var(--ad-compact-bg)' }
-          : { lab: m.role, color: 'var(--ad-muted)', bg: 'var(--ad-panel)' }}
+          ? { lab: 'system',  color: 'var(--ad-compact)', bg: 'var(--ad-compact-bg)' }
+          : { lab: m.role,    color: 'var(--ad-muted)',   bg: 'var(--ad-panel)' }}
+        {@const isExpanded = expandedIds.has(m.id)}
+
         <div class="ad-card" style="background: {palette.bg}; padding: 0;">
+          <!-- Row header -->
           <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid var(--ad-border-soft);">
             <div style="display: flex; align-items: center; gap: 8px;">
               <span style="font-size: 11px; font-weight: 600; color: {palette.color}; font-family: var(--ad-font-mono); text-transform: lowercase;">{palette.lab}</span>
               {#if m.role === 'tool'}
-                <span class="ad-badge ad-badge--ghost" style="font-size: 10px;">tool_use</span>
+                {#if (m.tool_calls?.length ?? 0) > 0}
+                  <span class="ad-badge ad-badge--ghost" style="font-size: 10px;">tool_use</span>
+                {:else if (m.tool_results?.length ?? 0) > 0}
+                  <span class="ad-badge ad-badge--ghost" style="font-size: 10px;">tool_result</span>
+                {/if}
               {/if}
             </div>
             <span class="ad-mono ad-faint" style="font-size: 11px;">
               {m.tokens_out ? `↓ ${m.tokens_out} · ` : ''}{relAgo(Date.now() - m.ts)}
             </span>
           </div>
-          <div style="padding: 10px 12px; font-family: {m.role === 'tool' || m.role === 'system' ? 'var(--ad-font-mono)' : 'var(--ad-font-ui)'}; font-size: {m.role === 'tool' || m.role === 'system' ? '12px' : '13px'}; color: {m.role === 'system' ? 'var(--ad-compact)' : 'var(--ad-fg)'}; white-space: pre-wrap; line-height: 1.55;">{m.content}</div>
+
+          <!-- Row body -->
+          <div style="padding: 10px 12px;">
+
+            {#if m.role === 'tool' && (m.tool_calls?.length ?? 0) > 0}
+              <!-- Issue 2: tool_use — show tool name + pretty-printed input -->
+              {#each m.tool_calls ?? [] as tc (tc.id)}
+                <div style="margin-bottom: {(m.tool_calls?.length ?? 0) > 1 ? '10px' : '0'};">
+                  <div style="font-size: 11px; font-weight: 600; color: var(--ad-fg-2); font-family: var(--ad-font-mono); margin-bottom: 6px;">
+                    → {tc.name}
+                  </div>
+                  <pre style="margin: 0; font-family: var(--ad-font-mono); font-size: 11px; color: var(--ad-fg); white-space: pre-wrap; line-height: 1.5; background: var(--ad-bg); padding: 8px 10px; border-radius: var(--ad-r-sm); border: 1px solid var(--ad-border-soft);">{safeParseJson(tc.input || '{}')}</pre>
+                </div>
+              {/each}
+
+            {:else if m.role === 'tool' && (m.tool_results?.length ?? 0) > 0}
+              <!-- Issue 2: tool_result — show output truncated to 5 lines -->
+              {#each m.tool_results ?? [] as tr (tr.id)}
+                <div style="margin-bottom: {(m.tool_results?.length ?? 0) > 1 ? '10px' : '0'};">
+                  {#if tr.is_error}
+                    <div style="font-size: 11px; font-weight: 600; color: var(--ad-error); font-family: var(--ad-font-mono); margin-bottom: 6px;">
+                      ✕ error
+                    </div>
+                  {/if}
+                  <pre style="margin: 0; font-family: var(--ad-font-mono); font-size: 11px; color: {tr.is_error ? 'var(--ad-error)' : 'var(--ad-fg)'}; white-space: pre-wrap; line-height: 1.5; background: var(--ad-bg); padding: 8px 10px; border-radius: var(--ad-r-sm); border: 1px solid var(--ad-border-soft);">{truncateLines(tr.output || '', 5)}</pre>
+                </div>
+              {/each}
+
+            {:else if m.role === 'tool' && m.content}
+              <!-- Fallback: tool message with plain content -->
+              <div
+                style="font-family: var(--ad-font-mono); font-size: 12px; color: var(--ad-fg); white-space: pre-wrap; line-height: 1.55; {!isExpanded && isLong(m.content) ? 'max-height: 7.75em; overflow: hidden; -webkit-mask-image: linear-gradient(to bottom, black 60%, transparent 100%); mask-image: linear-gradient(to bottom, black 60%, transparent 100%);' : ''}"
+              >{m.content}</div>
+              {#if isLong(m.content)}
+                <button
+                  class="ad-btn ad-btn--ghost ad-btn--sm"
+                  onclick={() => toggleExpanded(m.id)}
+                  style="margin-top: 6px; font-size: 11px; color: var(--ad-muted);"
+                >{isExpanded ? 'Show less' : 'Show more'}</button>
+              {/if}
+
+            {:else if m.content}
+              <!-- Issue 3: regular message content with show-more truncation -->
+              {@const long = isLong(m.content)}
+              <div
+                style="font-family: {m.role === 'system' ? 'var(--ad-font-mono)' : 'var(--ad-font-ui)'}; font-size: {m.role === 'system' ? '12px' : '13px'}; color: {m.role === 'system' ? 'var(--ad-compact)' : 'var(--ad-fg)'}; white-space: pre-wrap; line-height: 1.55; {long && !isExpanded ? 'max-height: 7.75em; overflow: hidden; -webkit-mask-image: linear-gradient(to bottom, black 60%, transparent 100%); mask-image: linear-gradient(to bottom, black 60%, transparent 100%);' : ''}"
+              >{m.content}</div>
+              {#if long}
+                <button
+                  class="ad-btn ad-btn--ghost ad-btn--sm"
+                  onclick={() => toggleExpanded(m.id)}
+                  style="margin-top: 6px; font-size: 11px; color: var(--ad-muted);"
+                >{isExpanded ? 'Show less' : 'Show more'}</button>
+              {/if}
+
+            {:else}
+              <!-- Empty content: render nothing (empty tool/system messages are filtered out when showTools=false) -->
+              <span style="font-size: 12px; color: var(--ad-faint); font-style: italic;">—</span>
+            {/if}
+
+          </div>
         </div>
       {/each}
-      {#if messages.length === 0}
+      {#if visibleMessages.length === 0}
         <div class="ad-card" style="padding: 24px; text-align: center; color: var(--ad-muted);">No messages loaded.</div>
       {/if}
     </div>

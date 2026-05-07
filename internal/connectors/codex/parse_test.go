@@ -270,11 +270,14 @@ func TestParse_Reasoning_Skipped(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// 8. event_msg (any subtype) is skipped
+// 8. event_msg non-token_count subtypes are still skipped.
+//    token_count with null/absent info is also skipped (no useful data).
+//    token_count with real data is tested separately below.
 // ---------------------------------------------------------------------------
 
 func TestParse_EventMsg_Skipped(t *testing.T) {
 	meta, mu := newMeta()
+	// token_count with info:null — still skipped because cumIn==cumOut==0.
 	subtypes := []string{
 		`{"timestamp":"2026-05-06T10:00:01.000Z","type":"event_msg","payload":{"type":"token_count","info":null}}`,
 		`{"timestamp":"2026-05-06T10:00:02.000Z","type":"event_msg","payload":{"type":"agent_message","message":"hello"}}`,
@@ -291,6 +294,252 @@ func TestParse_EventMsg_Skipped(t *testing.T) {
 		if msg != nil {
 			t.Errorf("event_msg should return nil, got %+v (line: %s)", msg, raw[:60])
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 13. token_count emits a delta system message
+// ---------------------------------------------------------------------------
+
+func TestParse_TokenCount_Emits_DeltaSystemMessage(t *testing.T) {
+	meta, mu := newMeta()
+	// Prime with session_meta so we have a session context.
+	sessionLine := []byte(`{"timestamp":"2026-05-06T10:00:00.000Z","type":"session_meta","payload":{"id":"sess-tc-01","cwd":"/Users/dev/tcproj"}}`)
+	if _, err := parseLine(sessionLine, fakePath, meta, mu); err != nil {
+		t.Fatalf("session_meta: %v", err)
+	}
+
+	tcLine := []byte(`{"timestamp":"2026-05-06T10:00:01.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":0,"output_tokens":20,"reasoning_output_tokens":0,"total_tokens":120},"last_token_usage":{"input_tokens":100,"cached_input_tokens":0,"output_tokens":20,"reasoning_output_tokens":0,"total_tokens":120},"model_context_window":272000}}}`)
+	msg, err := parseLine(tcLine, fakePath, meta, mu)
+	if err != nil {
+		t.Fatalf("token_count: %v", err)
+	}
+	if msg == nil {
+		t.Fatal("expected non-nil message for token_count")
+	}
+	if msg.Role != connectors.RoleSystem {
+		t.Errorf("role: got %q, want %q", msg.Role, connectors.RoleSystem)
+	}
+	if msg.TokensIn != 100 {
+		t.Errorf("TokensIn: got %d, want 100", msg.TokensIn)
+	}
+	if msg.TokensOut != 20 {
+		t.Errorf("TokensOut: got %d, want 20", msg.TokensOut)
+	}
+	if msg.Content != "" {
+		t.Errorf("Content: expected empty string, got %q", msg.Content)
+	}
+	if msg.SessionID != "sess-tc-01" {
+		t.Errorf("SessionID: got %q, want sess-tc-01", msg.SessionID)
+	}
+	if msg.CLI != connectors.CLICodex {
+		t.Errorf("CLI: got %q, want %q", msg.CLI, connectors.CLICodex)
+	}
+	if msg.ID == "" {
+		t.Error("ID should be non-empty")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 14. token_count computes deltas across consecutive events
+// ---------------------------------------------------------------------------
+
+func TestParse_TokenCount_DeltasAcrossEvents(t *testing.T) {
+	meta, mu := newMeta()
+	sessionLine := []byte(`{"timestamp":"2026-05-06T10:00:00.000Z","type":"session_meta","payload":{"id":"sess-tc-02","cwd":"/Users/dev/tcproj2"}}`)
+	if _, err := parseLine(sessionLine, fakePath, meta, mu); err != nil {
+		t.Fatalf("session_meta: %v", err)
+	}
+
+	// First event: cumulative in=100, out=20 → delta = 100, 20.
+	tc1 := []byte(`{"timestamp":"2026-05-06T10:00:01.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":0,"output_tokens":20,"reasoning_output_tokens":0,"total_tokens":120},"last_token_usage":{"input_tokens":100,"cached_input_tokens":0,"output_tokens":20,"reasoning_output_tokens":0,"total_tokens":120},"model_context_window":272000}}}`)
+	msg1, err := parseLine(tc1, fakePath, meta, mu)
+	if err != nil {
+		t.Fatalf("tc1: %v", err)
+	}
+	if msg1 == nil {
+		t.Fatal("expected non-nil message for tc1")
+	}
+	if msg1.TokensIn != 100 {
+		t.Errorf("tc1 TokensIn: got %d, want 100", msg1.TokensIn)
+	}
+	if msg1.TokensOut != 20 {
+		t.Errorf("tc1 TokensOut: got %d, want 20", msg1.TokensOut)
+	}
+
+	// Second event: cumulative in=300, out=80 → delta = 200, 60.
+	tc2 := []byte(`{"timestamp":"2026-05-06T10:00:02.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":300,"cached_input_tokens":0,"output_tokens":80,"reasoning_output_tokens":0,"total_tokens":380},"last_token_usage":{"input_tokens":300,"cached_input_tokens":0,"output_tokens":80,"reasoning_output_tokens":0,"total_tokens":380},"model_context_window":272000}}}`)
+	msg2, err := parseLine(tc2, fakePath, meta, mu)
+	if err != nil {
+		t.Fatalf("tc2: %v", err)
+	}
+	if msg2 == nil {
+		t.Fatal("expected non-nil message for tc2")
+	}
+	if msg2.TokensIn != 200 {
+		t.Errorf("tc2 TokensIn: got %d, want 200", msg2.TokensIn)
+	}
+	if msg2.TokensOut != 60 {
+		t.Errorf("tc2 TokensOut: got %d, want 60", msg2.TokensOut)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 15. negative delta is clamped to zero
+// ---------------------------------------------------------------------------
+
+func TestParse_TokenCount_NegativeDelta_ClampedToZero(t *testing.T) {
+	meta, mu := newMeta()
+	sessionLine := []byte(`{"timestamp":"2026-05-06T10:00:00.000Z","type":"session_meta","payload":{"id":"sess-tc-03","cwd":"/Users/dev/tcproj3"}}`)
+	if _, err := parseLine(sessionLine, fakePath, meta, mu); err != nil {
+		t.Fatalf("session_meta: %v", err)
+	}
+
+	// First event: cumulative in=100, out=20.
+	tc1 := []byte(`{"timestamp":"2026-05-06T10:00:01.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":0,"output_tokens":20,"reasoning_output_tokens":0,"total_tokens":120},"last_token_usage":{"input_tokens":100,"cached_input_tokens":0,"output_tokens":20,"reasoning_output_tokens":0,"total_tokens":120},"model_context_window":272000}}}`)
+	if _, err := parseLine(tc1, fakePath, meta, mu); err != nil {
+		t.Fatalf("tc1: %v", err)
+	}
+
+	// Second event: cumulative in=50 (lower than previous) → delta clamped to 0.
+	tc2 := []byte(`{"timestamp":"2026-05-06T10:00:02.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":50,"cached_input_tokens":0,"output_tokens":20,"reasoning_output_tokens":0,"total_tokens":70},"last_token_usage":{"input_tokens":50,"cached_input_tokens":0,"output_tokens":20,"reasoning_output_tokens":0,"total_tokens":70},"model_context_window":272000}}}`)
+	msg2, err := parseLine(tc2, fakePath, meta, mu)
+	if err != nil {
+		t.Fatalf("tc2: %v", err)
+	}
+	// deltaIn = 50 - 100 = -50 → clamped to 0; deltaOut = 20 - 20 = 0.
+	// Both deltas are 0 → no message emitted.
+	if msg2 != nil {
+		t.Errorf("expected nil (both deltas zero after clamp), got TokensIn=%d TokensOut=%d", msg2.TokensIn, msg2.TokensOut)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 16. token_count before session_meta is skipped
+// ---------------------------------------------------------------------------
+
+func TestParse_TokenCount_BeforeSessionMeta_Skipped(t *testing.T) {
+	meta, mu := newMeta() // no session_meta
+	tcLine := []byte(`{"timestamp":"2026-05-06T10:00:01.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":0,"output_tokens":20,"reasoning_output_tokens":0,"total_tokens":120},"last_token_usage":{"input_tokens":100,"cached_input_tokens":0,"output_tokens":20,"reasoning_output_tokens":0,"total_tokens":120},"model_context_window":272000}}}`)
+	msg, err := parseLine(tcLine, fakePath, meta, mu)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if msg != nil {
+		t.Fatalf("expected nil when token_count arrives before session_meta, got %+v", msg)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 17. token_count per-file state isolation — two paths track deltas separately
+// ---------------------------------------------------------------------------
+
+func TestParse_TokenCount_PerFileStateIsolation(t *testing.T) {
+	c := newConnectorForTest()
+
+	pathA := "/home/dev/.codex/sessions/2026/05/06/rollout-tcA.jsonl"
+	pathB := "/home/dev/.codex/sessions/2026/05/06/rollout-tcB.jsonl"
+
+	// Prime both paths with session_meta.
+	metaA := []byte(`{"timestamp":"2026-05-06T10:00:00.000Z","type":"session_meta","payload":{"id":"sess-tc-A","cwd":"/Users/dev/projA"}}`)
+	metaB := []byte(`{"timestamp":"2026-05-06T10:00:00.000Z","type":"session_meta","payload":{"id":"sess-tc-B","cwd":"/Users/dev/projB"}}`)
+	if _, err := c.Parse(metaA, pathA); err != nil {
+		t.Fatalf("pathA session_meta: %v", err)
+	}
+	if _, err := c.Parse(metaB, pathB); err != nil {
+		t.Fatalf("pathB session_meta: %v", err)
+	}
+
+	// Emit first token_count on pathA: cumIn=100.
+	tcA1 := []byte(`{"timestamp":"2026-05-06T10:00:01.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":0,"output_tokens":10,"reasoning_output_tokens":0,"total_tokens":110},"last_token_usage":{"input_tokens":100,"cached_input_tokens":0,"output_tokens":10,"reasoning_output_tokens":0,"total_tokens":110},"model_context_window":272000}}}`)
+	msgA1, err := c.Parse(tcA1, pathA)
+	if err != nil {
+		t.Fatalf("pathA tc1: %v", err)
+	}
+	if msgA1 == nil {
+		t.Fatal("expected non-nil message for pathA tc1")
+	}
+
+	// Emit first token_count on pathB: cumIn=200 — pathB's prev should be 0.
+	tcB1 := []byte(`{"timestamp":"2026-05-06T10:00:01.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":200,"cached_input_tokens":0,"output_tokens":30,"reasoning_output_tokens":0,"total_tokens":230},"last_token_usage":{"input_tokens":200,"cached_input_tokens":0,"output_tokens":30,"reasoning_output_tokens":0,"total_tokens":230},"model_context_window":272000}}}`)
+	msgB1, err := c.Parse(tcB1, pathB)
+	if err != nil {
+		t.Fatalf("pathB tc1: %v", err)
+	}
+	if msgB1 == nil {
+		t.Fatal("expected non-nil message for pathB tc1")
+	}
+
+	// pathA delta should be 100 (not 200), pathB delta should be 200 (not 100).
+	if msgA1.TokensIn != 100 {
+		t.Errorf("pathA TokensIn: got %d, want 100", msgA1.TokensIn)
+	}
+	if msgB1.TokensIn != 200 {
+		t.Errorf("pathB TokensIn: got %d, want 200", msgB1.TokensIn)
+	}
+
+	// Second event on pathA: cumIn=150 → delta 50.
+	tcA2 := []byte(`{"timestamp":"2026-05-06T10:00:02.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":150,"cached_input_tokens":0,"output_tokens":15,"reasoning_output_tokens":0,"total_tokens":165},"last_token_usage":{"input_tokens":150,"cached_input_tokens":0,"output_tokens":15,"reasoning_output_tokens":0,"total_tokens":165},"model_context_window":272000}}}`)
+	// Note: 150 < 200 (pathB's prev), so pathB state must NOT be used for pathA.
+	msgA2, err := c.Parse(tcA2, pathA)
+	if err != nil {
+		t.Fatalf("pathA tc2: %v", err)
+	}
+	if msgA2 == nil {
+		t.Fatal("expected non-nil message for pathA tc2")
+	}
+	if msgA2.TokensIn != 50 {
+		t.Errorf("pathA tc2 TokensIn: got %d, want 50 (delta from 100→150)", msgA2.TokensIn)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 18. parse real fixture end-to-end: sum token deltas > 0
+// ---------------------------------------------------------------------------
+
+func TestParse_RealFixture_ProducesNonZeroSessionTotals(t *testing.T) {
+	fixturePath := realFixtureFilePath(t)
+	f, err := os.Open(fixturePath)
+	if err != nil {
+		t.Fatalf("cannot open real fixture %s: %v", fixturePath, err)
+	}
+	defer f.Close()
+
+	meta, mu := newMeta()
+	scanner := bufio.NewScanner(f)
+
+	var totalIn, totalOut int64
+	lineNum := 0
+	for scanner.Scan() {
+		lineNum++
+		raw := scanner.Bytes()
+		if len(raw) == 0 {
+			continue
+		}
+		lineCopy := make([]byte, len(raw))
+		copy(lineCopy, raw)
+
+		msg, err := parseLine(lineCopy, fixturePath, meta, mu)
+		if err != nil {
+			t.Errorf("line %d: unexpected error: %v", lineNum, err)
+			continue
+		}
+		if msg != nil {
+			totalIn += msg.TokensIn
+			totalOut += msg.TokensOut
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("scanner error: %v", err)
+	}
+
+	t.Logf("fixture token totals: in=%d out=%d (across %d lines)", totalIn, totalOut, lineNum)
+
+	if totalIn == 0 {
+		t.Error("expected totalIn > 0 after parsing real fixture")
+	}
+	if totalOut == 0 {
+		t.Error("expected totalOut > 0 after parsing real fixture")
 	}
 }
 

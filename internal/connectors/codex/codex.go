@@ -29,6 +29,13 @@ type fileMeta struct {
 	sessionID   string
 	projectPath string
 	model       string
+
+	// prevTokensIn and prevTokensOut track the last cumulative token totals
+	// seen in a token_count event_msg. They are used to compute per-event
+	// deltas so that InsertMessage's incrementing session counters converge
+	// on the correct session-wide totals.
+	prevTokensIn  int64
+	prevTokensOut int64
 }
 
 // Connector implements connectors.Connector for the Codex CLI.

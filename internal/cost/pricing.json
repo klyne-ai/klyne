@@ -67,6 +67,30 @@
       "completion_per_mtok": 75.0,
       "cache_read_per_mtok": 1.5,
       "cache_write_per_mtok": 18.75
+    },
+    "gpt-5.1-codex-mini": {
+      "prompt_per_mtok": 0.4,
+      "completion_per_mtok": 1.6,
+      "cache_read_per_mtok": 0.2,
+      "cache_write_per_mtok": 0.0
+    },
+    "gpt-5.2-codex": {
+      "prompt_per_mtok": 10.0,
+      "completion_per_mtok": 30.0,
+      "cache_read_per_mtok": 5.0,
+      "cache_write_per_mtok": 0.0
+    },
+    "gpt-5.1-codex-max": {
+      "prompt_per_mtok": 10.0,
+      "completion_per_mtok": 30.0,
+      "cache_read_per_mtok": 5.0,
+      "cache_write_per_mtok": 0.0
+    },
+    "gpt-5.5": {
+      "prompt_per_mtok": 10.0,
+      "completion_per_mtok": 30.0,
+      "cache_read_per_mtok": 5.0,
+      "cache_write_per_mtok": 0.0
     }
   }
 }

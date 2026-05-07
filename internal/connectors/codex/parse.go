@@ -78,6 +78,30 @@ type contentItem struct {
 	Text string `json:"text"`
 }
 
+// eventMsgPayload is the outer payload for an event_msg line.
+// Only the Type field is needed to dispatch; subtype-specific structs
+// decode the rest.
+type eventMsgPayload struct {
+	Type string `json:"type"`
+}
+
+// tokenUsage holds the per-million-token counters inside a token_count event.
+type tokenUsage struct {
+	InputTokens  int64 `json:"input_tokens"`
+	OutputTokens int64 `json:"output_tokens"`
+}
+
+// tokenCountInfo is the "info" sub-object of a token_count event_msg payload.
+type tokenCountInfo struct {
+	TotalTokenUsage tokenUsage `json:"total_token_usage"`
+}
+
+// tokenCountPayload fully decodes the payload of an event_msg/token_count line.
+type tokenCountPayload struct {
+	Type string         `json:"type"`
+	Info tokenCountInfo `json:"info"`
+}
+
 // ---------------------------------------------------------------------------
 // parseTimestamp converts an ISO 8601 string to epoch milliseconds.
 // Returns 0 on failure; caller substitutes wall-clock time.
@@ -159,8 +183,7 @@ func parseLine(line []byte, path string, meta *fileMeta, mu *sync.Mutex) (*conne
 		return handleResponseItem(env.Payload, line, meta, mu, path, ts)
 
 	case "event_msg":
-		// All event_msg subtypes are skipped — canonical data lives in response_item.
-		return nil, nil
+		return handleEventMsg(env.Payload, line, meta, mu, path, ts)
 
 	default:
 		log.Printf("codex: unknown line type %q in %s — skipping (forward-compat)", env.Type, path)
@@ -197,6 +220,99 @@ func handleTurnContext(raw json.RawMessage, meta *fileMeta, mu *sync.Mutex, path
 	meta.model = p.Model
 	mu.Unlock()
 	return nil, nil
+}
+
+// handleEventMsg dispatches on the payload.type field of an event_msg line.
+// Most event_msg subtypes are high-level duplicates of response_item data and
+// are skipped. The token_count subtype is the exception: it is the ONLY place
+// Codex JSONL records token usage, so we emit a synthetic system message
+// carrying delta token counts so that InsertMessage's accumulating session
+// counters converge on the correct totals.
+func handleEventMsg(raw json.RawMessage, line []byte, meta *fileMeta, mu *sync.Mutex, path string, ts int64) (*connectors.Message, error) {
+	// Peek at the subtype first — cheap decode of just the "type" field.
+	var ep eventMsgPayload
+	if err := json.Unmarshal(raw, &ep); err != nil {
+		log.Printf("codex: failed to decode event_msg payload in %s: %v", path, err)
+		return nil, nil
+	}
+
+	if ep.Type == "token_count" {
+		return handleTokenCount(raw, line, meta, mu, path, ts)
+	}
+
+	// All other subtypes (agent_message, agent_reasoning, user_message,
+	// task_started, task_complete, turn_aborted, exec_command_end, error, …)
+	// are high-level status events; their canonical data lives in response_item.
+	return nil, nil
+}
+
+// handleTokenCount processes an event_msg with payload.type == "token_count".
+// Codex emits these lines repeatedly; total_token_usage is the session-cumulative
+// total at the moment the event fires. We convert to per-event deltas so that
+// InsertMessage's incrementing session counters stay accurate.
+func handleTokenCount(raw json.RawMessage, line []byte, meta *fileMeta, mu *sync.Mutex, path string, ts int64) (*connectors.Message, error) {
+	mu.Lock()
+	sessionID := meta.sessionID
+	mu.Unlock()
+
+	if sessionID == "" {
+		// No session context yet — skip; we have nothing to attach this to.
+		log.Printf("codex: token_count before session_meta in %s — skipping", path)
+		return nil, nil
+	}
+
+	var p tokenCountPayload
+	if err := json.Unmarshal(raw, &p); err != nil {
+		log.Printf("codex: failed to decode token_count payload in %s: %v", path, err)
+		return nil, nil
+	}
+
+	cumIn := p.Info.TotalTokenUsage.InputTokens
+	cumOut := p.Info.TotalTokenUsage.OutputTokens
+
+	// Both zero means the "info" field was null or absent — nothing to emit.
+	if cumIn == 0 && cumOut == 0 {
+		return nil, nil
+	}
+
+	mu.Lock()
+	prevIn := meta.prevTokensIn
+	prevOut := meta.prevTokensOut
+	meta.prevTokensIn = cumIn
+	meta.prevTokensOut = cumOut
+	sessionID = meta.sessionID
+	projectPath := meta.projectPath
+	model := meta.model
+	mu.Unlock()
+
+	deltaIn := cumIn - prevIn
+	deltaOut := cumOut - prevOut
+
+	// Guard against negative deltas (rare: file truncated, race, etc.).
+	if deltaIn < 0 {
+		deltaIn = 0
+	}
+	if deltaOut < 0 {
+		deltaOut = 0
+	}
+
+	// If both deltas are zero after clamping there is nothing useful to emit.
+	if deltaIn == 0 && deltaOut == 0 {
+		return nil, nil
+	}
+
+	return &connectors.Message{
+		ID:          messageID(sessionID, line),
+		SessionID:   sessionID,
+		CLI:         connectors.CLICodex,
+		ProjectPath: projectPath,
+		Role:        connectors.RoleSystem,
+		Content:     "",
+		TokensIn:    deltaIn,
+		TokensOut:   deltaOut,
+		Model:       model,
+		Ts:          ts,
+	}, nil
 }
 
 // handleResponseItem dispatches on payload.type within a response_item line.
