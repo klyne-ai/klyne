@@ -101,14 +101,14 @@ These apply to every agent dispatched against this plan. Each workstream file re
 | 1 | W9  | Sonnet | `main` | 🟢 merged (88.1% cov) |
 | 1 | W10 | Sonnet | `main` | 🟢 merged (89.0% cov) |
 | 1 | W13 | Sonnet | `main` | 🟢 merged (97.8% cov, 49 tests) |
-| 2 | W2  | _unassigned_ | — | ⬜ not started |
-| 2 | W3  | _unassigned_ | — | ⬜ not started |
-| 2 | W7  | _unassigned_ | — | ⬜ not started |
-| 2 | W8  | _unassigned_ | — | ⬜ not started |
-| 2 | W11 | _unassigned_ | — | ⬜ not started |
-| 2 | W14 | _unassigned_ | — | ⬜ not started |
-| 3 | W12 | _unassigned_ | — | ⬜ not started |
-| 3 | W15 | _unassigned_ | — | ⬜ not started |
+| 2 | W2  | Sonnet | `main` | 🟢 merged (81.2% cov) |
+| 2 | W3  | Sonnet | `main` | 🟢 merged (~87% per-fn cov) |
+| 2 | W7  | Sonnet | `main` | 🟢 merged (82.7% cov) |
+| 2 | W8  | Sonnet | `main` | 🟢 merged (97.3% api pkg) |
+| 2 | W11 | Sonnet | `main` | 🟢 merged (92% selector, 86.8% tasks) |
+| 2 | W14 | Sonnet | `main` | 🟢 merged (96.26% cov, 140 tests) |
+| 3 | W12 | Opus | `main` | 🟢 merged (78.5% cov; daemon binary works end-to-end) |
+| 3 | W15 | Sonnet | `main` | 🟢 merged (83.1% backend, 174 UI tests, 100% resume cov) |
 | 4 | W16 | _unassigned_ | — | ⬜ not started |
 | 4 | W17 | _unassigned_ | — | ⬜ not started |
 | 5 | W18 | _unassigned_ | — | ⬜ not started |

@@ -1,38 +1,185 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/mohitpatell/agentdeck/internal/ai/providers"
+	"github.com/mohitpatell/agentdeck/internal/config"
+	"github.com/mohitpatell/agentdeck/internal/store"
 )
 
-// newDoctorCmd registers `agentdeck doctor`. The W0 stub emits a
-// well-formed JSON document so smoke-test scripts can already parse it;
-// W12 fills in real diagnostic fields.
+// newDoctorCmd registers `agentdeck doctor`.
+//
+// Output: a single JSON document on stdout.
+// Exit status:
+//   - 0  when at least one provider is available AND at least one connector
+//     root exists on disk (the "green" state).
+//   - 1  on any "red" state (no providers, no connector roots, DB unopenable, …).
+//
+// Never echoes API key values — providers report a boolean only.
 func newDoctorCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "doctor",
 		Short: "Print a diagnostic report (paths, providers, schema version)",
-		RunE:  runDoctor,
+		// Silence the auto-printed "Error: …" because doctor's non-OK
+		// state is communicated through the JSON document itself.
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		RunE:          runDoctor,
 	}
 }
 
-// doctorReport is the W0 stub envelope. W12 will extend this struct;
-// fields here are intentionally minimal to avoid pre-committing to a
-// shape the real diagnostic doesn't want.
+// doctorReport is the structured output of `agentdeck doctor`.
 type doctorReport struct {
-	Status  string `json:"status"`
-	Version string `json:"version"`
-	Note    string `json:"note"`
+	OK            bool                       `json:"ok"`
+	Version       string                     `json:"version"`
+	SchemaVersion int                        `json:"schema_version"`
+	ConfigPath    string                     `json:"config_path"`
+	DBPath        string                     `json:"db_path"`
+	DBSizeBytes   int64                      `json:"db_size_bytes"`
+	Connectors    map[string]connectorStatus `json:"connectors"`
+	Providers     map[string]bool            `json:"providers"`
+}
+
+type connectorStatus struct {
+	Enabled bool   `json:"enabled"`
+	Root    string `json:"root"`
+	Exists  bool   `json:"exists"`
 }
 
 func runDoctor(cmd *cobra.Command, _ []string) error {
-	report := doctorReport{
-		Status:  "stub",
-		Version: version,
-		Note:    "not implemented (W12)",
-	}
+	report, ok := buildDoctorReport()
+
 	enc := json.NewEncoder(cmd.OutOrStdout())
 	enc.SetIndent("", "  ")
-	return enc.Encode(report)
+	if err := enc.Encode(report); err != nil {
+		return fmt.Errorf("agentdeck doctor: encode report: %w", err)
+	}
+
+	if !ok {
+		// Cobra would normally print the error message. We have already
+		// emitted JSON; signal exit-1 by returning a sentinel error that
+		// Cobra suppresses (SilenceUsage is true on the root command).
+		return errors.New("agentdeck doctor: not green")
+	}
+	return nil
+}
+
+// buildDoctorReport gathers diagnostic information without starting
+// servers. It opens the DB read-only enough to read schema_version, then
+// closes it immediately.
+func buildDoctorReport() (doctorReport, bool) {
+	r := doctorReport{
+		Version:    version,
+		ConfigPath: config.ConfigFile(),
+		Connectors: map[string]connectorStatus{},
+		Providers:  map[string]bool{},
+	}
+
+	// --- Config ----------------------------------------------------------
+	cfg, cfgErr := config.Load()
+	if cfgErr != nil {
+		// Continue with defaults so the JSON is still useful.
+		cfg = config.Defaults()
+	}
+
+	dbPath := expandHome(cfg.Paths.DB)
+	if dbPath == "" {
+		dbPath = config.DBPath()
+	}
+	r.DBPath = dbPath
+
+	// --- DB --------------------------------------------------------------
+	dbOK := false
+	if info, err := os.Stat(dbPath); err == nil {
+		r.DBSizeBytes = info.Size()
+	}
+
+	// Try to open and read schema version.
+	if db, err := store.Open(dbPath); err == nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		ver, vErr := db.SchemaVersion(ctx)
+		cancel()
+		if vErr == nil {
+			r.SchemaVersion = ver
+			dbOK = true
+		}
+		_ = db.Close()
+	}
+
+	// --- Connectors ------------------------------------------------------
+	claudeRoot := expandHome(cfg.Connectors.Claude.Root)
+	r.Connectors["claude"] = connectorStatus{
+		Enabled: cfg.Connectors.Claude.Enabled,
+		Root:    claudeRoot,
+		Exists:  pathExists(claudeRoot),
+	}
+	codexRoot := expandHome(cfg.Connectors.Codex.Root)
+	r.Connectors["codex"] = connectorStatus{
+		Enabled: cfg.Connectors.Codex.Enabled,
+		Root:    codexRoot,
+		Exists:  pathExists(codexRoot),
+	}
+
+	anyRootExists := r.Connectors["claude"].Exists || r.Connectors["codex"].Exists
+
+	// --- Providers -------------------------------------------------------
+	detectCtx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	defer cancel()
+	infos := providers.DetectAvailable(detectCtx)
+	anyProvider := false
+	for _, p := range infos {
+		r.Providers[p.Name] = p.Available
+		if p.Available {
+			anyProvider = true
+		}
+	}
+
+	// "ok" = green:
+	//   * config loaded (or defaulted) without panic
+	//   * DB opens
+	//   * at least one connector root exists
+	//   * at least one provider available
+	r.OK = dbOK && anyRootExists && anyProvider && cfgErr == nil
+	return r, r.OK
+}
+
+// expandHome expands a leading "~" to the current user's home directory.
+// Used by doctor to display the resolved paths.
+func expandHome(p string) string {
+	if p == "" {
+		return ""
+	}
+	if !strings.HasPrefix(p, "~") {
+		return p
+	}
+	home, err := config.HomeDir()
+	if err != nil {
+		return p
+	}
+	if p == "~" {
+		return home
+	}
+	if strings.HasPrefix(p, "~/") {
+		return filepath.Join(home, p[2:])
+	}
+	return p
+}
+
+// pathExists reports whether path exists on the filesystem (any type).
+func pathExists(p string) bool {
+	if p == "" {
+		return false
+	}
+	_, err := os.Stat(p)
+	return err == nil
 }
