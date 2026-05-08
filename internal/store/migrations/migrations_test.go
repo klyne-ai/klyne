@@ -37,6 +37,9 @@ func TestMigrationsApply(t *testing.T) {
 		"003_summaries.sql",
 		"004_messages_tool_columns.sql", // W2: Option-A tool-call JSON columns
 		"005_cached_tokens.sql",         // cached_read/write columns on messages + sessions
+		"006_deleted_sessions.sql",      // soft-delete tombstones
+		"007_zero_costs.sql",            // backfill cost=0 for flat-subscription DTO compat
+		"008_message_branch_cwd.sql",    // git_branch + cwd on messages for cockpit splits
 	}
 	if len(sqlFiles) != len(expected) {
 		t.Fatalf("expected %d migrations, found %d: %v", len(expected), len(sqlFiles), sqlFiles)
