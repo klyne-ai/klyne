@@ -1,7 +1,7 @@
-// Package mcpserver exposes agentdeck's session intelligence as MCP tools.
+// Package mcpserver exposes klyne's session intelligence as MCP tools.
 //
 // The server runs as a stdio subprocess that Claude Code (or any MCP host)
-// spawns. It does NOT depend on the agentdeck daemon being running — every
+// spawns. It does NOT depend on the klyne daemon being running — every
 // tool reads JSONL transcripts directly so answers reflect the live state
 // of the user's active session, not whatever the daemon last ingested.
 //

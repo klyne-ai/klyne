@@ -119,7 +119,7 @@ func TestPromptSearch_RendersHitsAsMarkdown(t *testing.T) {
 		],
 		"took_ms":7
 	}`)
-	t.Setenv("AGENTDECK_BASE_URL", d.srv.URL)
+	t.Setenv("KLYNE_BASE_URL", d.srv.URL)
 
 	req := &mcp.GetPromptRequest{
 		Params: &mcp.GetPromptParams{
@@ -143,7 +143,7 @@ func TestPromptSearch_RendersHitsAsMarkdown(t *testing.T) {
 }
 
 func TestPromptSearch_DaemonDownGracefulMessage(t *testing.T) {
-	t.Setenv("AGENTDECK_BASE_URL", "http://127.0.0.1:1") // not listening
+	t.Setenv("KLYNE_BASE_URL", "http://127.0.0.1:1") // not listening
 	req := &mcp.GetPromptRequest{
 		Params: &mcp.GetPromptParams{
 			Arguments: map[string]string{"query": "anything"},

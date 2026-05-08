@@ -33,18 +33,18 @@ const (
 func newAuditCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "audit-sessions",
-		Short: "Compare agentdeck's stored session metrics against ground truth in raw JSONL",
+		Short: "Compare klyne's stored session metrics against ground truth in raw JSONL",
 		Long: `audit-sessions walks the most recently modified Claude Code transcripts,
 re-derives "ground truth" directly from the JSONL, and compares against
-agentdeck's stored values. It is the trust foundation for every MCP tool:
-no number agentdeck exposes is credible until this audit passes.
+klyne's stored values. It is the trust foundation for every MCP tool:
+no number klyne exposes is credible until this audit passes.
 
 The v1 slice checks one thing: latest-assistant input_tokens accuracy.
 That is the value that drives the session-page context-fill bar (and
 the bug behind the original Opus 4.7 1M context display issue).
 
 Output is Markdown, written to stdout and optionally to --out. The
-agentdeck daemon does NOT need to be running.`,
+klyne daemon does NOT need to be running.`,
 		RunE: runAudit,
 	}
 	cmd.Flags().Int("limit", defaultAuditLimit,
@@ -64,7 +64,7 @@ func runAudit(cmd *cobra.Command, _ []string) error {
 	}
 	if len(paths) == 0 {
 		fmt.Fprintln(cmd.OutOrStdout(),
-			"# agentdeck audit report\n\nNo Claude Code transcripts found under ~/.claude/projects.")
+			"# klyne audit report\n\nNo Claude Code transcripts found under ~/.claude/projects.")
 		return nil
 	}
 
@@ -74,7 +74,7 @@ func runAudit(cmd *cobra.Command, _ []string) error {
 		// We can still run the audit — every session will be reported
 		// as not-in-DB, which is itself a signal worth surfacing.
 		fmt.Fprintf(cmd.ErrOrStderr(),
-			"warning: could not open agentdeck DB at %s: %v\n", dbPath, dbErr)
+			"warning: could not open klyne DB at %s: %v\n", dbPath, dbErr)
 	}
 	var lookup audit.LookupFunc = func(string) (int64, bool) { return 0, false }
 	if db != nil {
@@ -200,7 +200,7 @@ func discoverCodexTranscripts(limit int) ([]string, error) {
 	return out, nil
 }
 
-// newDBLookup builds an audit.LookupFunc backed by the real agentdeck
+// newDBLookup builds an audit.LookupFunc backed by the real klyne
 // store. Mirrors session_usage.go's logic: walk the most-recent N
 // messages newest-first, return the first assistant row with TokensIn>0.
 func newDBLookup(ctx context.Context, db *store.DB) audit.LookupFunc {

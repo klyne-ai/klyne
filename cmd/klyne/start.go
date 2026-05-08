@@ -16,12 +16,12 @@ import (
 )
 
 // defaultDemoFixturesDir is the in-repo path to the canonical sample
-// JSONL fixtures used by `agentdeck start --demo`. It's resolved
+// JSONL fixtures used by `klyne start --demo`. It's resolved
 // relative to the current working directory at runtime so users can
 // override it in tests by chdir'ing into a different fixture set.
 const defaultDemoFixturesDir = "examples/sample-jsonl"
 
-// newStartCmd registers `agentdeck start`.
+// newStartCmd registers `klyne start`.
 //
 // Behavior (spec Flow A):
 //   - Loads config from ~/.agentdeck/config.toml (or defaults).
@@ -36,7 +36,7 @@ const defaultDemoFixturesDir = "examples/sample-jsonl"
 func newStartCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "start",
-		Short: "Start the agentdeck daemon (watches CLI logs, serves UI)",
+		Short: "Start the klyne daemon (watches CLI logs, serves UI)",
 		RunE:  runStart,
 	}
 	cmd.Flags().Bool("no-open", false, "do not open the dashboard in a browser")
@@ -50,7 +50,7 @@ func newStartCmd() *cobra.Command {
 func runStart(cmd *cobra.Command, _ []string) error {
 	cfg, err := config.Load()
 	if err != nil {
-		return fmt.Errorf("agentdeck start: load config: %w", err)
+		return fmt.Errorf("klyne start: load config: %w", err)
 	}
 
 	demo, _ := cmd.Flags().GetBool("demo")
@@ -63,7 +63,7 @@ func runStart(cmd *cobra.Command, _ []string) error {
 		// the user's real ~/.agentdeck/agentdeck.db.
 		demoDB := filepath.Join(os.TempDir(), "agentdeck-demo.db")
 		if err := os.Remove(demoDB); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("agentdeck start: cleanup demo db: %w", err)
+			return fmt.Errorf("klyne start: cleanup demo db: %w", err)
 		}
 		cfg.Paths.DB = demoDB
 		cfg.Connectors.Claude.Enabled = false
@@ -72,7 +72,7 @@ func runStart(cmd *cobra.Command, _ []string) error {
 
 	a, err := app.New(cfg)
 	if err != nil {
-		return fmt.Errorf("agentdeck start: build app: %w", err)
+		return fmt.Errorf("klyne start: build app: %w", err)
 	}
 
 	if demo {
@@ -81,7 +81,7 @@ func runStart(cmd *cobra.Command, _ []string) error {
 		// the banner show what the user can paste into ls.
 		absFixtures, err := filepath.Abs(fixturesDir)
 		if err != nil {
-			return fmt.Errorf("agentdeck start: resolve fixtures dir: %w", err)
+			return fmt.Errorf("klyne start: resolve fixtures dir: %w", err)
 		}
 		a.DemoFixturesDir = absFixtures
 	}
@@ -94,14 +94,14 @@ func runStart(cmd *cobra.Command, _ []string) error {
 	// Refuse to start if a stale pidfile points at a live process.
 	if existing, err := app.ReadPidfile(); err == nil {
 		if processAlive(existing) {
-			return fmt.Errorf("agentdeck start: another daemon appears to be running (pid %d)", existing)
+			return fmt.Errorf("klyne start: another daemon appears to be running (pid %d)", existing)
 		}
 		// Stale pidfile — remove it and continue.
 		_ = app.RemovePidfile()
 	}
 
 	if err := app.WritePidfile(os.Getpid()); err != nil {
-		return fmt.Errorf("agentdeck start: write pidfile: %w", err)
+		return fmt.Errorf("klyne start: write pidfile: %w", err)
 	}
 	defer func() { _ = app.RemovePidfile() }()
 
@@ -111,7 +111,7 @@ func runStart(cmd *cobra.Command, _ []string) error {
 	// also background by default, so this is safe.
 
 	if err := a.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
-		return fmt.Errorf("agentdeck start: %w", err)
+		return fmt.Errorf("klyne start: %w", err)
 	}
 	return nil
 }

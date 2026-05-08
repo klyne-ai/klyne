@@ -18,7 +18,7 @@ import (
 
 // search_messages tool
 // ====================
-// The only tool in the MCP surface that depends on the agentdeck
+// The only tool in the MCP surface that depends on the klyne
 // daemon. Full-text search lives in SQLite (FTS5 + BM25); the JSONL
 // transcripts on disk are not indexed, so direct-read isn't viable
 // for cross-session search at scale.
@@ -29,7 +29,7 @@ import (
 // to the user, who restarts the daemon and retries.
 
 // defaultDaemonURL is the daemon's loopback address per
-// internal/config/schema.go. Override via AGENTDECK_BASE_URL when
+// internal/config/schema.go. Override via KLYNE_BASE_URL when
 // the user runs the daemon on a non-default port.
 const defaultDaemonURL = "http://127.0.0.1:7878"
 
@@ -93,14 +93,14 @@ type SearchOutput struct {
 	Reason string `json:"reason,omitempty" jsonschema:"empty-result explanation; populated when Hits is empty"`
 	// DaemonDown is true when the search call failed because the
 	// daemon was unreachable. The AI uses this to suggest restarting
-	// agentdeck rather than reformulating the query.
+	// klyne rather than reformulating the query.
 	DaemonDown bool `json:"daemon_down,omitempty" jsonschema:"true when the daemon could not be reached"`
 }
 
 // daemonBaseURL returns the URL the search tool will hit. Honours the
-// AGENTDECK_BASE_URL env override; defaults to defaultDaemonURL.
+// KLYNE_BASE_URL env override; defaults to defaultDaemonURL.
 func daemonBaseURL() string {
-	if v := strings.TrimSpace(os.Getenv("AGENTDECK_BASE_URL")); v != "" {
+	if v := strings.TrimSpace(os.Getenv("KLYNE_BASE_URL")); v != "" {
 		return v
 	}
 	return defaultDaemonURL
@@ -154,7 +154,7 @@ func HandleSearchMessages(ctx context.Context, _ *mcp.CallToolRequest, in Search
 		// Distinguish "daemon down" from other HTTP errors so the AI
 		// can give a targeted recovery instruction.
 		if isConnectionRefused(err) || isTimeout(err) {
-			reason := fmt.Sprintf("Could not reach the agentdeck daemon at %s — start it with `agentdeck` and try again.", base)
+			reason := fmt.Sprintf("Could not reach the klyne daemon at %s — start it with `klyne` and try again.", base)
 			return &mcp.CallToolResult{
 				Content: []mcp.Content{&mcp.TextContent{Text: reason}},
 			}, SearchOutput{Query: q, Reason: reason, DaemonDown: true}, nil

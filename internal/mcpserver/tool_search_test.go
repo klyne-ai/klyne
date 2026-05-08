@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// fakeDaemon stands in for the agentdeck daemon's HTTP API. It returns
+// fakeDaemon stands in for the klyne daemon's HTTP API. It returns
 // the supplied JSON body to every GET /search call and records the
 // query string so tests can assert the right params were forwarded.
 type fakeDaemon struct {
@@ -41,7 +41,7 @@ func TestHandleSearchMessages_HappyPath(t *testing.T) {
 		],
 		"took_ms":12
 	}`)
-	t.Setenv("AGENTDECK_BASE_URL", d.srv.URL)
+	t.Setenv("KLYNE_BASE_URL", d.srv.URL)
 
 	_, out, err := HandleSearchMessages(context.Background(), nil, SearchInput{Query: "bank sms"})
 	if err != nil {
@@ -62,7 +62,7 @@ func TestHandleSearchMessages_HappyPath(t *testing.T) {
 }
 
 func TestHandleSearchMessages_EmptyQuery(t *testing.T) {
-	t.Setenv("AGENTDECK_BASE_URL", "http://127.0.0.1:1") // never reached
+	t.Setenv("KLYNE_BASE_URL", "http://127.0.0.1:1") // never reached
 	_, out, err := HandleSearchMessages(context.Background(), nil, SearchInput{Query: "  "})
 	if err != nil {
 		t.Fatalf("err = %v", err)
@@ -78,7 +78,7 @@ func TestHandleSearchMessages_EmptyQuery(t *testing.T) {
 func TestHandleSearchMessages_DaemonDown(t *testing.T) {
 	// Closed port → connection refused. The handler must surface a
 	// friendly error, NOT hang for the OS-default 75-second timeout.
-	t.Setenv("AGENTDECK_BASE_URL", "http://127.0.0.1:1")
+	t.Setenv("KLYNE_BASE_URL", "http://127.0.0.1:1")
 	_, out, err := HandleSearchMessages(context.Background(), nil, SearchInput{Query: "anything"})
 	if err != nil {
 		t.Fatalf("handler should not return go-level error; got %v", err)
@@ -108,7 +108,7 @@ func TestHandleSearchMessages_AppliesProjectPathFilter(t *testing.T) {
 		],
 		"took_ms":1
 	}`)
-	t.Setenv("AGENTDECK_BASE_URL", d.srv.URL)
+	t.Setenv("KLYNE_BASE_URL", d.srv.URL)
 
 	_, out, err := HandleSearchMessages(context.Background(), nil, SearchInput{Query: "x", ProjectPath: "/keep"})
 	if err != nil {
@@ -126,7 +126,7 @@ func TestHandleSearchMessages_AppliesProjectPathFilter(t *testing.T) {
 
 func TestHandleSearchMessages_ForwardsLimitAndSort(t *testing.T) {
 	d := newFakeDaemon(t, http.StatusOK, `{"query":"x","hits":[],"took_ms":0}`)
-	t.Setenv("AGENTDECK_BASE_URL", d.srv.URL)
+	t.Setenv("KLYNE_BASE_URL", d.srv.URL)
 
 	_, _, err := HandleSearchMessages(context.Background(), nil, SearchInput{
 		Query: "x", Limit: 50, Sort: "relevance",

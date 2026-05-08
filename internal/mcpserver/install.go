@@ -12,13 +12,13 @@ import (
 
 // Install command
 // ===============
-// `agentdeck mcp install` writes (or updates) the agentdeck MCP server
+// `klyne mcp install` writes (or updates) the klyne MCP server
 // entry in each detected host's configuration file. Idempotent — safe
 // to re-run on every binary upgrade.
 //
 // Hosts supported:
-//   - Claude Code: ~/.claude.json     {.mcpServers.agentdeck = {...}}
-//   - Codex CLI:   ~/.codex/config.toml [mcp_servers.agentdeck]
+//   - Claude Code: ~/.claude.json     {.mcpServers.klyne = {...}}
+//   - Codex CLI:   ~/.codex/config.toml [mcp_servers.klyne]
 //
 // The Codex config key was confirmed against OpenAI's published Codex
 // MCP docs (2026-05): mcp_servers.<name> with command/args/env keys.
@@ -37,7 +37,7 @@ const (
 type InstallAction string
 
 const (
-	// InstallActionAdded means the agentdeck entry was missing and
+	// InstallActionAdded means the klyne entry was missing and
 	// was newly written into the file.
 	InstallActionAdded InstallAction = "added"
 	// InstallActionUpdated means the entry existed but had a stale
@@ -56,9 +56,18 @@ type InstallReport struct {
 	Action   InstallAction
 }
 
-// agentdeckArgs is the argv passed to the agentdeck binary by the
-// MCP host. Stays in one place so Claude + Codex agree.
-var agentdeckArgs = []string{"mcp"}
+// klyneEntryName is the MCP server name written into host configs.
+const klyneEntryName = "klyne"
+
+// legacyEntryName is the pre-rebrand server name. The install command
+// removes any entry under this key when writing the new one so users
+// migrating from agentdeck don't end up with two MCP servers
+// registered for the same binary.
+const legacyEntryName = "agentdeck"
+
+// klyneArgs is the argv passed to the klyne binary by the MCP host.
+// Stays in one place so Claude + Codex agree.
+var klyneArgs = []string{"mcp"}
 
 // claudeConfigPath returns ~/.claude.json. Returns ("", error) when
 // HOME is unresolvable.
@@ -101,9 +110,9 @@ func DetectAvailablePlatforms() []Platform {
 	return out
 }
 
-// InstallForPlatform writes (or updates) the agentdeck entry in the
+// InstallForPlatform writes (or updates) the klyne entry in the
 // target platform's config file. binaryPath is the absolute path to
-// the agentdeck binary the host should invoke (typically the result
+// the klyne binary the host should invoke (typically the result
 // of os.Executable()).
 //
 // Returns an InstallReport describing whether the file was added,
@@ -121,7 +130,7 @@ func InstallForPlatform(p Platform, binaryPath string) (*InstallReport, error) {
 }
 
 // installClaude reads ~/.claude.json (creating an empty object when
-// missing), merges the agentdeck entry under .mcpServers.agentdeck,
+// missing), merges the klyne entry under .mcpServers.klyne,
 // and writes back. JSON is preserved as a parsed map so any other
 // fields the user has there (theme settings, other MCP servers, etc.)
 // survive untouched.
@@ -146,19 +155,24 @@ func installClaude(binaryPath string) (*InstallReport, error) {
 	}
 	want := map[string]any{
 		"command": binaryPath,
-		"args":    asAnySlice(agentdeckArgs),
+		"args":    asAnySlice(klyneArgs),
 	}
-	existing, present := servers["agentdeck"].(map[string]any)
+	existing, present := servers[klyneEntryName].(map[string]any)
+	_, legacyPresent := servers[legacyEntryName]
 	action := InstallActionAdded
 	switch {
 	case !present:
 		action = InstallActionAdded
-	case mcpEntryEqual(existing, want):
+	case mcpEntryEqual(existing, want) && !legacyPresent:
+		// Idempotent fast-path only when the legacy entry is also
+		// gone — otherwise we still need to rewrite the file to
+		// remove the legacy key.
 		return &InstallReport{Platform: PlatformClaude, Path: path, Action: InstallActionAlreadyInstalled}, nil
 	default:
 		action = InstallActionUpdated
 	}
-	servers["agentdeck"] = want
+	servers[klyneEntryName] = want
+	delete(servers, legacyEntryName)
 	parsed["mcpServers"] = servers
 
 	out, err := json.MarshalIndent(parsed, "", "  ")
@@ -172,7 +186,7 @@ func installClaude(binaryPath string) (*InstallReport, error) {
 }
 
 // installCodex reads ~/.codex/config.toml (creating dir + file when
-// missing), merges the agentdeck entry under [mcp_servers.agentdeck],
+// missing), merges the klyne entry under [mcp_servers.klyne],
 // and writes back. Other top-level keys, [features], [projects.*],
 // [plugins.*], and [marketplaces.*] are preserved through a parse +
 // re-marshal cycle.
@@ -202,19 +216,21 @@ func installCodex(binaryPath string) (*InstallReport, error) {
 	}
 	want := map[string]any{
 		"command": binaryPath,
-		"args":    asAnySlice(agentdeckArgs),
+		"args":    asAnySlice(klyneArgs),
 	}
-	existing, present := servers["agentdeck"].(map[string]any)
+	existing, present := servers[klyneEntryName].(map[string]any)
+	_, legacyPresent := servers[legacyEntryName]
 	action := InstallActionAdded
 	switch {
 	case !present:
 		action = InstallActionAdded
-	case mcpEntryEqual(existing, want):
+	case mcpEntryEqual(existing, want) && !legacyPresent:
 		return &InstallReport{Platform: PlatformCodex, Path: path, Action: InstallActionAlreadyInstalled}, nil
 	default:
 		action = InstallActionUpdated
 	}
-	servers["agentdeck"] = want
+	servers[klyneEntryName] = want
+	delete(servers, legacyEntryName)
 	parsed["mcp_servers"] = servers
 
 	out, err := toml.Marshal(parsed)

@@ -72,9 +72,9 @@ func TestInstallForPlatform_ClaudeAdded(t *testing.T) {
 	if _, ok := servers["other"]; !ok {
 		t.Errorf("existing 'other' server was lost: %v", servers)
 	}
-	ad, ok := servers["agentdeck"].(map[string]any)
+	ad, ok := servers["klyne"].(map[string]any)
 	if !ok {
-		t.Fatalf("agentdeck entry missing or wrong shape: %v", servers["agentdeck"])
+		t.Fatalf("klyne entry missing or wrong shape: %v", servers["klyne"])
 	}
 	if ad["command"] != "/usr/local/bin/agentdeck" {
 		t.Errorf("command = %v, want /usr/local/bin/agentdeck", ad["command"])
@@ -103,10 +103,73 @@ func TestInstallForPlatform_ClaudeIdempotent(t *testing.T) {
 	}
 }
 
+// TestInstallForPlatform_RemovesLegacyAgentdeckEntry pins the migration
+// behaviour from the rebrand: the install command writes the new
+// `klyne` entry AND removes the legacy `agentdeck` entry from the
+// config so users don't end up with both registered after upgrading.
+func TestInstallForPlatform_ClaudeRemovesLegacyAgentdeckEntry(t *testing.T) {
+	home := withFakeHome(t)
+	path := filepath.Join(home, ".claude.json")
+	// Pre-existing config carries the LEGACY "agentdeck" entry from
+	// before the rebrand. Seed must use the literal old key.
+	if err := os.WriteFile(path, []byte(`{"mcpServers":{"agentdeck":{"command":"/old/agentdeck","args":["mcp"]}}}`), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, err := InstallForPlatform(PlatformClaude, "/new/klyne"); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	servers, _ := parsed["mcpServers"].(map[string]any)
+	if _, ok := servers["agentdeck"]; ok {
+		t.Errorf("legacy 'agentdeck' entry was not removed: %v", servers)
+	}
+	if _, ok := servers["klyne"]; !ok {
+		t.Errorf("'klyne' entry was not added: %v", servers)
+	}
+}
+
+func TestInstallForPlatform_CodexRemovesLegacyAgentdeckEntry(t *testing.T) {
+	home := withFakeHome(t)
+	if err := os.MkdirAll(filepath.Join(home, ".codex"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	path := filepath.Join(home, ".codex", "config.toml")
+	// Pre-existing config carries the LEGACY [mcp_servers.agentdeck] table.
+	existing := "model = \"gpt-5\"\n\n[mcp_servers.agentdeck]\ncommand = \"/old/agentdeck\"\nargs = [\"mcp\"]\n"
+	if err := os.WriteFile(path, []byte(existing), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, err := InstallForPlatform(PlatformCodex, "/new/klyne"); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	var parsed map[string]any
+	if err := toml.Unmarshal(body, &parsed); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	servers, _ := parsed["mcp_servers"].(map[string]any)
+	if _, ok := servers["agentdeck"]; ok {
+		t.Errorf("legacy 'agentdeck' entry was not removed: %v", servers)
+	}
+	if _, ok := servers["klyne"]; !ok {
+		t.Errorf("'klyne' entry was not added: %v", servers)
+	}
+}
+
 func TestInstallForPlatform_ClaudeUpdatesStalePath(t *testing.T) {
 	home := withFakeHome(t)
 	path := filepath.Join(home, ".claude.json")
-	if err := os.WriteFile(path, []byte(`{"mcpServers":{"agentdeck":{"command":"/old/path","args":["mcp"]}}}`), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"mcpServers":{"klyne":{"command":"/old/path","args":["mcp"]}}}`), 0o600); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	r, err := InstallForPlatform(PlatformClaude, "/new/path/agentdeck")
@@ -171,9 +234,9 @@ trust_level = "trusted"
 		t.Errorf("projects entry lost: %v", projects)
 	}
 	servers, _ := parsed["mcp_servers"].(map[string]any)
-	ad, ok := servers["agentdeck"].(map[string]any)
+	ad, ok := servers["klyne"].(map[string]any)
 	if !ok {
-		t.Fatalf("agentdeck entry missing: %v", servers)
+		t.Fatalf("klyne entry missing: %v", servers)
 	}
 	if ad["command"] != "/usr/local/bin/agentdeck" {
 		t.Errorf("command = %v", ad["command"])

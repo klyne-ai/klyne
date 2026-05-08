@@ -56,7 +56,7 @@ func userPromptResult(description, text string) *mcp.GetPromptResult {
 	}
 }
 
-// PromptHealthHandler implements the /mcp__agentdeck__health prompt.
+// PromptHealthHandler implements the /mcp__klyne__health prompt.
 // Live: invokes get_context_health and returns its verdict + bloat
 // scorecard as Markdown. Equivalent to the AI calling the tool but
 // triggered explicitly by the user via the slash menu.
@@ -75,7 +75,7 @@ func PromptHealthHandler(ctx context.Context, req *mcp.GetPromptRequest) (*mcp.G
 	), nil
 }
 
-// PromptSessionsHandler implements /mcp__agentdeck__sessions. Live:
+// PromptSessionsHandler implements /mcp__klyne__sessions. Live:
 // lists every Claude + Codex session in cwd's project so the user can
 // see what's discoverable and pick one for the next call.
 func PromptSessionsHandler(ctx context.Context, req *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
@@ -93,7 +93,7 @@ func PromptSessionsHandler(ctx context.Context, req *mcp.GetPromptRequest) (*mcp
 	), nil
 }
 
-// PromptHandoffHandler implements /mcp__agentdeck__handoff. Live:
+// PromptHandoffHandler implements /mcp__klyne__handoff. Live:
 // renders the deterministic handoff Markdown the user can paste into
 // a fresh session.
 func PromptHandoffHandler(ctx context.Context, req *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
@@ -111,7 +111,7 @@ func PromptHandoffHandler(ctx context.Context, req *mcp.GetPromptRequest) (*mcp.
 		// generic explanation when even that is empty.
 		text := strings.TrimSpace(out.Markdown)
 		if text == "" {
-			text = "No handoff available for this working directory. Run `/mcp__agentdeck__sessions` to see candidates."
+			text = "No handoff available for this working directory. Run `/mcp__klyne__sessions` to see candidates."
 		}
 		return userPromptResult("Handoff (no session resolved)", text), nil
 	}
@@ -121,7 +121,7 @@ func PromptHandoffHandler(ctx context.Context, req *mcp.GetPromptRequest) (*mcp.
 	), nil
 }
 
-// PromptSearchHandler implements /mcp__agentdeck__search. Live:
+// PromptSearchHandler implements /mcp__klyne__search. Live:
 // invokes search_messages and returns the hits as Markdown so the
 // user (and Claude) can pick a session_id to drill into.
 //
@@ -182,7 +182,7 @@ func formatSearchAsMarkdown(out SearchOutput) string {
 	return b.String()
 }
 
-// PromptPreCompactHandler implements /mcp__agentdeck__precompact.
+// PromptPreCompactHandler implements /mcp__klyne__precompact.
 // Live: recovers messages preceding the last /compact event (Claude)
 // or replacement_history (Codex). When no compact has happened, the
 // text explains why nothing was returned.
@@ -238,7 +238,7 @@ func formatHealthAsMarkdown(out GetContextHealthOutput) string {
 // sessions with CLI / activity / last-modified per row.
 func formatSessionsAsMarkdown(out ListSessionsOutput) string {
 	if len(out.Candidates) == 0 {
-		return fmt.Sprintf("No agentdeck-discoverable sessions in `%s`.", out.CWD)
+		return fmt.Sprintf("No klyne-discoverable sessions in `%s`.", out.CWD)
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Sessions in `%s`\n\n", out.CWD)

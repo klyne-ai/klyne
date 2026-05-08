@@ -1,7 +1,7 @@
 // Command agentdeck is the W0 stub of the daemon CLI. Subcommands are
 // wired here; their bodies are filled in by W12 (app wiring).
 //
-// Running `agentdeck` with no subcommand defaults to `agentdeck start`,
+// Running `klyne` with no subcommand defaults to `klyne start`,
 // matching the v1 spec ("agentdeck (no args). Daemon starts, opens
 // http://127.0.0.1:7878 in default browser." — spec Flow A).
 package main
@@ -28,10 +28,10 @@ func main() {
 // tests can construct fresh trees without state leakage.
 func newRootCmd() *cobra.Command {
 	root := &cobra.Command{
-		Use:     "agentdeck",
+		Use:     "klyne",
 		Short:   "Local-first dashboard for Claude Code and Codex CLI sessions",
 		Version: version,
-		// With no subcommand, behave as `agentdeck start` (spec Flow A).
+		// With no subcommand, behave as `klyne start` (spec Flow A).
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runStart(cmd, args)
 		},

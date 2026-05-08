@@ -11,13 +11,13 @@ import (
 // when tool semantics change so MCP hosts can detect upgrades.
 //
 // v0.3.0 — slice 4: Codex parity for all four tools and live MCP
-// prompts surfaced under Claude Code's `/mcp__agentdeck__*` slash
+// prompts surfaced under Claude Code's `/mcp__klyne__*` slash
 // menu.
-// v0.4.0 — slice 5: search_messages tool + /mcp__agentdeck__search
+// v0.4.0 — slice 5: search_messages tool + /mcp__klyne__search
 // prompt for cross-session full-text search.
 const version = "v0.4.0"
 
-// New constructs the agentdeck MCP server with every v1 tool
+// New constructs the klyne MCP server with every v1 tool
 // registered. The returned server is ready for Run.
 //
 // Tool surface (slice 2):
@@ -39,7 +39,7 @@ const version = "v0.4.0"
 // use a different schema and a different storage model.
 func New() *mcp.Server {
 	srv := mcp.NewServer(&mcp.Implementation{
-		Name:    "agentdeck",
+		Name:    "klyne",
 		Version: version,
 	}, nil)
 
@@ -68,13 +68,13 @@ The handoff contains: project path, recent task topic, files touched, commands r
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "search_messages",
-		Description: `Full-text search across every Claude Code and Codex session agentdeck has indexed.
+		Description: `Full-text search across every Claude Code and Codex session klyne has indexed.
 
 Use this when the user asks "where did we talk about X?" or "find that conversation about Y" — anything that needs cross-session lookup. Returns hits with session_id (so you can drill in via get_pre_compact_context or generate_handoff), project_path, role, snippet (FTS-highlighted), and timestamp.
 
 Sort defaults to "recent" (newest first); pass sort:"relevance" for BM25 best-match. Optional project_path argument filters hits to one repository.
 
-REQUIRES the agentdeck daemon to be running (the FTS index lives in SQLite). When unreachable the tool returns daemon_down=true with a clear restart hint instead of hanging.`,
+REQUIRES the klyne daemon to be running (the FTS index lives in SQLite). When unreachable the tool returns daemon_down=true with a clear restart hint instead of hanging.`,
 	}, HandleSearchMessages)
 
 	mcp.AddTool(srv, &mcp.Tool{
@@ -88,7 +88,7 @@ For Codex sessions, the recovery uses the embedded payload.replacement_history t
 
 	// Live MCP prompts. Each prompt parallels one of the tools above
 	// and surfaces in Claude Code's slash menu as
-	// /mcp__agentdeck__<name>. Handlers run server-side and return
+	// /mcp__klyne__<name>. Handlers run server-side and return
 	// the result as injected user-message content — no AI roundtrip
 	// needed for the fetch.
 	srv.AddPrompt(&mcp.Prompt{
