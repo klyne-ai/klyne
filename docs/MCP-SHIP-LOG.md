@@ -1,8 +1,96 @@
 # klyne MCP — Ship Log
 
-**Build date:** 2026-05-08 (slice 5: cross-session search via daemon FTS)
-**Branch:** `feat/bootstrap-and-wave1`
+**Build date:** 2026-05-09 (slice 6: reproducible proof + README rewrite + bug fixes)
+**Branch:** `init` (klyne-ai/klyne)
 **Server version advertised over MCP:** `klyne v0.4.0`
+
+## Slice 6 — Reproducible proof + README rewrite + integration bug fixes
+
+The first slice that makes klyne's *marketing* defensible. Every
+public claim now has a fixture, a Go test, and a `claim.md` with a
+side-by-side comparison against what vanilla Claude returns.
+
+**`docs/proof/` directory** — `make proof` runs every test under
+this tree. Two scenarios:
+
+  - **`01-compact-recovery/`** — Synthetic Claude session about a
+    bank-SMS regex bug. 12 pre-compact messages + `/compact` + 2
+    post-compact messages. Tests assert (a) Klyne's
+    `get_pre_compact_context` recovers all 12 pre-compact messages
+    including high-signal strings (file paths, the user-verified
+    `XX1234` mask, the exact npm command, the test result) and (b)
+    those same strings do NOT appear in any post-compact line —
+    confirming the AI's view, post-compact, has lost them. **1165
+    bytes of conversational context recovered per fixture run** is
+    surfaced in `t.Logf` so users can see the magnitude.
+
+  - **`02-handoff-equivalence/`** — Synthetic webhook-retry session
+    paused mid-task. Tests assert (a) every handoff section header
+    is present and populated from fixture content, (b) rendering
+    twice produces byte-identical output (deterministic), (c) files
+    iterated on are marked with `(×N)` so the new session knows
+    which file is central. The verbatim handoff Markdown is captured
+    in `dump_test.go` and pasted into `claim.md` as the exact
+    side-by-side against vanilla Claude's likely output.
+
+**Public API addition** — `mcpserver.RenderHandoff(snap)` exported
+so external proof tests can render a handoff from a snapshot
+without going through the MCP request flow. Internal call sites
+unchanged.
+
+**Pre-existing bug fixes during integration:**
+
+  - `TestCost_Summary_DefaultGroup` was checking for `model` but the
+    handler in `cost.go` is documented to default to `day`, and the
+    UI explicitly passes `group=day`. The test was the bug.
+  - `TestMigrationsApply` expected 5 migrations; 006/007/008 had
+    landed without the test being extended.
+  - `TestColdStart` failed once because `bin/klyne` was a stale
+    pre-rebrand binary; rebuilt fresh and 562ms cold-start is now
+    reproducible.
+
+**README rewrite** — restructured to lead with the two killer
+scenarios that match the project's real value prop:
+
+  1. *"After /compact, your AI has lost context. Klyne recovers it."*
+     → links directly to `docs/proof/01-compact-recovery/`
+  2. *"Vanilla Claude's summary is variable; Klyne's handoff is
+     deterministic."*
+     → links directly to `docs/proof/02-handoff-equivalence/`
+
+Plus: tools/prompts tables now include `search_messages` and the
+five `/mcp__klyne__*` slash commands; install section covers
+`klyne mcp install` with auto-detect and legacy `agentdeck`
+cleanup; "What klyne does NOT claim" section to prevent overreach;
+roadmap reflects Codex parity, search, and proof artifacts all
+shipped.
+
+**End-to-end smoke verified:**
+
+  - `make proof` → both scenarios green in <2s
+  - `make build` → fresh binary at `bin/klyne`
+  - Fresh install against temp HOME → writes klyne entries to both
+    Claude and Codex configs; preserves unrelated servers; removes
+    legacy `agentdeck` entries cleanly
+
+**Per-tool proof coverage matrix:**
+
+| Tool | Proof |
+|---|---|
+| `get_pre_compact_context` | ✅ `docs/proof/01-compact-recovery/` |
+| `generate_handoff` | ✅ `docs/proof/02-handoff-equivalence/` |
+| `list_sessions` | (Covered by `internal/mcpserver/sessions_test.go`) |
+| `get_context_health` | (Covered by `internal/contexthealth/*_test.go`) |
+| `search_messages` | (Covered by `internal/mcpserver/tool_search_test.go` with `httptest`) |
+
+The two README-headlined claims have proof under `docs/proof/`. The
+remaining tools have unit tests in their owning packages but are
+not currently called out in the README hero, so they don't need a
+parallel `docs/proof/` artifact yet. If their claims are ever
+elevated to README hero status, a `docs/proof/` companion lands
+with that change — by convention.
+
+
 
 ## Slice 5 — Cross-session full-text search
 
