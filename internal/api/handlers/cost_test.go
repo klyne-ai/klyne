@@ -173,7 +173,11 @@ func TestCost_Summary_DefaultGroup(t *testing.T) {
 	srv := httptest.NewServer(newCostRouter(t, db))
 	t.Cleanup(srv.Close)
 
-	// No group param — should default to "model".
+	// No group param — must match the handler's documented default
+	// (see cost.go: "default \"day\""). The UI explicitly passes
+	// group=day, so the default only matters for ad-hoc API consumers,
+	// but locking it down here means future renames break loudly
+	// instead of silently shipping a new default.
 	resp, err := http.Get(srv.URL + "/cost/summary")
 	if err != nil {
 		t.Fatalf("GET: %v", err)
@@ -188,8 +192,8 @@ func TestCost_Summary_DefaultGroup(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if body.Group != api.CostGroupModel {
-		t.Errorf("expected default group 'model', got %q", body.Group)
+	if body.Group != api.CostGroupDay {
+		t.Errorf("expected default group 'day' (handler default per cost.go docstring), got %q", body.Group)
 	}
 }
 
