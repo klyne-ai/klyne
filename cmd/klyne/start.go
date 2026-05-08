@@ -24,9 +24,9 @@ const defaultDemoFixturesDir = "examples/sample-jsonl"
 // newStartCmd registers `klyne start`.
 //
 // Behavior (spec Flow A):
-//   - Loads config from ~/.agentdeck/config.toml (or defaults).
+//   - Loads config from ~/.klyne/config.toml (or defaults).
 //   - Builds App via app.New.
-//   - Writes ~/.agentdeck/daemon.pid.
+//   - Writes ~/.klyne/daemon.pid.
 //   - Installs SIGINT/SIGTERM handlers via signal.NotifyContext.
 //   - Calls App.Start; on return removes the pidfile.
 //
@@ -60,8 +60,8 @@ func runStart(cmd *cobra.Command, _ []string) error {
 		// Reroute the DB to a throwaway tempdir path and disable the
 		// live connectors. The temp DB is recreated on every start so
 		// demo state never leaks between runs and never collides with
-		// the user's real ~/.agentdeck/agentdeck.db.
-		demoDB := filepath.Join(os.TempDir(), "agentdeck-demo.db")
+		// the user's real ~/.klyne/klyne.db.
+		demoDB := filepath.Join(os.TempDir(), "klyne-demo.db")
 		if err := os.Remove(demoDB); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("klyne start: cleanup demo db: %w", err)
 		}

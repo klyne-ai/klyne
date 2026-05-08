@@ -17,7 +17,7 @@ import (
 	"github.com/klyne-ai/klyne/internal/store"
 )
 
-// newDoctorCmd registers `agentdeck doctor`.
+// newDoctorCmd registers `klyne doctor`.
 //
 // Output: a single JSON document on stdout.
 // Exit status:
@@ -38,7 +38,7 @@ func newDoctorCmd() *cobra.Command {
 	}
 }
 
-// doctorReport is the structured output of `agentdeck doctor`.
+// doctorReport is the structured output of `klyne doctor`.
 type doctorReport struct {
 	OK            bool                       `json:"ok"`
 	Version       string                     `json:"version"`
@@ -62,14 +62,14 @@ func runDoctor(cmd *cobra.Command, _ []string) error {
 	enc := json.NewEncoder(cmd.OutOrStdout())
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(report); err != nil {
-		return fmt.Errorf("agentdeck doctor: encode report: %w", err)
+		return fmt.Errorf("klyne doctor: encode report: %w", err)
 	}
 
 	if !ok {
 		// Cobra would normally print the error message. We have already
 		// emitted JSON; signal exit-1 by returning a sentinel error that
 		// Cobra suppresses (SilenceUsage is true on the root command).
-		return errors.New("agentdeck doctor: not green")
+		return errors.New("klyne doctor: not green")
 	}
 	return nil
 }

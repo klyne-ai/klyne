@@ -23,7 +23,7 @@ import (
 //
 // Methodology:
 //   - Set HOME to a temp dir so the daemon writes config/db to an isolated
-//     location, not ~/.agentdeck.
+//     location, not ~/.klyne.
 //   - Write a config.toml that binds to a specific port and disables
 //     all connectors (no fsnotify watches) so the daemon starts in <200 ms.
 //   - Poll /healthz every 10 ms from the moment the process is started.
@@ -31,7 +31,7 @@ import (
 //
 // This test is skipped:
 //   - With -short flag (dev runs that avoid subprocess overhead).
-//   - When bin/agentdeck does not exist (pre-build environments).
+//   - When bin/klyne does not exist (pre-build environments).
 func TestColdStart(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping cold-start subprocess test in -short mode")
@@ -39,12 +39,12 @@ func TestColdStart(t *testing.T) {
 
 	binPath := binaryPath(t)
 	if _, err := os.Stat(binPath); os.IsNotExist(err) {
-		t.Skip("bin/agentdeck not found; run 'make build' first")
+		t.Skip("bin/klyne not found; run 'make build' first")
 	}
 
-	// Create a temp home dir so the daemon doesn't touch ~/.agentdeck.
+	// Create a temp home dir so the daemon doesn't touch ~/.klyne.
 	fakeHome := t.TempDir()
-	agentdeckDir := filepath.Join(fakeHome, ".agentdeck")
+	agentdeckDir := filepath.Join(fakeHome, ".klyne")
 	if err := os.MkdirAll(agentdeckDir, 0o700); err != nil {
 		t.Fatalf("mkdir .agentdeck: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestColdStart(t *testing.T) {
 addr = "%s"
 
 [paths]
-db = "%s/agentdeck.db"
+db = "%s/klyne.db"
 
 [connectors.claude]
 enabled = false
@@ -136,7 +136,7 @@ embed_model = "off"
 	}
 }
 
-// binaryPath returns the absolute path to bin/agentdeck relative to this
+// binaryPath returns the absolute path to bin/klyne relative to this
 // test file's location (two directories up from internal/bench/).
 func binaryPath(t testing.TB) string {
 	t.Helper()

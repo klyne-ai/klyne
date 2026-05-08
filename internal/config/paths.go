@@ -1,5 +1,5 @@
 // Package config provides loading, saving, and path resolution for
-// ~/.agentdeck/config.toml. Loader implementation lives in config.go;
+// ~/.klyne/config.toml. Loader implementation lives in config.go;
 // this file handles per-OS path resolution.
 package config
 
@@ -14,7 +14,7 @@ import (
 var HomeDir = os.UserHomeDir
 
 // ConfigDir returns the agentdeck configuration directory:
-//   - macOS / Linux: ~/.agentdeck
+//   - macOS / Linux: ~/.klyne
 //   - Windows:       %USERPROFILE%\.agentdeck
 //
 // It calls HomeDir() each time so tests can swap the implementation.
@@ -22,16 +22,16 @@ func ConfigDir() string {
 	if runtime.GOOS == "windows" {
 		// On Windows prefer %USERPROFILE% over %APPDATA% to match the spec.
 		if profile := os.Getenv("USERPROFILE"); profile != "" {
-			return filepath.Join(profile, ".agentdeck")
+			return filepath.Join(profile, ".klyne")
 		}
 	}
 	home, err := HomeDir()
 	if err != nil {
 		// Fall back to the working directory if the home directory cannot
 		// be determined (e.g., no passwd entry in a container).
-		return filepath.Join(".", ".agentdeck")
+		return filepath.Join(".", ".klyne")
 	}
-	return filepath.Join(home, ".agentdeck")
+	return filepath.Join(home, ".klyne")
 }
 
 // ConfigFile returns the path to the TOML configuration file.
@@ -41,7 +41,7 @@ func ConfigFile() string {
 
 // DBPath returns the path to the SQLite database file.
 func DBPath() string {
-	return filepath.Join(ConfigDir(), "agentdeck.db")
+	return filepath.Join(ConfigDir(), "klyne.db")
 }
 
 // PricingOverridePath returns the path to the optional user-supplied

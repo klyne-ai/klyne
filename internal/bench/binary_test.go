@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// TestBinarySize asserts that bin/agentdeck is under 25 MB.
+// TestBinarySize asserts that bin/klyne is under 25 MB.
 //
 // Spec §12 budget: binary size < 25 MB.
 //
@@ -18,7 +18,7 @@ func TestBinarySize(t *testing.T) {
 	path := repoBinaryPath(t)
 	info, err := os.Stat(path)
 	if os.IsNotExist(err) {
-		t.Skipf("bin/agentdeck not found at %s; run 'make build' first", path)
+		t.Skipf("bin/klyne not found at %s; run 'make build' first", path)
 	}
 	if err != nil {
 		t.Fatalf("stat binary: %v", err)
@@ -40,7 +40,7 @@ func BenchmarkBinarySize(b *testing.B) {
 	path := repoBinaryPath(b)
 	info, err := os.Stat(path)
 	if os.IsNotExist(err) {
-		b.Skipf("bin/agentdeck not found at %s; run 'make build' first", path)
+		b.Skipf("bin/klyne not found at %s; run 'make build' first", path)
 	}
 	if err != nil {
 		b.Fatalf("stat binary: %v", err)
@@ -59,7 +59,7 @@ func BenchmarkBinarySize(b *testing.B) {
 	}
 }
 
-// repoBinaryPath returns the absolute path to bin/agentdeck by locating the
+// repoBinaryPath returns the absolute path to bin/klyne by locating the
 // repo root two directories above the current test file.
 func repoBinaryPath(tb testing.TB) string {
 	tb.Helper()

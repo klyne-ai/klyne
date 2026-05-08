@@ -222,7 +222,7 @@ func TestWizardComplete_WritesConfig(t *testing.T) {
 	}
 
 	// Verify config was written to disk.
-	configPath := filepath.Join(tmpHome, ".agentdeck", "config.toml")
+	configPath := filepath.Join(tmpHome, ".klyne", "config.toml")
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		t.Fatalf("config file not found at %s", configPath)
 	}

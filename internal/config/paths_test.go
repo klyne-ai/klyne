@@ -23,7 +23,7 @@ func TestConfigDir_MacLinux(t *testing.T) {
 	}
 	home := withTempHome(t)
 	got := ConfigDir()
-	want := filepath.Join(home, ".agentdeck")
+	want := filepath.Join(home, ".klyne")
 	if got != want {
 		t.Errorf("ConfigDir() = %q; want %q", got, want)
 	}
@@ -35,7 +35,7 @@ func TestConfigFile(t *testing.T) {
 	}
 	home := withTempHome(t)
 	got := ConfigFile()
-	want := filepath.Join(home, ".agentdeck", "config.toml")
+	want := filepath.Join(home, ".klyne", "config.toml")
 	if got != want {
 		t.Errorf("ConfigFile() = %q; want %q", got, want)
 	}
@@ -47,7 +47,7 @@ func TestDBPath(t *testing.T) {
 	}
 	home := withTempHome(t)
 	got := DBPath()
-	want := filepath.Join(home, ".agentdeck", "agentdeck.db")
+	want := filepath.Join(home, ".klyne", "klyne.db")
 	if got != want {
 		t.Errorf("DBPath() = %q; want %q", got, want)
 	}
@@ -59,7 +59,7 @@ func TestPricingOverridePath(t *testing.T) {
 	}
 	home := withTempHome(t)
 	got := PricingOverridePath()
-	want := filepath.Join(home, ".agentdeck", "pricing.json")
+	want := filepath.Join(home, ".klyne", "pricing.json")
 	if got != want {
 		t.Errorf("PricingOverridePath() = %q; want %q", got, want)
 	}
@@ -73,9 +73,9 @@ func TestPaths_PerOS(t *testing.T) {
 		os     string
 		suffix string
 	}{
-		{"darwin", ".agentdeck"},
-		{"linux", ".agentdeck"},
-		{"windows", ".agentdeck"},
+		{"darwin", ".klyne"},
+		{"linux", ".klyne"},
+		{"windows", ".klyne"},
 	}
 
 	for _, tc := range cases {

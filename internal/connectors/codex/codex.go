@@ -1,4 +1,4 @@
-// Package codex implements the Codex CLI connector for agentdeck.
+// Package codex implements the Codex CLI connector for klyne.
 //
 // Codex sessions are stored under:
 //

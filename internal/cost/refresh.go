@@ -1,7 +1,7 @@
 // Package cost — refresh.go handles loading and decoding pricing.json files.
 //
 // The embedded pricing.json is the authoritative default. The user may
-// optionally supply ~/.agentdeck/pricing.json (path from config) to override
+// optionally supply ~/.klyne/pricing.json (path from config) to override
 // individual model rates or add new models. Override semantics: per-model
 // entries in the override file replace (not merge) the corresponding embedded
 // entry. Models absent from the override file keep their embedded values.

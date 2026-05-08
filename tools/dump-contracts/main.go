@@ -1,5 +1,5 @@
 // dump-contracts is a small Go AST tool that emits a JSON dump of every
-// exported struct (and its fields + JSON tags) declared in agentdeck's
+// exported struct (and its fields + JSON tags) declared in klyne's
 // W0-frozen contract files. The frontend's contract-check (W13) loads
 // this dump and asserts its TypeScript DTOs match field-by-field.
 //

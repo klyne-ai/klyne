@@ -174,7 +174,7 @@ func TestSeedFromFixtures_MissingDirIsNonFatal(t *testing.T) {
 }
 
 // TestDemoDBPath_NotProductionPath asserts that the demo DB path the start
-// command uses (os.TempDir()/agentdeck-demo.db) is distinct from the
+// command uses (os.TempDir()/klyne-demo.db) is distinct from the
 // production DB path (config.DBPath()). This is a string-level guard
 // against a future refactor that accidentally points demo mode at the
 // real DB.
@@ -189,7 +189,7 @@ func TestDemoDBPath_NotProductionPath(t *testing.T) {
 	t.Cleanup(func() { config.HomeDir = orig })
 
 	prodPath := config.DBPath()
-	demoPath := filepath.Join(os.TempDir(), "agentdeck-demo.db")
+	demoPath := filepath.Join(os.TempDir(), "klyne-demo.db")
 
 	if prodPath == demoPath {
 		t.Fatalf("demo DB path %q must NOT equal production DB path %q",
@@ -200,8 +200,8 @@ func TestDemoDBPath_NotProductionPath(t *testing.T) {
 	}
 	// Double check the production path is the canonical location, not
 	// some accidentally-shared tempdir.
-	if !strings.Contains(prodPath, ".agentdeck") {
-		t.Fatalf("production DB path %q lost its '.agentdeck' segment — refactor risk",
+	if !strings.Contains(prodPath, ".klyne") {
+		t.Fatalf("production DB path %q lost its '.klyne' segment — refactor risk",
 			prodPath)
 	}
 }

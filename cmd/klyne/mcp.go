@@ -11,7 +11,7 @@ import (
 	"github.com/klyne-ai/klyne/internal/mcpserver"
 )
 
-// newMcpCmd registers `agentdeck mcp`.
+// newMcpCmd registers `klyne mcp`.
 //
 // The command runs the klyne MCP server over stdio, the standard
 // transport that Claude Code (and other MCP hosts) use to spawn local

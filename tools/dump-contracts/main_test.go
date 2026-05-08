@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// repoRoot returns the absolute path to the agentdeck repo root, derived
+// repoRoot returns the absolute path to the klyne repo root, derived
 // from this test file's location: <root>/tools/dump-contracts/main_test.go.
 func repoRoot(t *testing.T) string {
 	t.Helper()

@@ -52,7 +52,7 @@ func TestPidfile_WriteReadRemove(t *testing.T) {
 
 func TestPidfile_PathInsideConfigDir(t *testing.T) {
 	tmp := withTempHome(t)
-	want := filepath.Join(tmp, ".agentdeck", PidfileName)
+	want := filepath.Join(tmp, ".klyne", PidfileName)
 	if got := PidfilePath(); got != want {
 		t.Fatalf("PidfilePath = %q, want %q", got, want)
 	}

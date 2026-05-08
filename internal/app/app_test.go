@@ -23,7 +23,7 @@ func aiChatReqStub() ai.ChatRequest  { return ai.ChatRequest{Model: "x"} }
 func aiEmbedReqStub() ai.EmbedRequest { return ai.EmbedRequest{Model: "x", Input: "y"} }
 
 // newTestConfig returns a *config.Config rooted at t.TempDir(): the DB
-// lives in <tempdir>/agentdeck.db and connectors point at empty
+// lives in <tempdir>/klyne.db and connectors point at empty
 // subdirectories so Watch returns no events. Browser is suppressed.
 func newTestConfig(t *testing.T) *config.Config {
 	t.Helper()
@@ -36,7 +36,7 @@ func newTestConfig(t *testing.T) *config.Config {
 
 	cfg := config.Defaults()
 	cfg.Server.Addr = "127.0.0.1:0" // random port
-	cfg.Paths.DB = filepath.Join(tmp, "agentdeck.db")
+	cfg.Paths.DB = filepath.Join(tmp, "klyne.db")
 	cfg.Paths.PricingOverride = filepath.Join(tmp, "pricing.json")
 	cfg.Connectors.Claude.Root = filepath.Join(tmp, "claude")
 	cfg.Connectors.Codex.Root = filepath.Join(tmp, "codex")

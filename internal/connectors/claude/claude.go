@@ -1,4 +1,4 @@
-// Package claude is the agentdeck connector for the Claude Code CLI.
+// Package claude is the klyne connector for the Claude Code CLI.
 //
 // It implements the connectors.Connector interface by:
 //   - Discovering *.jsonl files under ~/.claude/projects/<encoded-cwd>/<uuid>.jsonl

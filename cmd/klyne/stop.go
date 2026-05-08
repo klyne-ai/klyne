@@ -20,7 +20,7 @@ const (
 	stopMaxWait      = 3 * time.Second
 )
 
-// newStopCmd registers `agentdeck stop`.
+// newStopCmd registers `klyne stop`.
 //
 // Idempotent:
 //   - missing pidfile  → exit 0 with an informational message.
@@ -29,7 +29,7 @@ const (
 func newStopCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "stop",
-		Short: "Stop the running agentdeck daemon",
+		Short: "Stop the running klyne daemon",
 		RunE:  runStop,
 	}
 }
@@ -40,30 +40,30 @@ func runStop(cmd *cobra.Command, _ []string) error {
 	pid, err := app.ReadPidfile()
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			_, _ = fmt.Fprintln(out, "agentdeck stop: no daemon running (pidfile absent)")
+			_, _ = fmt.Fprintln(out, "klyne stop: no daemon running (pidfile absent)")
 			return nil
 		}
 		// Bad contents — clean up and report.
 		_ = app.RemovePidfile()
-		return fmt.Errorf("agentdeck stop: read pidfile: %w", err)
+		return fmt.Errorf("klyne stop: read pidfile: %w", err)
 	}
 
 	proc, err := os.FindProcess(pid)
 	if err != nil {
 		_ = app.RemovePidfile()
-		return fmt.Errorf("agentdeck stop: find process %d: %w", pid, err)
+		return fmt.Errorf("klyne stop: find process %d: %w", pid, err)
 	}
 
 	// Liveness probe via signal 0.
 	if err := proc.Signal(syscall.Signal(0)); err != nil {
 		// Process already gone — clean up and exit 0.
 		_ = app.RemovePidfile()
-		_, _ = fmt.Fprintf(out, "agentdeck stop: pid %d not running; removed stale pidfile\n", pid)
+		_, _ = fmt.Fprintf(out, "klyne stop: pid %d not running; removed stale pidfile\n", pid)
 		return nil
 	}
 
 	if err := proc.Signal(syscall.SIGTERM); err != nil {
-		return fmt.Errorf("agentdeck stop: signal pid %d: %w", pid, err)
+		return fmt.Errorf("klyne stop: signal pid %d: %w", pid, err)
 	}
 
 	// Wait for the daemon to exit (or time out).
@@ -72,7 +72,7 @@ func runStop(cmd *cobra.Command, _ []string) error {
 		if err := proc.Signal(syscall.Signal(0)); err != nil {
 			// gone
 			_ = app.RemovePidfile()
-			_, _ = fmt.Fprintf(out, "agentdeck stop: pid %d stopped\n", pid)
+			_, _ = fmt.Fprintf(out, "klyne stop: pid %d stopped\n", pid)
 			return nil
 		}
 		time.Sleep(stopWaitInterval)
@@ -80,5 +80,5 @@ func runStop(cmd *cobra.Command, _ []string) error {
 
 	// Daemon did not exit in time — leave pidfile in place so an operator
 	// can inspect, but report the timeout so scripts can decide what to do.
-	return fmt.Errorf("agentdeck stop: pid %d did not exit within %s", pid, stopMaxWait)
+	return fmt.Errorf("klyne stop: pid %d did not exit within %s", pid, stopMaxWait)
 }

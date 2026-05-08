@@ -15,7 +15,7 @@
 package cost
 
 // PricingFile is the on-disk JSON document. Both the binary's embedded
-// default and the user's optional ~/.agentdeck/pricing.json override
+// default and the user's optional ~/.klyne/pricing.json override
 // share this shape.
 type PricingFile struct {
 	// Version is the schema version. v1 ships with Version=1.

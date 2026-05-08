@@ -1,5 +1,5 @@
 // Package config provides loading, saving, and path resolution for
-// ~/.agentdeck/config.toml.
+// ~/.klyne/config.toml.
 //
 // The typed Config struct and its Defaults() constructor live in
 // schema.go (W0-owned). This file owns only the I/O layer.

@@ -1,4 +1,4 @@
-// Package claude implements the Claude Code connector for agentdeck.
+// Package claude implements the Claude Code connector for klyne.
 //
 // # Parse
 //

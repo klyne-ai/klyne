@@ -1,4 +1,4 @@
-// Package config defines the typed shape of ~/.agentdeck/config.toml.
+// Package config defines the typed shape of ~/.klyne/config.toml.
 // The loader (read, parse, expand "~", validate) lives in W6.
 //
 // W0-FROZEN CONTRACT
@@ -87,8 +87,8 @@ func Defaults() *Config {
 			Addr: "127.0.0.1:7878",
 		},
 		Paths: PathsConfig{
-			DB:              "~/.agentdeck/agentdeck.db",
-			PricingOverride: "~/.agentdeck/pricing.json",
+			DB:              "~/.klyne/klyne.db",
+			PricingOverride: "~/.klyne/pricing.json",
 		},
 		Connectors: ConnectorsConfig{
 			Claude: ClaudeConnectorConfig{

@@ -1,8 +1,8 @@
-// Command agentdeck is the W0 stub of the daemon CLI. Subcommands are
+// Command klyne is the W0 stub of the daemon CLI. Subcommands are
 // wired here; their bodies are filled in by W12 (app wiring).
 //
 // Running `klyne` with no subcommand defaults to `klyne start`,
-// matching the v1 spec ("agentdeck (no args). Daemon starts, opens
+// matching the v1 spec ("klyne (no args). Daemon starts, opens
 // http://127.0.0.1:7878 in default browser." — spec Flow A).
 package main
 
@@ -54,6 +54,6 @@ func newRootCmd() *cobra.Command {
 // real implementation lands.
 func stub(cmd *cobra.Command, name, owner string) error {
 	_, err := fmt.Fprintf(cmd.OutOrStdout(),
-		"agentdeck %s: not implemented (%s)\n", name, owner)
+		"klyne %s: not implemented (%s)\n", name, owner)
 	return err
 }

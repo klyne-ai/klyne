@@ -235,11 +235,11 @@ func TestConfigDir_HomeDirError(t *testing.T) {
 	t.Cleanup(func() { HomeDir = orig })
 
 	got := ConfigDir()
-	// Should fall back to "./.agentdeck" (relative), not panic.
+	// Should fall back to "./.klyne" (relative), not panic.
 	if got == "" {
 		t.Error("ConfigDir() returned empty string on HomeDir error")
 	}
-	if filepath.Base(got) != ".agentdeck" {
+	if filepath.Base(got) != ".klyne" {
 		t.Errorf("ConfigDir() base = %q; want .agentdeck", filepath.Base(got))
 	}
 }
@@ -258,7 +258,7 @@ func TestSave_MkdirAllError(t *testing.T) {
 	// MkdirAll fails.
 	home, _ := HomeDir()
 	// Create a plain file at the path where .agentdeck should be created.
-	blocker := filepath.Join(home, ".agentdeck")
+	blocker := filepath.Join(home, ".klyne")
 	if err := os.WriteFile(blocker, []byte("blocker"), 0o600); err != nil {
 		t.Fatalf("WriteFile blocker: %v", err)
 	}
@@ -283,7 +283,7 @@ func TestLoad_DefaultsMissingAndSaveFails(t *testing.T) {
 	// Make the home directory a read-only file so that Save() → MkdirAll
 	// fails, which propagates back through Load().
 	home, _ := HomeDir()
-	blocker := filepath.Join(home, ".agentdeck")
+	blocker := filepath.Join(home, ".klyne")
 	if err := os.WriteFile(blocker, []byte("blocker"), 0o600); err != nil {
 		t.Fatalf("WriteFile blocker: %v", err)
 	}
