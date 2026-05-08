@@ -43,7 +43,7 @@
   <div>
     <h2 class="text-xl font-bold text-gray-100">Choose your AI models</h2>
     <p class="text-sm text-gray-400 mt-1">
-      agentdeck uses AI to generate rolling summaries and session titles.
+      klyne uses AI to generate rolling summaries and session titles.
       The recommended options are the most cost-effective for your available keys.
     </p>
   </div>

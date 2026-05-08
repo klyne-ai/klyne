@@ -8,7 +8,7 @@
 
 ## Universal preamble
 
-You are working on the agentdeck repo. Spec at `compass_artifact_wf-d189e421-ff1d-443c-95b8-19b52fcd59b4_text_markdown.md`. §18 decisions are LOCKED. TDD-first; ≥80% coverage. After every change >30 lines run `make ci`. Use `superpowers:verification-before-completion` before claiming done.
+You are working on the klyne repo. Spec at `compass_artifact_wf-d189e421-ff1d-443c-95b8-19b52fcd59b4_text_markdown.md`. §18 decisions are LOCKED. TDD-first; ≥80% coverage. After every change >30 lines run `make ci`. Use `superpowers:verification-before-completion` before claiming done.
 
 **Single-writer rule:** modify only files under "Owned paths". If a wiring need exposes a missing function in another package, **open a PR back to that workstream's owner** — never silently add to their files.
 
@@ -16,7 +16,7 @@ You are working on the agentdeck repo. Spec at `compass_artifact_wf-d189e421-ff1
 
 ## Goal
 
-Compose all the modules into a running daemon. Implement `agentdeck start`, `agentdeck stop`, `agentdeck doctor`. Bind `127.0.0.1:7878` only. Open the browser on first run.
+Compose all the modules into a running daemon. Implement `klyne start`, `klyne stop`, `klyne doctor`. Bind `127.0.0.1:7878` only. Open the browser on first run.
 
 ---
 
@@ -64,10 +64,10 @@ func (a *App) Stop(ctx context.Context) error       // flushes writer queue, clo
 ```
 
 cobra commands:
-- `agentdeck` (no args) → calls `start` subcommand internally.
-- `agentdeck start` → starts daemon; writes pidfile to `~/.agentdeck/daemon.pid`.
-- `agentdeck stop` → reads pidfile and SIGTERMs the daemon.
-- `agentdeck doctor` → diagnostic JSON:
+- `klyne` (no args) → calls `start` subcommand internally.
+- `klyne start` → starts daemon; writes pidfile to `~/.klyne/daemon.pid`.
+- `klyne stop` → reads pidfile and SIGTERMs the daemon.
+- `klyne doctor` → diagnostic JSON:
   - detected JSONL roots (`~/.claude/projects/`, `~/.codex/sessions/`)
   - detected provider keys (no values, just booleans)
   - DB path + size
@@ -108,8 +108,8 @@ HTTP server (W7 router + W8 SSE + W15 mounters) on 127.0.0.1:7878
 
 ## Acceptance criteria
 
-- [ ] **Fresh-machine smoke:** `agentdeck` against a tempdir with fixture JSONL → ingests, serves UI (embedded), opens browser (suppressed in CI), all four spec §6 flows work.
-- [ ] `agentdeck doctor` returns structured JSON with the items above. Exit 0 if green, 1 otherwise.
+- [ ] **Fresh-machine smoke:** `klyne` against a tempdir with fixture JSONL → ingests, serves UI (embedded), opens browser (suppressed in CI), all four spec §6 flows work.
+- [ ] `klyne doctor` returns structured JSON with the items above. Exit 0 if green, 1 otherwise.
 - [ ] **SIGTERM → flush writer queue → close DB → exit within 2s.**
 - [ ] Pidfile lifecycle: `start` writes; `stop` reads + SIGTERM + waits + removes; both `start` and `stop` are idempotent (e.g., `stop` when no pid — exit 0 with message).
 - [ ] **Summaries run in their own goroutine pool** — never inline with the writer (mitigates risk R7). Document this invariant in `app.go`.
@@ -144,4 +144,4 @@ Integration test: start a real server on a random port (not 7878), hit each rout
 
 ## Done
 
-When all four user flows in spec §6 work end-to-end on a fresh machine, `agentdeck doctor` returns green, and the W16 perf bench can run against a real daemon.
+When all four user flows in spec §6 work end-to-end on a fresh machine, `klyne doctor` returns green, and the W16 perf bench can run against a real daemon.

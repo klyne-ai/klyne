@@ -8,7 +8,7 @@
 
 ## Universal preamble
 
-You are working on the agentdeck repo. Spec at `compass_artifact_wf-d189e421-ff1d-443c-95b8-19b52fcd59b4_text_markdown.md`. §18 decisions are LOCKED. TDD-first; ≥80% coverage. After every change >30 lines run `make ci`. Use `superpowers:verification-before-completion` before claiming done.
+You are working on the klyne repo. Spec at `compass_artifact_wf-d189e421-ff1d-443c-95b8-19b52fcd59b4_text_markdown.md`. §18 decisions are LOCKED. TDD-first; ≥80% coverage. After every change >30 lines run `make ci`. Use `superpowers:verification-before-completion` before claiming done.
 
 **Single-writer rule:** modify only files under "Owned paths". You import `MessageBubble`, `CostPanel`, etc. from W14 read-only. If a W14 component needs a change, open a PR back to W14 — don't edit it.
 
@@ -164,4 +164,4 @@ Manual: walk through flow C in a browser using a synthetic compact fixture.
 
 ## Done
 
-When the killer demo works end-to-end on a fresh machine: a real Claude Code `/compact` event triggers a notification in agentdeck, the user clicks "Restore context", a Markdown block lands on their clipboard, and pasting it into Claude Code recovers the conversation.
+When the killer demo works end-to-end on a fresh machine: a real Claude Code `/compact` event triggers a notification in klyne, the user clicks "Restore context", a Markdown block lands on their clipboard, and pasting it into Claude Code recovers the conversation.

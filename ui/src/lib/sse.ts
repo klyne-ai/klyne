@@ -78,7 +78,7 @@ export function resetEventSourceFactory(): void {
 // ---------------------------------------------------------------------------
 
 /**
- * Subscribe to the agentdeck SSE stream.
+ * Subscribe to the klyne SSE stream.
  *
  * @param handlers - Object whose properties are optional per-event callbacks.
  * @param url - Override the default /events URL (useful in tests).

@@ -310,7 +310,7 @@
   }
 </script>
 
-<svelte:head><title>Cockpit — agentdeck</title></svelte:head>
+<svelte:head><title>Cockpit — klyne</title></svelte:head>
 
 <div style="padding: 20px 24px 40px; max-width: 1600px;">
   <!-- Header -->

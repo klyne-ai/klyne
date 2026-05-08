@@ -1,4 +1,4 @@
-# agentdeck — Multi-Agent Build Plan
+# klyne — Multi-Agent Build Plan
 
 > **Companion to:** [`compass_artifact_wf-d189e421-ff1d-443c-95b8-19b52fcd59b4_text_markdown.md`](../../compass_artifact_wf-d189e421-ff1d-443c-95b8-19b52fcd59b4_text_markdown.md) (the v1 shipping spec).
 > **Purpose:** Decompose the 14-day v1 plan into independent workstreams that AI agents can execute in parallel without colliding.
@@ -67,7 +67,7 @@ These apply to every agent dispatched against this plan. Each workstream file re
 3. **Single-writer rule.** Touch only files listed under your workstream's "Owned paths". Need to change something else? Open a PR against the relevant W0-owned contract file (see [`04-shared-contracts.md`](./04-shared-contracts.md)).
 4. **Run the quality gate** after any change >30 lines: `make ci` (set up by W0). If your environment can't run it, ask the human to.
 5. **Use the `superpowers:verification-before-completion` skill** before claiming done.
-6. **Worktree isolation.** Each agent works in its own git worktree at `~/agentdeck-worktrees/W{N}-{slug}` on branch `wave{X}/W{N}-{slug}`. No two agents share a working tree.
+6. **Worktree isolation.** Each agent works in its own git worktree at `~/klyne-worktrees/W{N}-{slug}` on branch `wave{X}/W{N}-{slug}`. No two agents share a working tree.
 7. **Performance budgets** in spec §12 are hard requirements, not aspirations.
 
 ---

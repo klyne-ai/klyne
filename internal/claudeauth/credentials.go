@@ -1,5 +1,5 @@
 // Package claudeauth reads the OAuth credentials Claude Code stores in the
-// macOS Keychain so agentdeck can call Anthropic's first-party
+// macOS Keychain so.klyne can call Anthropic's first-party
 // /api/oauth/usage endpoint with the same auth the official CLI uses.
 //
 // Provenance: Claude Code on macOS persists credentials as a generic

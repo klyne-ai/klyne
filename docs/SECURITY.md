@@ -1,6 +1,6 @@
-# agentdeck: privacy and security
+# klyne: privacy and security
 
-agentdeck is local-first by design. It reads JSONL files Claude Code and
+klyne is local-first by design. It reads JSONL files Claude Code and
 Codex already wrote to your disk, stores them in a local SQLite database,
 and serves a UI on `127.0.0.1`. The only outbound network call in the
 default configuration is the Claude `/api/oauth/usage` endpoint, using
@@ -12,7 +12,7 @@ you explicitly set a Bring-Your-Own-Key environment variable.
 This document is the authoritative privacy and security reference. Every
 claim below cites a code path so you can verify it yourself.
 
-## What agentdeck reads
+## What klyne reads
 
 | Path / source | Why | Code reference |
 |---|---|---|
@@ -23,28 +23,28 @@ claim below cites a code path so you can verify it yourself.
 | Environment variable `ANTHROPIC_API_KEY` | BYOK credential for the Anthropic provider, used only when the user opts into the summary / advisor / embedding feature with `provider=anthropic`. | `internal/ai/providers/anthropic.go:64-82` (NewAnthropic reads env), `internal/ai/providers/detect.go:62-80` (availability detection) |
 | Environment variable `OPENAI_API_KEY` | BYOK credential for the OpenAI provider. | `internal/ai/providers/openai.go:60-75` (NewOpenAI reads env), `internal/ai/providers/detect.go:82-101` |
 | Environment variable `GEMINI_API_KEY` | BYOK credential for the Gemini provider. | `internal/ai/providers/gemini.go:46-61` (NewGemini reads env), `internal/ai/providers/detect.go:103-121` |
-| `~/.agentdeck/config.toml` | Optional user configuration — server bind addr, connector roots, AI model preferences. | `internal/config/paths.go:38-40` (ConfigFile), `internal/config/schema.go:84-109` (Defaults) |
-| `~/.agentdeck/pricing.json` (optional) | User-supplied LiteLLM-style pricing override. | `internal/config/paths.go:49-51` (PricingOverridePath) |
+| `~/.klyne/config.toml` | Optional user configuration — server bind addr, connector roots, AI model preferences. | `internal/config/paths.go:38-40` (ConfigFile), `internal/config/schema.go:84-109` (Defaults) |
+| `~/.klyne/pricing.json` (optional) | User-supplied LiteLLM-style pricing override. | `internal/config/paths.go:49-51` (PricingOverridePath) |
 
-agentdeck does **not** modify any source JSONL file. The watchers open
+klyne does **not** modify any source JSONL file. The watchers open
 each file with `os.Open` (read-only) and only track byte offsets to
 resume tailing — see `internal/connectors/claude/watch.go:173-178` and
 `internal/connectors/codex/watch.go:103-108`.
 
-## What agentdeck writes
+## What klyne writes
 
 | Path | Contents | Code reference |
 |---|---|---|
-| `~/.agentdeck/agentdeck.db` (and SQLite WAL sidecar files) | The local SQLite database holding sessions, messages, search index, costs. WAL journaling and a single-writer connection enforced. | `internal/config/paths.go:42-45` (DBPath), `internal/config/schema.go:90` (default), `internal/store/db.go:18-45` (PRAGMAs and pool config), `:78-118` (Open) |
-| `~/.agentdeck/config.toml` | Persisted user configuration. | `internal/config/paths.go:38-40` |
+| `~/.klyne/klyne.db` (and SQLite WAL sidecar files) | The local SQLite database holding sessions, messages, search index, costs. WAL journaling and a single-writer connection enforced. | `internal/config/paths.go:42-45` (DBPath), `internal/config/schema.go:90` (default), `internal/store/db.go:18-45` (PRAGMAs and pool config), `:78-118` (Open) |
+| `~/.klyne/config.toml` | Persisted user configuration. | `internal/config/paths.go:38-40` |
 | Stdout / stderr | Operational logs via `log.Printf` and `log/slog`. Logs identify file paths and event counts, never message bodies, tokens, or API keys. | e.g. `internal/connectors/claude/watch.go:70,106` and `internal/usage/oauth.go` (intentionally suppresses error context — see `:147-149`) |
 
-The path resolves to `~/.agentdeck` on macOS, Linux, and Windows
-(`%USERPROFILE%\.agentdeck` on Windows) — confirmed at
+The path resolves to `~/.klyne` on macOS, Linux, and Windows
+(`%USERPROFILE%\.klyne` on Windows) — confirmed at
 `internal/config/paths.go:21-35`. There is no separate Application
 Support / XDG path.
 
-agentdeck never writes to `~/.claude/` or `~/.codex/`. Both directories
+klyne never writes to `~/.claude/` or `~/.codex/`. Both directories
 are read-only inputs.
 
 ## Network calls (the entire allowlist)
@@ -54,7 +54,7 @@ searching for `http.NewRequest` and `https://` across `internal/`.
 
 | URL | Method | When | Auth | Cache | Code reference |
 |---|---|---|---|---|---|
-| `https://api.anthropic.com/api/oauth/usage` | GET | Every `/usage` request, served from cache for up to 5 minutes. | `Authorization: Bearer <Claude OAuth token from Keychain>`, `anthropic-beta: oauth-2025-04-20`, identifying `User-Agent: agentdeck/0.1`. | 5-min TTL on success; ~2.5-min TTL on failure to suppress flapping. Returns `(nil, nil)` on missing creds, network error, or non-200 — never surfaces an error to the user. | `internal/usage/oauth.go:25-30` (constants), `:120-176` (fetchFresh) |
+| `https://api.anthropic.com/api/oauth/usage` | GET | Every `/usage` request, served from cache for up to 5 minutes. | `Authorization: Bearer <Claude OAuth token from Keychain>`, `anthropic-beta: oauth-2025-04-20`, identifying `User-Agent: klyne/0.1`. | 5-min TTL on success; ~2.5-min TTL on failure to suppress flapping. Returns `(nil, nil)` on missing creds, network error, or non-200 — never surfaces an error to the user. | `internal/usage/oauth.go:25-30` (constants), `:120-176` (fetchFresh) |
 | `https://api.anthropic.com/v1/messages` | POST | Only when `ANTHROPIC_API_KEY` is set AND the user invokes summary / break-advisor with `provider=anthropic`. | `x-api-key: $ANTHROPIC_API_KEY`. | None. | `internal/ai/providers/anthropic.go:24-27` (URL constants), `:102-208` (Chat) |
 | `https://api.openai.com/v1/chat/completions` | POST | Only when `OPENAI_API_KEY` is set AND the user invokes the AI feature with `provider=openai`. | `Authorization: Bearer $OPENAI_API_KEY`. | None. | `internal/ai/providers/openai.go:15-19`, `:153-247` (Chat) |
 | `https://api.openai.com/v1/embeddings` | POST | Same condition as above, only on the embedding code path (off by default in v1 — see `internal/config/schema.go:106`). | `Authorization: Bearer $OPENAI_API_KEY`. | None. | `internal/ai/providers/openai.go:84-150` (Embed) |
@@ -77,7 +77,7 @@ request to the port.
 **Claude OAuth token.** Read fresh from the macOS Keychain on every
 expired-cache refresh of `/usage`. The token is held in memory only for
 the duration of a single Anthropic request (see
-`internal/usage/oauth.go:120-145`). agentdeck never writes the token
+`internal/usage/oauth.go:120-145`). klyne never writes the token
 back to disk and never echoes it in API responses or logs. On non-Darwin
 systems, the Keychain reader returns `ErrUnsupportedPlatform` and the
 fetcher silently degrades to "OAuth data unavailable"
@@ -115,7 +115,7 @@ length, prefix, and value are never returned.
 
 ## Threat model
 
-agentdeck guards against:
+klyne guards against:
 
 1. **Accidental cloud upload of session content.** No `POST` request in
    `internal/` targets any URL outside the BYOK provider list and the
@@ -137,11 +137,11 @@ agentdeck guards against:
    `/v1/messages` request — that path requires a separate
    `ANTHROPIC_API_KEY`, per the legal constraint above.
 
-agentdeck does **not** guard against:
+klyne does **not** guard against:
 
 1. **A hostile process running as your user reading the SQLite DB.**
-   The DB lives at `~/.agentdeck/agentdeck.db` with default user-only
-   permissions. agentdeck does not enforce a stricter ACL, encrypt
+   The DB lives at `~/.klyne/klyne.db` with default user-only
+   permissions. klyne does not enforce a stricter ACL, encrypt
    the DB at rest, or sandbox the process. If your user account is
    compromised, the DB is readable.
 2. **Hostile JSONL injection.** The watchers parse whatever JSONL
@@ -162,7 +162,7 @@ agentdeck does **not** guard against:
 
 ## Reporting a vulnerability
 
-If you believe you have found a security vulnerability in agentdeck,
+If you believe you have found a security vulnerability in klyne,
 please open a private security advisory on the GitHub repository
 (`https://github.com/klyne-ai/klyne` — see the User-Agent at
 `internal/usage/oauth.go:144`). Please do not file a public issue for
@@ -199,8 +199,8 @@ the claims in this document; if it does not, please file an issue.
 3. Inspect what is stored locally:
 
    ```sh
-   sqlite3 ~/.agentdeck/agentdeck.db ".tables"
-   sqlite3 ~/.agentdeck/agentdeck.db ".schema"
+   sqlite3 ~/.klyne/klyne.db ".tables"
+   sqlite3 ~/.klyne/klyne.db ".schema"
    ```
 
    The schema reflects sessions, messages, costs, and search indexes

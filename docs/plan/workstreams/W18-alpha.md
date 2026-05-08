@@ -6,7 +6,7 @@
 
 ## Universal preamble
 
-You are working on the agentdeck repo. Spec at `compass_artifact_wf-d189e421-ff1d-443c-95b8-19b52fcd59b4_text_markdown.md`. §18 decisions are LOCKED. TDD-first; ≥80% coverage. After every change >30 lines run `make ci`. Use `superpowers:verification-before-completion` before claiming done.
+You are working on the klyne repo. Spec at `compass_artifact_wf-d189e421-ff1d-443c-95b8-19b52fcd59b4_text_markdown.md`. §18 decisions are LOCKED. TDD-first; ≥80% coverage. After every change >30 lines run `make ci`. Use `superpowers:verification-before-completion` before claiming done.
 
 **Single-writer rule:** as bugs are assigned, agents may need to touch files outside their historical workstream. **Require explicit owner sign-off** (or human review) before changing files outside your dispatched bug's scope.
 
@@ -24,7 +24,7 @@ This is human-led with ad-hoc agent dispatches per bug.
 
 ### 1. Distribute alpha to 5 users
 - Send the install script + brief usage notes.
-- Ask them to run their normal Claude Code / Codex sessions for 24 hours with `agentdeck` running.
+- Ask them to run their normal Claude Code / Codex sessions for 24 hours with `klyne` running.
 - Collect feedback via a private GitHub issue label `alpha-feedback`.
 
 ### 2. Triage
@@ -76,7 +76,7 @@ Spec §14 Day-14 row:
 - [ ] No `must-fix-v1` bugs open.
 - [ ] All spec §12 perf budgets green (W16 bench in CI).
 - [ ] `bash scripts/install.sh` works on fresh Linux + macOS VMs.
-- [ ] `agentdeck doctor` returns green on all 3 OSes.
+- [ ] `klyne doctor` returns green on all 3 OSes.
 - [ ] README + landing page proofread.
 - [ ] CHANGELOG.md complete.
 
@@ -85,7 +85,7 @@ Spec §14 Day-14 row:
 ## Public launch checklist (Day 15)
 
 - [ ] Flip repo public on GitHub.
-- [ ] Post `Show HN: agentdeck — mission control for Claude Code + Codex`.
+- [ ] Post `Show HN: klyne — mission control for Claude Code + Codex`.
 - [ ] Post on r/ClaudeAI and r/ChatGPTCoding.
 - [ ] Post 30-second demo on X / Twitter.
 - [ ] Open "request a connector" issue templates ready (W0 already shipped these).

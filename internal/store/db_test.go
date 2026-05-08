@@ -19,7 +19,7 @@ import (
 // parent).
 func TestOpen_InvalidPath(t *testing.T) {
 	// Use a deeply nested path whose parent doesn't exist.
-	_, err := store.Open("/nonexistent-agentdeck-test-dir/deep/subdir/test.db")
+	_, err := store.Open("/nonexistent-klyne-test-dir/deep/subdir/test.db")
 	if err == nil {
 		t.Fatal("expected Open to fail for unwritable path, got nil error")
 	}

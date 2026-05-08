@@ -42,7 +42,7 @@ import (
 // discusses "authentication", another "database schema". Our buckets model this.
 var wordBuckets = [][]string{
 	{"hello", "world", "greet", "welcome", "salutation", "morning", "evening"},
-	{"agentdeck", "dashboard", "session", "monitor", "viewer", "panel"},
+	{"klyne", "dashboard", "session", "monitor", "viewer", "panel"},
 	{"benchmark", "performance", "latency", "throughput", "measure", "profile"},
 	{"sqlite", "database", "schema", "migration", "index", "query", "table"},
 	{"fts5", "fulltext", "search", "rank", "bm25", "snippet", "match"},

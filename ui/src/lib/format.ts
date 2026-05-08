@@ -1,5 +1,5 @@
 /**
- * format.ts — Display formatting utilities for agentdeck v1.1 UI.
+ * format.ts — Display formatting utilities for klyne v1.1 UI.
  */
 
 /** kfmt — format a number as compact K/M notation. */

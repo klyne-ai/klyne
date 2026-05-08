@@ -8,7 +8,7 @@ This workstream is the single biggest leverage point in the entire project. Ever
 
 ## Universal preamble (read first)
 
-You are working on the agentdeck repository at `/Users/mohitpatel/Desktop/Project/agentdeck`. The shipping spec is at `compass_artifact_wf-d189e421-ff1d-443c-95b8-19b52fcd59b4_text_markdown.md` in the repo root. Read §1, §5, §7, §8, §11, §17, §18 before touching code. Decisions in spec §18 are LOCKED.
+You are working on the klyne repository at `/Users/mohitpatel/Desktop/Project/agentdeck`. The shipping spec is at `compass_artifact_wf-d189e421-ff1d-443c-95b8-19b52fcd59b4_text_markdown.md` in the repo root. Read §1, §5, §7, §8, §11, §17, §18 before touching code. Decisions in spec §18 are LOCKED.
 
 **TDD is mandatory.** Write tests first using the `superpowers:test-driven-development` skill. Target ≥80% coverage on new code. Run `make ci` (which you set up) after every change >30 lines. Use `superpowers:verification-before-completion` before claiming done.
 
@@ -57,7 +57,7 @@ internal/store/migrations/003_summaries.sql
 internal/store/migrations/embed.go (just //go:embed *.sql + var FS embed.FS)
 internal/api/contracts.go          (route list constants + request/response DTOs — handlers in W7)
 internal/api/sse_events.go         (SSE event payload types: MsgNew, SummaryReady, SessionUpdate, CostTick, ThreadRebuild, CompactDetected)
-internal/config/schema.go          (typed struct for ~/.agentdeck/config.toml — loader in W6)
+internal/config/schema.go          (typed struct for ~/.klyne/config.toml — loader in W6)
 internal/cost/pricing_schema.go    (typed struct + JSON tags for LiteLLM-style pricing — table data + lookup in W9)
 tools/dump-contracts/main.go       (tiny Go AST tool that emits contract JSON for the TS contract-check)
 examples/sample-jsonl/README.md
@@ -96,7 +96,7 @@ In particular:
 - [ ] `golangci-lint run` clean.
 - [ ] `go test ./...` passes (mostly empty, but no errors).
 - [ ] CI green on push to a feature branch.
-- [ ] `agentdeck doctor` exits 0 with a "stub" message.
+- [ ] `klyne doctor` exits 0 with a "stub" message.
 - [ ] Every type that crosses a workstream boundary lives in **exactly one** file you own.
 - [ ] `docs/contracts.md` references each contract by file:line and pins the spec section it derives from (§7, §8, §11, §12, §18).
 - [ ] At least one fixture per CLI in `examples/sample-jsonl/` contains a `/compact` event.
@@ -131,5 +131,5 @@ Before merging W0:
 1. Read every file in "Owned paths" once.
 2. Cross-check each against [`../04-shared-contracts.md`](../04-shared-contracts.md).
 3. Confirm `make ci` runs all checks.
-4. Confirm `agentdeck doctor` is invokable and prints a stub message.
+4. Confirm `klyne doctor` is invokable and prints a stub message.
 5. Sight-read `docs/contracts.md` — it should be the index a Wave-1 agent reads after this file.

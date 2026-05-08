@@ -6,7 +6,7 @@
 
 ## Universal preamble
 
-You are working on the agentdeck repo. Spec at `compass_artifact_wf-d189e421-ff1d-443c-95b8-19b52fcd59b4_text_markdown.md`. **§18 decisions are LOCKED** (SvelteKit 5, Tailwind 4, adapter-static, no React). TDD-first; ≥80% coverage on `lib/`. After every change >30 lines run `make ci`. Use `superpowers:verification-before-completion` before claiming done.
+You are working on the klyne repo. Spec at `compass_artifact_wf-d189e421-ff1d-443c-95b8-19b52fcd59b4_text_markdown.md`. **§18 decisions are LOCKED** (SvelteKit 5, Tailwind 4, adapter-static, no React). TDD-first; ≥80% coverage on `lib/`. After every change >30 lines run `make ci`. Use `superpowers:verification-before-completion` before claiming done.
 
 **Single-writer rule:** modify only files under "Owned paths". Need a Go DTO field? Open a `contract-change` PR against W0's `contracts.go`.
 

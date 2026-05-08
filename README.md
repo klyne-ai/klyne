@@ -1,9 +1,9 @@
-# agentdeck
+# klyne
 
 AI coding sessions do not only get long. They lose working memory after
 `/compact`.
 
-agentdeck is a local-first session rescue layer for Claude Code and Codex
+klyne is a local-first session rescue layer for Claude Code and Codex
 power users. It reads the JSONL files your AI coding tools already write,
 shows when a session is drifting or bloated, recovers context that `/compact`
 buried, and generates a clean handoff prompt for a fresh session.
@@ -21,13 +21,13 @@ When an AI coding session gets too large, you usually have two bad options:
 - run `/compact`, which shrinks the live context but buries exact decisions,
   files, failures, and reasoning inside a summary.
 
-agentdeck gives the AI a way to inspect the raw local session history again.
+klyne gives the AI a way to inspect the raw local session history again.
 That turns "I lost the thread" into "recover the important context and continue
 cleanly."
 
 ## Real Evidence
 
-This is from a local `agentdeck audit-sessions --limit 20` run on real Claude
+This is from a local `klyne audit-sessions --limit 20` run on real Claude
 Code and Codex transcripts:
 
 ```text
@@ -44,18 +44,18 @@ Compression:      36x
 ```
 
 That is the core use case: the details still exist in the local JSONL, but the
-current AI session no longer has them in live context. agentdeck exposes those
+current AI session no longer has them in live context. klyne exposes those
 details through a small MCP tool surface.
 
 ## How It Works
 
-![How agentdeck works](docs/assets/readme/how-agentdeck-works.png)
+![How klyne works](docs/assets/readme/how-klyne-works.png)
 
-agentdeck runs in two complementary modes:
+klyne runs in two complementary modes:
 
 - **Local web cockpit**: browse sessions, search messages, inspect token usage,
   and copy safe resume commands.
-- **MCP session rescue server**: lets Claude Code ask agentdeck for context
+- **MCP session rescue server**: lets Claude Code ask klyne for context
   health, pre-compact recovery, and handoff prompts.
 
 The MCP server does not require the daemon. It reads JSONL directly so it can
@@ -76,10 +76,10 @@ Example MCP request flow:
 User: "This session feels lost. Should I compact or restart?"
 
 AI calls get_context_health
-→ agentdeck reports context fill, repeated reads, failed command loops, bloat
+→ klyne reports context fill, repeated reads, failed command loops, bloat
 
 AI calls generate_handoff
-→ agentdeck returns files touched, commands run, known failures, recent task,
+→ klyne returns files touched, commands run, known failures, recent task,
   and last useful exchanges
 
 User starts fresh session
@@ -92,9 +92,9 @@ Build from source:
 
 ```sh
 git clone https://github.com/klyne-ai/klyne
-cd agentdeck
-GOTOOLCHAIN=auto CGO_ENABLED=0 go build -o ./bin/agentdeck ./cmd/klyne
-./bin/agentdeck start
+cd klyne
+GOTOOLCHAIN=auto CGO_ENABLED=0 go build -o ./bin/klyne ./cmd/klyne
+./bin/klyne start
 ```
 
 Then open:
@@ -106,7 +106,7 @@ http://127.0.0.1:7878
 To run the MCP server:
 
 ```sh
-agentdeck mcp
+klyne mcp
 ```
 
 Example Claude Code MCP config:
@@ -114,8 +114,8 @@ Example Claude Code MCP config:
 ```json
 {
   "mcpServers": {
-    "agentdeck": {
-      "command": "agentdeck",
+    "klyne": {
+      "command": "klyne",
       "args": ["mcp"]
     }
   }
@@ -124,12 +124,12 @@ Example Claude Code MCP config:
 
 ## Quick Start
 
-1. Build and start agentdeck.
+1. Build and start klyne.
 2. Open `http://127.0.0.1:7878`.
-3. Run `agentdeck audit-sessions --limit 20` to verify the local trust
+3. Run `klyne audit-sessions --limit 20` to verify the local trust
    foundation.
-4. Add `agentdeck mcp` to Claude Code.
-5. In a long Claude Code session, ask: "Use agentdeck to check whether this
+4. Add `klyne mcp` to Claude Code.
+5. In a long Claude Code session, ask: "Use klyne to check whether this
    session should continue, compact, or restart."
 
 ## What You Get
@@ -157,7 +157,7 @@ discovery and audit reporting exist, but full MCP parity is still in progress.
 
 ## Privacy Model
 
-agentdeck is local-first:
+klyne is local-first:
 
 - reads local JSONL transcripts;
 - stores local SQLite data;

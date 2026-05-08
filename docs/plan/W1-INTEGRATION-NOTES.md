@@ -58,7 +58,7 @@ func DBPath() string
 func PricingOverridePath() string
 ```
 - `HomeDir` is exposed as a package-level `var` for test override.
-- macOS/Linux: `$HOME/.agentdeck/`; Windows: `%USERPROFILE%\.agentdeck\`.
+- macOS/Linux: `$HOME/.klyne/`; Windows: `%USERPROFILE%\.klyne\`.
 
 ### `internal/cost` (W9)
 ```go

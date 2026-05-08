@@ -68,7 +68,7 @@
 </script>
 
 <svelte:head>
-  <title>agentdeck</title>
+  <title>klyne</title>
 </svelte:head>
 
 <div style="height: 100vh; display: flex; flex-direction: column;">

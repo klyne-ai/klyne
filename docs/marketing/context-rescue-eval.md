@@ -1,7 +1,7 @@
 # Context Rescue — eval plan
 
 Companion to [context-rescue-strategy.md](./context-rescue-strategy.md). The
-strategy doc commits agentdeck to answering four questions in under 10 seconds
+strategy doc commits klyne to answering four questions in under 10 seconds
 on a real session:
 
 1. Is this session still healthy?

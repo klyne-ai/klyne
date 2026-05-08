@@ -19,7 +19,7 @@ git commit -m "chore: vendor shipping spec v1.0 + multi-agent build plan"
 git remote add origin <your-private-github-url>
 git push -u origin main
 
-mkdir -p ~/agentdeck-worktrees
+mkdir -p ~/klyne-worktrees
 ```
 
 ---
@@ -48,13 +48,13 @@ Paste the prompt from [`workstreams/W00-bootstrap.md`](./workstreams/W00-bootstr
 ```bash
 cd /Users/mohitpatel/Desktop/Project/agentdeck
 
-git worktree add ~/agentdeck-worktrees/W1-store     wave1/W1-store
-git worktree add ~/agentdeck-worktrees/W4-claude    wave1/W4-claude
-git worktree add ~/agentdeck-worktrees/W5-codex     wave1/W5-codex
-git worktree add ~/agentdeck-worktrees/W6-config    wave1/W6-config
-git worktree add ~/agentdeck-worktrees/W9-cost      wave1/W9-cost
-git worktree add ~/agentdeck-worktrees/W10-ai       wave1/W10-ai
-git worktree add ~/agentdeck-worktrees/W13-ui-shell wave1/W13-ui-shell
+git worktree add ~/klyne-worktrees/W1-store     wave1/W1-store
+git worktree add ~/klyne-worktrees/W4-claude    wave1/W4-claude
+git worktree add ~/klyne-worktrees/W5-codex     wave1/W5-codex
+git worktree add ~/klyne-worktrees/W6-config    wave1/W6-config
+git worktree add ~/klyne-worktrees/W9-cost      wave1/W9-cost
+git worktree add ~/klyne-worktrees/W10-ai       wave1/W10-ai
+git worktree add ~/klyne-worktrees/W13-ui-shell wave1/W13-ui-shell
 ```
 
 ---
@@ -65,13 +65,13 @@ Open one Claude Code (or Codex CLI) session per worktree, set `cwd` to the workt
 
 | Worktree | Prompt file | Recommended model |
 |---|---|---|
-| `~/agentdeck-worktrees/W1-store` | [`workstreams/W01-store-db.md`](./workstreams/W01-store-db.md) | Sonnet |
-| `~/agentdeck-worktrees/W4-claude` | [`workstreams/W04-connector-claude.md`](./workstreams/W04-connector-claude.md) | Sonnet |
-| `~/agentdeck-worktrees/W5-codex` | [`workstreams/W05-connector-codex.md`](./workstreams/W05-connector-codex.md) | Sonnet (or **Codex CLI** for dogfooding) |
-| `~/agentdeck-worktrees/W6-config` | [`workstreams/W06-config.md`](./workstreams/W06-config.md) | Sonnet |
-| `~/agentdeck-worktrees/W9-cost` | [`workstreams/W09-cost-engine.md`](./workstreams/W09-cost-engine.md) | Sonnet |
-| `~/agentdeck-worktrees/W10-ai` | [`workstreams/W10-ai-providers.md`](./workstreams/W10-ai-providers.md) | Sonnet + `claude-api` skill |
-| `~/agentdeck-worktrees/W13-ui-shell` | [`workstreams/W13-ui-shell.md`](./workstreams/W13-ui-shell.md) | Sonnet + `frontend-patterns` |
+| `~/klyne-worktrees/W1-store` | [`workstreams/W01-store-db.md`](./workstreams/W01-store-db.md) | Sonnet |
+| `~/klyne-worktrees/W4-claude` | [`workstreams/W04-connector-claude.md`](./workstreams/W04-connector-claude.md) | Sonnet |
+| `~/klyne-worktrees/W5-codex` | [`workstreams/W05-connector-codex.md`](./workstreams/W05-connector-codex.md) | Sonnet (or **Codex CLI** for dogfooding) |
+| `~/klyne-worktrees/W6-config` | [`workstreams/W06-config.md`](./workstreams/W06-config.md) | Sonnet |
+| `~/klyne-worktrees/W9-cost` | [`workstreams/W09-cost-engine.md`](./workstreams/W09-cost-engine.md) | Sonnet |
+| `~/klyne-worktrees/W10-ai` | [`workstreams/W10-ai-providers.md`](./workstreams/W10-ai-providers.md) | Sonnet + `claude-api` skill |
+| `~/klyne-worktrees/W13-ui-shell` | [`workstreams/W13-ui-shell.md`](./workstreams/W13-ui-shell.md) | Sonnet + `frontend-patterns` |
 
 **Tip:** Use Codex CLI for one of W4 or W5 — you'll dogfood the cross-CLI story and surface bugs faster.
 
@@ -91,12 +91,12 @@ Open one Claude Code (or Codex CLI) session per worktree, set `cwd` to the workt
 When all 7 Wave-1 PRs are merged:
 
 ```bash
-git worktree add ~/agentdeck-worktrees/W2-store-daos      wave2/W2-store-daos
-git worktree add ~/agentdeck-worktrees/W3-store-search    wave2/W3-store-search
-git worktree add ~/agentdeck-worktrees/W7-api-handlers    wave2/W7-api-handlers
-git worktree add ~/agentdeck-worktrees/W8-sse-hub         wave2/W8-sse-hub
-git worktree add ~/agentdeck-worktrees/W11-selector       wave2/W11-selector
-git worktree add ~/agentdeck-worktrees/W14-ui-components  wave2/W14-ui-components
+git worktree add ~/klyne-worktrees/W2-store-daos      wave2/W2-store-daos
+git worktree add ~/klyne-worktrees/W3-store-search    wave2/W3-store-search
+git worktree add ~/klyne-worktrees/W7-api-handlers    wave2/W7-api-handlers
+git worktree add ~/klyne-worktrees/W8-sse-hub         wave2/W8-sse-hub
+git worktree add ~/klyne-worktrees/W11-selector       wave2/W11-selector
+git worktree add ~/klyne-worktrees/W14-ui-components  wave2/W14-ui-components
 ```
 
 Then dispatch using the matching `workstreams/W##-*.md` files.

@@ -131,7 +131,7 @@ This is the fast, safe step. No contract removal, no UI regression.
   session page has one rescue surface instead of two.
 - Keep `/sessions/{id}/usage` and `/sessions/{id}/break-advice` mounted
   for at least two releases after the UI cutover so any external
-  consumers (the docs explicitly say agentdeck has none today) get a
+  consumers (the docs explicitly say klyne has none today) get a
   deprecation window.
 
 ### Phase D — endpoint sunset

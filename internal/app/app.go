@@ -1,4 +1,4 @@
-// Package app is the composition root for the agentdeck daemon.
+// Package app is the composition root for the klyne daemon.
 //
 // It wires every Wave 1+2 module — store, connectors, cost, SSE hub,
 // HTTP router, AI runner — into a single App value with a Start/Stop
@@ -148,7 +148,7 @@ type App struct {
 	// on its internal done channel which is only closed by Start.
 	runnerStarted bool
 
-	// Demo, when true, marks this App as running in `agentdeck start
+	// Demo, when true, marks this App as running in `klyne start
 	// --demo` mode. Start prints the demo banner before binding the HTTP
 	// listener, runs DemoSeedFixtures from DemoFixturesDir, and the
 	// caller is expected to have already disabled live connectors via
@@ -320,7 +320,7 @@ func (a *App) Start(ctx context.Context) error {
 	// log sinks (slog formatters strip the "***" decoration).
 	if a.Demo {
 		dbPath := expandHomeOrDefault(a.cfg.Paths.DB, config.DBPath())
-		banner := fmt.Sprintf("*** agentdeck demo mode — using fixtures from %s, DB at %s ***",
+		banner := fmt.Sprintf("*** klyne demo mode — using fixtures from %s, DB at %s ***",
 			a.DemoFixturesDir, dbPath)
 		fmt.Fprintln(os.Stdout, banner)
 		a.logger.Info("demo mode active",
@@ -399,7 +399,7 @@ func (a *App) Start(ctx context.Context) error {
 	// 4. Serve HTTP in a goroutine and wait for ctx.
 	serveErr := make(chan error, 1)
 	go func() {
-		a.logger.Info("agentdeck listening", slog.String("addr", a.startedAddr))
+		a.logger.Info("klyne listening", slog.String("addr", a.startedAddr))
 		err := a.server.Serve(ln)
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			serveErr <- err

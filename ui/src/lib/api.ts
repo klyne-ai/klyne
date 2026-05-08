@@ -1,5 +1,5 @@
 /**
- * api.ts — Typed fetch wrappers for every agentdeck HTTP route.
+ * api.ts — Typed fetch wrappers for every klyne HTTP route.
  *
  * Routes mirrored from internal/api/contracts.go (W0-frozen).
  * Every wrapper throws an ApiError on non-2xx responses.
@@ -30,7 +30,7 @@ import type {
 // Configuration
 // ---------------------------------------------------------------------------
 
-/** Base URL for the agentdeck daemon. Override via the API_BASE env var at build time. */
+/** Base URL for the klyne daemon. Override via the API_BASE env var at build time. */
 const API_BASE =
   typeof import.meta !== 'undefined' &&
   typeof (import.meta as { env?: { VITE_API_BASE?: string } }).env !== 'undefined'

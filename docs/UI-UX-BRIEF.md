@@ -1,4 +1,4 @@
-# agentdeck — UI/UX Brief (v1)
+# klyne — UI/UX Brief (v1)
 
 > **Purpose:** Hand-off doc for design input. The backend is built and exposing real data. This doc inventories everything we have, proposes a screen set, and surfaces the design decisions only you can make.
 >
@@ -39,7 +39,7 @@ Top 10 projects by recency:
 
 | Project | Sessions | Messages | Out tokens | Cost | Last active |
 |---|---:|---:|---:|---:|---|
-| agentdeck | 1 | 504 | 672K | $0 (opus-4-7) | now |
+| klyne | 1 | 504 | 672K | $0 (opus-4-7) | now |
 | trinity | 1 | 68 | 33K | $0 (opus-4-7) | 1h ago |
 | ai-for-bharat-hackathon | 7 | 1,149 | 611K | $0 (opus-4-7) | yesterday |
 | trackIt | 39 | 4,361 | 2.3M | $0 (opus-4-7) | yesterday |
@@ -203,12 +203,12 @@ Currently: empty state placeholder + cost tile. **Proposed:**
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│  agentdeck  / search                              [⚙ settings] [user]  │
+│  klyne  / search                              [⚙ settings] [user]  │
 ├────────────────────────────────────────────────────────────────────────┤
 │                                                                          │
 │  Active now (1)                                                          │
 │  ┌──────────────────────────────────────────────────────────────┐       │
-│  │ 🟢 agentdeck · claude-opus-4-7 · 504 msgs · ↑in 3.9K ↓out 672K│       │
+│  │ 🟢 klyne · claude-opus-4-7 · 504 msgs · ↑in 3.9K ↓out 672K│       │
 │  │    Started 14h ago · last msg 0s ago · open ›                 │       │
 │  └──────────────────────────────────────────────────────────────┘       │
 │                                                                          │
@@ -322,7 +322,7 @@ Already functional. Refinements:
 ## 6. Proposed information architecture
 
 ```
-agentdeck (top nav: 4 items + search)
+klyne (top nav: 4 items + search)
 │
 ├─ Dashboard      (`/`)
 │   ├─ Active now (live tile, SSE-driven)
@@ -353,7 +353,7 @@ agentdeck (top nav: 4 items + search)
 
 Top nav (always visible):
 ```
-[agentdeck]  Dashboard · Projects · Search    ⚙ Settings  [model picker shortcut]
+[klyne]  Dashboard · Projects · Search    ⚙ Settings  [model picker shortcut]
 ```
 
 ---
@@ -361,7 +361,7 @@ Top nav (always visible):
 ## 7. Key user flows
 
 ### 7.1 "What was I working on?" (daily glance, ≤ 5 sec)
-1. Click agentdeck icon (or open `localhost:7878`).
+1. Click klyne icon (or open `localhost:7878`).
 2. Dashboard loads → "Active now" tile shows current session.
 3. Below, recent projects show top 6 with last-active timestamps.
 4. Done. Mental model refreshed.
@@ -375,7 +375,7 @@ Top nav (always visible):
 
 ### 7.3 "Recover from /compact" (the killer demo, ≤ 15 sec)
 1. Working in `claude` terminal, /compact fires, context blown.
-2. Switch to agentdeck tab — session detail shows ♻ compacted badge.
+2. Switch to klyne tab — session detail shows ♻ compacted badge.
 3. Click "Restore context" → modal with rolling summary + last 20 messages as Markdown.
 4. Click "Copy as resume prompt".
 5. Switch back to terminal, paste. Threading restored.
@@ -457,4 +457,4 @@ These are choices that don't have a single right answer — please weigh in.
 
 ---
 
-*Document version: 1.0 · 2026-05-07 · Author: agentdeck Wave 4 orchestrator session*
+*Document version: 1.0 · 2026-05-07 · Author: klyne Wave 4 orchestrator session*

@@ -8,7 +8,7 @@
 -- session/message; matching ids are dropped on the floor.
 --
 -- A user can resurrect a tombstoned session by removing the row manually
--- (sqlite3 ~/.agentdeck/agentdeck.db 'DELETE FROM deleted_sessions WHERE id=?;')
+-- (sqlite3 ~/.klyne/klyne.db 'DELETE FROM deleted_sessions WHERE id=?;')
 -- and restarting the daemon — the connector will warm-replay it.
 
 CREATE TABLE IF NOT EXISTS deleted_sessions (

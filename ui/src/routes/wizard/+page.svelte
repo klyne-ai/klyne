@@ -71,7 +71,7 @@
 </script>
 
 <svelte:head>
-  <title>agentdeck — Setup Wizard</title>
+  <title>klyne — Setup Wizard</title>
 </svelte:head>
 
 <div style="min-height: calc(100vh - var(--ad-nav-h)); display: grid; place-items: center; padding: 24px;">
@@ -92,12 +92,12 @@
     <!-- Step content -->
     <div style="padding: 28px 28px 16px; min-height: 280px;">
       {#if step === 0}
-        <h2 style="font-size: 22px; font-weight: 600; margin: 0 0 8px; letter-spacing: -0.01em;">Welcome to agentdeck</h2>
+        <h2 style="font-size: 22px; font-weight: 600; margin: 0 0 8px; letter-spacing: -0.01em;">Welcome to klyne</h2>
         <p class="ad-muted" style="font-size: 13px; margin-bottom: 20px;">
           One window for every Claude and Codex session on your machine. Read JSONLs, search across them, recover from /compact.
         </p>
         <ul style="padding-left: 18px; font-size: 13px; color: var(--ad-fg-2); line-height: 1.7; margin: 0;">
-          <li>No cloud sync — everything stays local in <span class="ad-mono">~/.agentdeck</span>.</li>
+          <li>No cloud sync — everything stays local in <span class="ad-mono">~/.klyne</span>.</li>
           <li>Bring your own API keys; we'll detect them in the next step.</li>
           <li>Live updates over SSE as new messages stream in.</li>
         </ul>
@@ -175,7 +175,7 @@
             <div style="width: 56px; height: 56px; border-radius: 50%; background: var(--ad-active-bg); color: var(--ad-active); display: grid; place-items: center; font-size: 28px; margin: 0 auto 16px;">✓</div>
             <h2 style="font-size: 20px; font-weight: 600; margin: 0 0 8px;">You're set up</h2>
             <p class="ad-muted" style="font-size: 13px; margin: 0 0 20px;">
-              agentdeck is now watching your projects. New sessions will appear automatically.
+              klyne is now watching your projects. New sessions will appear automatically.
             </p>
           {/if}
         </div>

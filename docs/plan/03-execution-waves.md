@@ -20,7 +20,7 @@ Each wave can start when **all dependencies in the previous wave are merged to `
 - **Agents in parallel:** 7 (one per workstream, each in its own git worktree)
 - **Merge point:** all 7 land green to `main`. Use the `superpowers:using-git-worktrees` and `superpowers:dispatching-parallel-agents` skills.
 - **Integration risk:** **medium.** Contracts make collisions structurally unlikely, but watch for:
-  - W1 + W9 both reasoning about `~/.agentdeck/` paths logically — W1 owns DB file, W9 owns pricing override file. Document path ownership in `docs/contracts.md`.
+  - W1 + W9 both reasoning about `~/.klyne/` paths logically — W1 owns DB file, W9 owns pricing override file. Document path ownership in `docs/contracts.md`.
   - W4 + W5 both depending on `examples/sample-jsonl/` fixtures — fixtures committed by W0 are **read-only** here.
   - W13 will inevitably need a TS type missing from W0 — agent should open a PR back to W0's contract files (treated as labeled `contract-change` PR, not silent edit).
 
@@ -36,7 +36,7 @@ Each wave can start when **all dependencies in the previous wave are merged to `
   - W8 starts when W7 has merged its `Mount` hook.
   - W11 starts when W3, W8, W10 are green.
   - W14 starts when W13 lands and W7+W8 are partially up (mocks are fine until they aren't).
-- **Merge point:** `agentdeck start` (W12 in Wave 3) is buildable. `make dev` runs daemon + UI together with hot reload.
+- **Merge point:** `klyne start` (W12 in Wave 3) is buildable. `make dev` runs daemon + UI together with hot reload.
 - **Integration risk:** **medium-high** — this is where SSE event shapes get exercised end-to-end. If W8's `MsgNew` payload doesn't match what W14's `SessionList` expects, both think the other is wrong.
 - **Mitigation:** `ui/scripts/check-contracts.ts` (built in W13) runs in CI on every PR and rejects type drift.
 
@@ -46,7 +46,7 @@ Each wave can start when **all dependencies in the previous wave are merged to `
 
 - **Workstreams:** W12, W15
 - **Agents in parallel:** 2. **W12 must be one agent only**, because it touches every package's exported API.
-- **Merge point:** the four user flows in spec §6 work end-to-end on a fresh machine with fixture data. `agentdeck doctor` green.
+- **Merge point:** the four user flows in spec §6 work end-to-end on a fresh machine with fixture data. `klyne doctor` green.
 - **Integration risk:** **high.** This is when bugs that survived unit tests because mocks lied surface for real.
 - **Mitigation:** allocate a full day of buffer. Use `superpowers:systematic-debugging` and `verification-loop` skills.
 

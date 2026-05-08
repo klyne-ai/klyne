@@ -1,4 +1,4 @@
-# agentdeck features
+# klyne features
 
 This directory documents user-facing features. Each page covers what ships,
 the user problem it solves, and the implementation logic.

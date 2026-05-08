@@ -6,7 +6,7 @@
 
 ## Universal preamble
 
-You are working on the agentdeck repo. Spec at `compass_artifact_wf-d189e421-ff1d-443c-95b8-19b52fcd59b4_text_markdown.md`. §18 decisions are LOCKED. TDD-first; ≥80% coverage. After every change >30 lines run `make ci`. Use `superpowers:verification-before-completion` before claiming done.
+You are working on the klyne repo. Spec at `compass_artifact_wf-d189e421-ff1d-443c-95b8-19b52fcd59b4_text_markdown.md`. §18 decisions are LOCKED. TDD-first; ≥80% coverage. After every change >30 lines run `make ci`. Use `superpowers:verification-before-completion` before claiming done.
 
 **Single-writer rule:** modify only files under "Owned paths".
 
@@ -14,7 +14,7 @@ You are working on the agentdeck repo. Spec at `compass_artifact_wf-d189e421-ff1
 
 ## Goal
 
-Embed a LiteLLM-style pricing JSON in the binary; provide `Lookup(model)` for per-token rates and `Cost(tokensIn, tokensOut, model)` for USD calculation. Support per-session, per-project, per-day, per-model rollups. Allow `~/.agentdeck/pricing.json` to override embedded values.
+Embed a LiteLLM-style pricing JSON in the binary; provide `Lookup(model)` for per-token rates and `Cost(tokensIn, tokensOut, model)` for USD calculation. Support per-session, per-project, per-day, per-model rollups. Allow `~/.klyne/pricing.json` to override embedded values.
 
 ---
 
@@ -32,7 +32,7 @@ Embed a LiteLLM-style pricing JSON in the binary; provide `Lookup(model)` for pe
 internal/cost/pricing.go
 internal/cost/pricing_test.go
 internal/cost/pricing.json          (embedded via //go:embed)
-internal/cost/refresh.go            (loads override from ~/.agentdeck/pricing.json if present)
+internal/cost/refresh.go            (loads override from ~/.klyne/pricing.json if present)
 internal/cost/refresh_test.go
 ```
 
@@ -85,7 +85,7 @@ Pull current rates from each vendor's pricing page (Anthropic, OpenAI, Google AI
 - [ ] All listed models present in `pricing.json` with non-zero rates (except `llama3.1:8b`).
 - [ ] `Cost(tokensIn, tokensOut, model)` returns USD; **0 with a warning log if model unknown** (not an error).
 - [ ] **Per-session $ matches `ccusage` to within 0.5% on a fixture** (the spec D7 acceptance).
-- [ ] Override file at `~/.agentdeck/pricing.json` takes precedence; tests cover both paths.
+- [ ] Override file at `~/.klyne/pricing.json` takes precedence; tests cover both paths.
 - [ ] Rollups (`RollupSession`, `RollupProject`, `RollupDaily`, `RollupByModel`) return correct sums.
 - [ ] 80%+ coverage.
 

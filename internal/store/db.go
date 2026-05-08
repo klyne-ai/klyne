@@ -1,4 +1,4 @@
-// Package store provides the SQLite store layer for agentdeck.
+// Package store provides the SQLite store layer for klyne.
 //
 // It exposes a DB struct with separate read and write *sql.DB handles
 // (MaxOpenConns=8 and MaxOpenConns=1, respectively) and applies the 6 spec §5

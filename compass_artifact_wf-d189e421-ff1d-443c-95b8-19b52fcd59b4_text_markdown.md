@@ -1,4 +1,4 @@
-# agentdeck — Shipping Spec v1.0
+# klyne — Shipping Spec v1.0
 
 > **Status:** Implementation-ready. Single source of truth.
 > **Owner:** solo dev + AI agent team.
@@ -10,15 +10,15 @@
 
 ## TL;DR
 
-- agentdeck is a **local-first mission control** for AI coding CLIs. It does not replace your CLI — you keep running `claude` and `codex` exactly as you do today. agentdeck silently watches the JSONL session files those CLIs already write to disk and gives you one clean browser UI to search them, summarize them, see costs, and recover threads after `/compact` blew away your context.
+- klyne is a **local-first mission control** for AI coding CLIs. It does not replace your CLI — you keep running `claude` and `codex` exactly as you do today. klyne silently watches the JSONL session files those CLIs already write to disk and gives you one clean browser UI to search them, summarize them, see costs, and recover threads after `/compact` blew away your context.
 - v1 ships with **only Claude Code and Codex CLI** because that's what most users have, plus a **smart BYOK auto-selector** that detects what API key you already own and routes each internal task (summarization, thread naming, embeddings) to the best model from your existing keys — so users never juggle subscriptions.
 - Stack: **Go backend** (single binary, gopsutil, fsnotify, modernc.org/sqlite v1.44.3) + **SvelteKit 5 frontend** (smallest bundle, fastest cold start), SQLite WAL + FTS5, SSE for real-time. Performance budget: <40 MB RAM idle, <50 ms p95 search, <200 ms cold-tab paint.
 
 ---
 
-## 1. What is agentdeck (1-paragraph elevator pitch)
+## 1. What is klyne (1-paragraph elevator pitch)
 
-agentdeck is a local-first, open-source dashboard that unifies every AI coding CLI you already use — starting with Claude Code and Codex — into a single browser-based mission control. It runs as a tiny Go daemon on your machine, tails the JSONL session logs your CLIs already write, and gives you searchable summaries, cross-CLI threads, cost tracking, and recovery from `/compact` events. **You don't change your workflow.** You don't create kanban tasks. You don't describe work upfront. You keep typing `claude` and `codex` in your terminal exactly as you do today; agentdeck just makes the history of what happened across all of them visible, searchable, and useful.
+klyne is a local-first, open-source dashboard that unifies every AI coding CLI you already use — starting with Claude Code and Codex — into a single browser-based mission control. It runs as a tiny Go daemon on your machine, tails the JSONL session logs your CLIs already write, and gives you searchable summaries, cross-CLI threads, cost tracking, and recovery from `/compact` events. **You don't change your workflow.** You don't create kanban tasks. You don't describe work upfront. You keep typing `claude` and `codex` in your terminal exactly as you do today; klyne just makes the history of what happened across all of them visible, searchable, and useful.
 
 ---
 
@@ -28,7 +28,7 @@ agentdeck is a local-first, open-source dashboard that unifies every AI coding C
 
 - **"They have just ONE subscription."** Most developers pay for Claude Pro/Max OR ChatGPT Plus, not both. Tools that demand new API keys for every internal feature are dead on arrival.
 - **"Performance should not be compromised … smooth flow for the user experience."** Existing dashboards (Electron-based, heavy SPAs) feel sluggish. The bar is "feels like a native CLI."
-- **"I had to create a kanban, describe the task… we want to keep it SIMPLE."** The user tried vibe-kanban (BloopAI/vibe-kanban, ~26K GitHub stars as of May 2026) and bounced because it forced an upfront task-description workflow. agentdeck's UX north star is the inverse: zero upfront friction, observe-only, the CLI is still in charge.
+- **"I had to create a kanban, describe the task… we want to keep it SIMPLE."** The user tried vibe-kanban (BloopAI/vibe-kanban, ~26K GitHub stars as of May 2026) and bounced because it forced an upfront task-description workflow. klyne's UX north star is the inverse: zero upfront friction, observe-only, the CLI is still in charge.
 - **`/compact` destroys context.** Claude Code auto-compacts long sessions and Codex CLI sessions can drop on disconnect. Users lose the thread of what they were doing and what decisions got made. Recovery is manual, painful, and often impossible.
 - **No cross-CLI memory.** A user might debug in Claude Code, then refactor in Codex, then come back the next day and have no unified record of "what was I working on Thursday across all my agents?"
 - **Cost surprises.** Codex CLI writes token totals into JSONL but there's no built-in dashboard. Users don't know if they're about to blow their Pro quota until 429s start hitting.
@@ -55,7 +55,7 @@ agentdeck is a local-first, open-source dashboard that unifies every AI coding C
 
 ### Positioning (one sentence)
 
-> "agentdeck is the unified browser dashboard for the AI coding CLIs you already run — observe-only, local-first, zero workflow change."
+> "klyne is the unified browser dashboard for the AI coding CLIs you already run — observe-only, local-first, zero workflow change."
 
 ### Differentiators (vs. each competitor)
 
@@ -70,7 +70,7 @@ agentdeck is a local-first, open-source dashboard that unifies every AI coding C
 ### Launch sequence
 
 1. **Stealth alpha (Day 1–14, "v1"):** ship the 14-day plan in §15 to a private GitHub repo. Dogfood with five Claude Code + Codex power users.
-2. **Public v1 launch (Day 15):** flip repo public, post on r/ClaudeAI, r/ChatGPTCoding, Hacker News (`Show HN: agentdeck — mission control for Claude Code + Codex`), and X/Twitter with a 30-second screen recording showing the 4 user flows in §6.
+2. **Public v1 launch (Day 15):** flip repo public, post on r/ClaudeAI, r/ChatGPTCoding, Hacker News (`Show HN: klyne — mission control for Claude Code + Codex`), and X/Twitter with a 30-second screen recording showing the 4 user flows in §6.
 3. **Early traction loop (Weeks 3–6):** open "request a connector" issues for OpenCode, Cursor, Aider, Cline, Gemini CLI, GitHub Copilot CLI. PRs welcome, with a templated `Connector` interface (§11).
 4. **v1.1 (Week 6–8):** memory monitoring panel, sqlite-vec semantic search opt-in, basic notifications.
 5. **v2 (Quarter 2):** ship the top 2 community-requested connectors based on issue thumbs-ups.
@@ -100,7 +100,7 @@ GitHub stars are vanity. The real metric is **weekly active local installs** (an
 │            └──────────┬──────────────┘                           │
 │                       │ fsnotify watch                           │
 │            ┌──────────▼─────────────┐                            │
-│            │  agentdeckd (Go bin)   │                            │
+│            │  klyned (Go bin)   │                            │
 │            │  ┌──────────────────┐  │                            │
 │            │  │ Watcher / Parser │  │                            │
 │            │  │ Connector layer  │  │                            │
@@ -117,7 +117,7 @@ GitHub stars are vanity. The real metric is **weekly active local installs** (an
 │            │ open in browser        │                            │
 │            └────────────────────────┘                            │
 │                                                                  │
-│  ~/.agentdeck/agentdeck.db (SQLite WAL + FTS5)                   │
+│  ~/.klyne/klyne.db (SQLite WAL + FTS5)                   │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -172,25 +172,25 @@ Assumption: user already has Claude Code and/or Codex installed and has been usi
 
 ### Flow A: Install (≤ 60 seconds, zero config)
 
-1. `brew install agentdeck` (macOS) / `curl -fsSL agentdeck.dev/install.sh | sh` (Linux/macOS) / `winget install agentdeck` (Windows). Single binary, no Node, no Python, no Docker.
-2. `agentdeck` (no args). Daemon starts, opens `http://127.0.0.1:7878` in default browser.
+1. `brew install klyne` (macOS) / `curl -fsSL klyne.dev/install.sh | sh` (Linux/macOS) / `winget install klyne` (Windows). Single binary, no Node, no Python, no Docker.
+2. `klyne` (no args). Daemon starts, opens `http://127.0.0.1:7878` in default browser.
 3. First-run wizard (4 screens, ~30 seconds total):
    - **Welcome.** "We watch your Claude Code and Codex sessions. We never modify your CLIs, never proxy your traffic, never call any external API without your explicit setup."
    - **Detection.** Daemon checks for `~/.claude/projects/`, `~/.codex/sessions/`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`. Shows green check / grey dash for each. (We do not read OAuth tokens — see §8.)
    - **Smart model picker** (see §8). Shows the auto-selected model for each internal task with "why this was picked" reasoning. User can accept all or override.
-   - **Done.** Drops to the dashboard. agentdeck immediately back-fills history from existing JSONL files.
+   - **Done.** Drops to the dashboard. klyne immediately back-fills history from existing JSONL files.
 
 ### Flow B: Daily use (no friction)
 
 1. Open terminal. Run `claude` or `codex` as you always do.
-2. Whenever you want to look back: hit `agentdeck` icon in menubar (macOS), or open `localhost:7878` in any browser tab. Dashboard already shows the live session you're in.
+2. Whenever you want to look back: hit `klyne` icon in menubar (macOS), or open `localhost:7878` in any browser tab. Dashboard already shows the live session you're in.
 3. Search across every session you've ever run: top bar, full-text, ranked, sub-50 ms.
 
 ### Flow C: Recover from `/compact` (the killer demo)
 
 1. You're 4 hours into a Claude Code session. `/compact` fires. Context blown.
-2. In agentdeck, click the session card → **"Restore context"** button.
-3. agentdeck shows the auto-generated rolling summary of everything before the compact (computed at every 50 messages and right before any detected compaction event), plus the last 20 raw messages, all formatted as a single Markdown block.
+2. In klyne, click the session card → **"Restore context"** button.
+3. klyne shows the auto-generated rolling summary of everything before the compact (computed at every 50 messages and right before any detected compaction event), plus the last 20 raw messages, all formatted as a single Markdown block.
 4. Click **"Copy as resume prompt"**. Paste into Claude Code. You're back in the thread, all key decisions intact.
 
 ### Flow D: Find an old thread ("what was I doing last Thursday?")
@@ -312,21 +312,21 @@ CREATE VIRTUAL TABLE message_embeddings USING vec0(
 
 ### The problem in one sentence
 
-The user said: **"They have just ONE subscription. They don't have to think or juggle between the models."** So agentdeck must work great whether the user has only Claude Pro, only ChatGPT Plus, only a Gemini API key, or some combination.
+The user said: **"They have just ONE subscription. They don't have to think or juggle between the models."** So klyne must work great whether the user has only Claude Pro, only ChatGPT Plus, only a Gemini API key, or some combination.
 
 ### CRITICAL legal constraint (Anthropic, fully enforced April 4, 2026, 12:00 PM PT)
 
-agentdeck **cannot** call Anthropic's API using the Claude Code OAuth token stored in `~/.claude`. Anthropic's Claude Code authentication documentation states verbatim:
+klyne **cannot** call Anthropic's API using the Claude Code OAuth token stored in `~/.claude`. Anthropic's Claude Code authentication documentation states verbatim:
 
 > "OAuth authentication (used with Free, Pro, and Max plans) is intended exclusively for Claude Code and Claude.ai. Using OAuth tokens obtained through Claude Free, Pro, or Max accounts in any other product, tool, or service — including the Agent SDK — is not permitted and constitutes a violation of the Consumer Terms of Service."
 
 Anthropic enforces this server-side; the API rejects such requests with: **"This credential is only authorized for use with Claude Code and cannot be used for other API requests."** Anthropic engineer Thariq Shihipar (Member of Technical Staff, Claude Code team) stated on the record (Feb 2026): "Third-party harnesses using Claude subscriptions create problems for users and are prohibited by our Terms of Service." Full enforcement was announced for **April 4, 2026, 12:00 PM PT**, after which subscription quotas no longer cover any third-party tool. **OpenCode pushed a commit removing Claude Pro/Max key support on or around February 19–20, 2026** ("anthropic legal requests"), with cleanup PR #18186 landing March 19, 2026.
 
-**Therefore:** if the user has only Claude Pro/Max with no Anthropic API key, agentdeck must not "borrow" the Claude Code subscription for its own internal calls. We need an alternative path.
+**Therefore:** if the user has only Claude Pro/Max with no Anthropic API key, klyne must not "borrow" the Claude Code subscription for its own internal calls. We need an alternative path.
 
 ### OpenAI / ChatGPT Plus is currently more permissive
 
-OpenAI's Codex CLI auth docs flag programmatic use as the recommended path for an API key but do not prohibit third-party access to `~/.codex/auth.json` the way Anthropic does, and OpenAI staff (e.g. Thibault Sottiaux) have publicly endorsed third-party harnesses using ChatGPT-account auth. Even so, **agentdeck takes the conservative, durable path: we never read `~/.codex/auth.json` either.** We rely on user-supplied API keys or a local model. This keeps us legally bulletproof on both vendors and means the next ToS update doesn't break our product.
+OpenAI's Codex CLI auth docs flag programmatic use as the recommended path for an API key but do not prohibit third-party access to `~/.codex/auth.json` the way Anthropic does, and OpenAI staff (e.g. Thibault Sottiaux) have publicly endorsed third-party harnesses using ChatGPT-account auth. Even so, **klyne takes the conservative, durable path: we never read `~/.codex/auth.json` either.** We rely on user-supplied API keys or a local model. This keeps us legally bulletproof on both vendors and means the next ToS update doesn't break our product.
 
 ### Auto-selection rules (executed in order; first match wins)
 
@@ -349,23 +349,23 @@ For each internal task, we pick:
 | **Per-session rolling summary** (1–4K tokens in, ~300 tokens out, runs every ~50 msgs) | 1. Gemini 2.5 Flash-Lite (free tier: 15 RPM, **1,000 RPD**, 250K TPM, 1M-token context per ai.google.dev rate-limits docs) → 2. OpenAI gpt-5-mini → 3. Anthropic claude-haiku-4 → 4. Ollama `llama3.1:8b` | Cheap, long-context. Summarization is the easy job; Gemini's free tier is generous enough to be effectively free for most users. |
 | **Thread naming / titling** (300 tokens in, 20 out) | 1. Gemini Flash-Lite → 2. gpt-5-nano → 3. claude-haiku-4 → 4. Ollama `llama3.1:8b` | Tiny task; free tier is fine forever. |
 | **Embeddings** (v1.1, ~512 tokens per message) | 1. OpenAI `text-embedding-3-small` → 2. Gemini `text-embedding-004` → 3. local `nomic-embed-text` via Ollama | Quality + cost. OpenAI is the de-facto bar. |
-| **Optional "ask agentdeck about my history"** chat (v1.1) | Use whatever the user picked as primary; default to highest-quality available | This is rare and on-demand, so quality matters more than cost. |
+| **Optional "ask klyne about my history"** chat (v1.1) | Use whatever the user picked as primary; default to highest-quality available | This is rare and on-demand, so quality matters more than cost. |
 
 ### The "I only have Claude Pro" path
 
 If the user ONLY has Claude Pro/Max (i.e. uses Claude Code via OAuth) and **no API key at all**, the wizard says clearly:
 
-> "You're paying for Claude Pro, which agentdeck cannot legally re-use for its own internal tasks (Anthropic ToS, fully enforced April 4, 2026). Pick one:
+> "You're paying for Claude Pro, which klyne cannot legally re-use for its own internal tasks (Anthropic ToS, fully enforced April 4, 2026). Pick one:
 >
-> **(A) Free + recommended:** add a Google Gemini API key. Free tier with no credit card; **1,000 requests/day on Flash-Lite** is more than enough for agentdeck's summary workload (a 50-message rolling summary every ~50 msgs ≈ tens of calls/day for a heavy user). [Get key →]
+> **(A) Free + recommended:** add a Google Gemini API key. Free tier with no credit card; **1,000 requests/day on Flash-Lite** is more than enough for klyne's summary workload (a 50-message rolling summary every ~50 msgs ≈ tens of calls/day for a heavy user). [Get key →]
 >
 > **(B) Fully local:** install Ollama and pull `llama3.1:8b`. Slower, lower-quality summaries, but zero cloud dependency. [Install Ollama →]
 >
-> **(C) Skip:** turn off summaries. agentdeck still works as a search-and-cost dashboard. You can enable later."
+> **(C) Skip:** turn off summaries. klyne still works as a search-and-cost dashboard. You can enable later."
 
 ### Honest trade-off note (explicit per user direction)
 
-This is a **deliberate exception to the "BYOK strict" stance** earlier research recommended. The reason: the "one-subscription user" reality makes pure-BYOK hostile. Recommending Gemini's free tier or local Ollama for a tiny set of background tasks (summarization only) preserves the spirit of BYOK — *no agentdeck-managed API keys, no proxying, no markup* — while solving the real-world friction. Embeddings remain strict-BYOK because they are opt-in v1.1.
+This is a **deliberate exception to the "BYOK strict" stance** earlier research recommended. The reason: the "one-subscription user" reality makes pure-BYOK hostile. Recommending Gemini's free tier or local Ollama for a tiny set of background tasks (summarization only) preserves the spirit of BYOK — *no klyne-managed API keys, no proxying, no markup* — while solving the real-world friction. Embeddings remain strict-BYOK because they are opt-in v1.1.
 
 ### Per-task override UI
 
@@ -401,7 +401,7 @@ A settings panel shows every internal task with a dropdown of compatible models 
 - 🟡 Threads view (cross-session workstream clustering)
 - 🟡 Native menubar/tray app (still served from the Go binary, just adds a tray icon via systray)
 - 🟡 Notifications (cost threshold, `/compact` detected, session idle)
-- 🟡 "Ask agentdeck about my history" Q&A box
+- 🟡 "Ask klyne about my history" Q&A box
 
 ### v2 (Quarter 2)
 
@@ -458,7 +458,7 @@ A settings panel shows every internal task with a dropdown of compatible models 
 ## 11. Repo structure
 
 ```
-agentdeck/
+klyne/
 ├── README.md
 ├── LICENSE                          # MIT
 ├── go.mod
@@ -473,7 +473,7 @@ agentdeck/
 │       ├── feature.yml
 │       └── connector_request.yml    # for "request a connector"
 ├── cmd/
-│   └── agentdeck/
+│   └── klyne/
 │       └── main.go                  # cobra entrypoint
 ├── internal/
 │   ├── app/
@@ -516,7 +516,7 @@ agentdeck/
 │   ├── proc/
 │   │   └── memory.go                # v1.1, gopsutil
 │   └── config/
-│       └── config.go                # ~/.agentdeck/config.toml
+│       └── config.go                # ~/.klyne/config.toml
 ├── ui/
 │   ├── package.json
 │   ├── svelte.config.js             # adapter-static
@@ -580,7 +580,7 @@ These are the explicit budgets that a perf regression test will fail on:
 |---|---|---|
 | Idle RAM (daemon) | < 40 MB | `ps -o rss=` after 1 hour, no active sessions |
 | Active RAM (1 live session, 5K msg DB) | < 80 MB | same, with session live |
-| Cold-start to UI paint | < 200 ms | from `agentdeck` invocation to first SvelteKit paint |
+| Cold-start to UI paint | < 200 ms | from `klyne` invocation to first SvelteKit paint |
 | FTS5 search p95 | < 50 ms | over 100K messages, 3-token query |
 | JSONL ingest throughput | ≥ 5,000 msg/sec | bulk back-fill on first run |
 | Summary turnaround | < 3 s | for 50-msg window, Gemini Flash-Lite |
@@ -613,7 +613,7 @@ These are the explicit budgets that a perf regression test will fail on:
 | Hacker News front page | — | once | — | — |
 | Release cadence | weekly patch | bi-weekly minor | monthly minor | monthly |
 
-**The single benchmark for "did we win"**: on Day 90, can a stranger install agentdeck on a Mac, open a browser, search their last month of Claude Code + Codex history, and hit "Restore context" on a compacted session — all without reading any docs? If yes, we won.
+**The single benchmark for "did we win"**: on Day 90, can a stranger install klyne on a Mac, open a browser, search their last month of Claude Code + Codex history, and hit "Restore context" on a compacted session — all without reading any docs? If yes, we won.
 
 ---
 
@@ -623,7 +623,7 @@ The plan assumes a solo dev driving an AI agent team (Claude Code + Codex), ~6 f
 
 | Day | Backend (Go) | Frontend (Svelte) | Done when |
 |---|---|---|---|
-| **D1** | Repo scaffold, `cmd/klyne`, cobra root, `internal/store/db.go` with WAL pragmas + dual handles, migration 001 | `npm create svelte@latest ui`, Tailwind, app shell, dummy `+page.svelte` | `agentdeck` starts, opens browser, blank page renders |
+| **D1** | Repo scaffold, `cmd/klyne`, cobra root, `internal/store/db.go` with WAL pragmas + dual handles, migration 001 | `npm create svelte@latest ui`, Tailwind, app shell, dummy `+page.svelte` | `klyne` starts, opens browser, blank page renders |
 | **D2** | `Connector` interface, Claude connector: Discover + Parse (no watch yet), unit tests against fixture JSONL | API client `lib/api.ts`, SessionList component (mock data) | `GET /sessions` returns parsed Claude sessions |
 | **D3** | Claude connector: fsnotify watch + writer goroutine, FTS5 migration 002 | SessionList wired to live `/sessions` | new Claude messages appear in DB within 1 s |
 | **D4** | Codex connector (Discover, Parse, Watch) — same shape as Claude | SessionView component (renders messages + tool calls) | both CLIs show in unified list |
@@ -636,7 +636,7 @@ The plan assumes a solo dev driving an AI agent team (Claude Code + Codex), ~6 f
 | **D11** | "Open in CLI" command builders (`claude --resume`, `codex resume`), polish error paths, structured logging | Polish: empty states, error states, keyboard shortcuts | smoke pass on all 4 user flows in §6 |
 | **D12** | Cross-platform build matrix (darwin/linux/windows × amd64/arm64), goreleaser config, install.sh, brew tap stub | Tailwind cleanup, mobile-narrow layout (just-in-case) | release artifacts produced in CI |
 | **D13** | Bench harness against §12 budgets, fix top 3 hotspots; macOS code-signing dry run | README copy (§16), screenshots, 30-sec demo gif | every §12 budget green |
-| **D14** | Private alpha to 5 users, fix 5 reported bugs, tag v1.0.0 | Landing page (`agentdeck.dev`) deployed via Cloudflare Pages | v1.0.0 tag pushed, install.sh works on a fresh VM |
+| **D14** | Private alpha to 5 users, fix 5 reported bugs, tag v1.0.0 | Landing page (`klyne.dev`) deployed via Cloudflare Pages | v1.0.0 tag pushed, install.sh works on a fresh VM |
 
 **Day 15:** flip repo public, post on HN / Reddit / X.
 
@@ -645,17 +645,17 @@ The plan assumes a solo dev driving an AI agent team (Claude Code + Codex), ~6 f
 ## 16. README copy template (launch-day marketing voice)
 
 ````markdown
-# agentdeck
+# klyne
 
 **Mission control for the AI coding CLIs you already run.**
 
-agentdeck is a local-first, open-source dashboard that watches your Claude Code
+klyne is a local-first, open-source dashboard that watches your Claude Code
 and Codex sessions and gives you one clean browser UI to search them,
 summarize them, see costs, and recover threads after `/compact`.
 
 It does not replace your CLI. It does not ask you to create kanban tasks.
 You keep typing `claude` and `codex` in your terminal exactly as you do today.
-agentdeck just makes the history of what happened across every session,
+klyne just makes the history of what happened across every session,
 across every project, instantly searchable and useful.
 
 ## Why
@@ -667,22 +667,22 @@ If you live in AI coding CLIs, you've felt all of these:
 - You don't know how much you've burned on tokens this month.
 - You jump between Claude Code and Codex and have no unified record.
 
-agentdeck fixes all of that, without changing your workflow.
+klyne fixes all of that, without changing your workflow.
 
 ## Install (60 seconds, zero config)
 
 ```bash
 # macOS
-brew install agentdeck
+brew install klyne
 
 # Linux / macOS
-curl -fsSL https://agentdeck.dev/install.sh | sh
+curl -fsSL https://klyne.dev/install.sh | sh
 
 # Windows
-winget install agentdeck
+winget install klyne
 
 # Run
-agentdeck
+klyne
 ```
 
 That's it. Browser opens. You're in.
@@ -697,7 +697,7 @@ That's it. Browser opens. You're in.
 - ♻️ **Restore context.** One click after `/compact` → resume prompt on
   your clipboard.
 - 🔑 **Smart BYOK.** Bring whatever key you already have (Anthropic, OpenAI,
-  Gemini free tier, or local Ollama). agentdeck picks the right model for
+  Gemini free tier, or local Ollama). klyne picks the right model for
   each internal task and tells you why.
 - ⚡ **Tiny.** <25 MB single Go binary, <40 MB RAM idle. No Electron.
 
@@ -710,11 +710,11 @@ That's it. Browser opens. You're in.
 
 ## Local-first by construction
 
-agentdeck reads your CLI's own JSONL session files
+klyne reads your CLI's own JSONL session files
 (`~/.claude/projects/`, `~/.codex/sessions/`). It never re-uses Claude
 Code OAuth tokens — that would violate Anthropic's Consumer Terms (fully
 enforced April 4, 2026). For its own internal tasks (summaries, naming),
-agentdeck uses an API key you provide, or a local Ollama model.
+klyne uses an API key you provide, or a local Ollama model.
 You stay in full control.
 
 ## v1 supports

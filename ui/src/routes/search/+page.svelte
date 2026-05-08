@@ -96,7 +96,7 @@
 </script>
 
 <svelte:head>
-  <title>{q ? `Search: ${q}` : 'Search'} — agentdeck</title>
+  <title>{q ? `Search: ${q}` : 'Search'} — klyne</title>
 </svelte:head>
 
 <div style="padding: 20px 24px 40px; max-width: 1100px;">

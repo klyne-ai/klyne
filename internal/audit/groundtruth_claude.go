@@ -53,7 +53,7 @@ type claudeRawUsage struct {
 	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
 }
 
-// total returns the cache-aware prompt size — the value agentdeck
+// total returns the cache-aware prompt size — the value.klyne
 // stores in messages.tokens_in (see internal/connectors/claude/parse.go
 // lines 244-246). This is the canonical "what was actually in this
 // turn's context window" number; raw input_tokens is misleading on
@@ -140,7 +140,7 @@ func LatestAssistantTokens(path string) (SourceTokens, error) {
 			// not mislabel the audit row. A JSONL file can host more
 			// than one logical session; v1 reports only the dominant
 			// (latest-by-timestamp) one, which is what the user sees
-			// in agentdeck's session-page view.
+			// in.klyne's session-page view.
 			out.SessionID = raw.SessionID
 		}
 	}

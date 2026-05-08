@@ -206,7 +206,7 @@ func TestLatestAssistantTokens_MultipleSessionsInFile(t *testing.T) {
 
 func TestLatestAssistantTokens_FileNotFound(t *testing.T) {
 	t.Parallel()
-	_, err := LatestAssistantTokens("/nonexistent-agentdeck-audit/no.jsonl")
+	_, err := LatestAssistantTokens("/nonexistent.klyne-audit/no.jsonl")
 	if err == nil {
 		t.Fatalf("err = nil, want non-nil for missing file")
 	}

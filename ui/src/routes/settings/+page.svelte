@@ -79,7 +79,7 @@
 </script>
 
 <svelte:head>
-  <title>agentdeck — Settings</title>
+  <title>klyne — Settings</title>
 </svelte:head>
 
 <div style="padding: 20px 24px 40px; max-width: 880px;">
@@ -207,7 +207,7 @@
             {#each [
               ['Version', '1.1.0'],
               ['Schema version', '7'],
-              ['DB path', '~/.agentdeck/state.db'],
+              ['DB path', '~/.klyne/state.db'],
               ['Server', '127.0.0.1:7878'],
             ] as [k, v]}
               <tr>

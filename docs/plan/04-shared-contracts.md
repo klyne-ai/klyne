@@ -6,7 +6,7 @@ These artifacts must be **finalized by W0 before any fan-out**. Each line is a f
 
 ## 1. Go module + dependencies
 
-`go.mod` declares `module github.com/<owner>/agentdeck`, Go 1.23.
+`go.mod` declares `module github.com/<owner>/klyne`, Go 1.23.
 
 Pinned dependencies (per spec §10):
 
@@ -143,8 +143,8 @@ File: **`internal/config/schema.go`** (W0-owned, frozen)
 addr = "127.0.0.1:7878"
 
 [paths]
-db = "~/.agentdeck/agentdeck.db"
-pricing_override = "~/.agentdeck/pricing.json"
+db = "~/.klyne/klyne.db"
+pricing_override = "~/.klyne/pricing.json"
 
 [connectors.claude]
 enabled = true

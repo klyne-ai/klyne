@@ -1,6 +1,6 @@
 // Package app — demo-mode fixture seeder.
 //
-// This file owns the offline ingestion pipeline used by `agentdeck start
+// This file owns the offline ingestion pipeline used by `klyne start
 // --demo`. The seeder walks a fixture directory of *.jsonl files, runs each
 // line through the matching connector parser (Claude or Codex, inferred
 // from the file path), and writes the resulting Messages into the supplied

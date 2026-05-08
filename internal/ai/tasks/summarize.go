@@ -1,4 +1,4 @@
-// Package tasks implements AI background tasks for agentdeck: Summarize,
+// Package tasks implements AI background tasks for klyne: Summarize,
 // Title, and the Runner that triggers them from SSE events.
 package tasks
 

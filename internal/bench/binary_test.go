@@ -70,5 +70,5 @@ func repoBinaryPath(tb testing.TB) string {
 	// filename = .../internal/bench/binary_test.go
 	// two dirs up = repo root
 	repoRoot := filepath.Join(filepath.Dir(filename), "..", "..")
-	return filepath.Join(repoRoot, "bin", "agentdeck")
+	return filepath.Join(repoRoot, "bin", "klyne")
 }

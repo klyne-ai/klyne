@@ -36,7 +36,7 @@
 </script>
 
 <svelte:head>
-  <title>agentdeck — Projects</title>
+  <title>klyne — Projects</title>
 </svelte:head>
 
 <div style="padding: 20px 24px 40px; max-width: 1280px;">

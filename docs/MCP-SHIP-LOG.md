@@ -1,8 +1,8 @@
-# agentdeck MCP — Ship Log
+# klyne MCP — Ship Log
 
 **Build date:** 2026-05-08 (slice 5: cross-session search via daemon FTS)
 **Branch:** `feat/bootstrap-and-wave1`
-**Server version advertised over MCP:** `agentdeck v0.4.0`
+**Server version advertised over MCP:** `klyne v0.4.0`
 
 ## Slice 5 — Cross-session full-text search
 
@@ -26,11 +26,11 @@ Closes that gap with one tool + one slash prompt.
   flag
 - 5-second HTTP timeout — never hang the AI on a stuck daemon
 - Honest "daemon down" path: connection-refused or timeout returns
-  `{daemon_down: true, reason: "Could not reach the agentdeck daemon
-  at <url> — start it with \`agentdeck\` and try again."}` instead
+  `{daemon_down: true, reason: "Could not reach the klyne daemon
+  at <url> — start it with \`klyne\` and try again."}` instead
   of a generic Go error
 
-**`/mcp__agentdeck__search` slash prompt** (parallel to the tool)
+**`/mcp__klyne__search` slash prompt** (parallel to the tool)
 - Accepts `query` (required), `limit`, `sort`, `project_path`
 - Renders hits as a Markdown list with short session ids,
   timestamps, and snippets — the AI can pick a session and call
@@ -61,7 +61,7 @@ suite race-clean.
 |---|---|
 | Cross-session full-text search | ✓ via daemon FTS |
 | Daemon-required indication | ✓ explicit `daemon_down` flag |
-| Slash prompt UX | ✓ `/mcp__agentdeck__search` |
+| Slash prompt UX | ✓ `/mcp__klyne__search` |
 
 ## Slice 4 — Codex parity, slash prompts, install command
 
@@ -106,19 +106,19 @@ Each of the four tools now has a parallel prompt that runs the same
 business logic and returns the result as a user-message injection —
 no AI roundtrip needed for the fetch.
 
-- `/mcp__agentdeck__health` → live `get_context_health`
-- `/mcp__agentdeck__sessions` → live `list_sessions`
-- `/mcp__agentdeck__handoff` → live `generate_handoff`
-- `/mcp__agentdeck__precompact` → live `get_pre_compact_context`
+- `/mcp__klyne__health` → live `get_context_health`
+- `/mcp__klyne__sessions` → live `list_sessions`
+- `/mcp__klyne__handoff` → live `generate_handoff`
+- `/mcp__klyne__precompact` → live `get_pre_compact_context`
 
 All accept an optional `cwd` argument; default is the MCP
 subprocess's cwd.
 
-**4. `agentdeck mcp install` command.** Auto-detects which host
-configs exist and writes (or updates) the agentdeck entry idempotently.
+**4. `klyne mcp install` command.** Auto-detects which host
+configs exist and writes (or updates) the klyne entry idempotently.
 
-- Claude: `~/.claude.json` → `mcpServers.agentdeck = {command, args}`
-- Codex:  `~/.codex/config.toml` → `[mcp_servers.agentdeck]` (key
+- Claude: `~/.claude.json` → `mcpServers.klyne = {command, args}`
+- Codex:  `~/.codex/config.toml` → `[mcp_servers.klyne]` (key
   format verified against OpenAI's published Codex MCP docs)
 - `--platform claude|codex|all` overrides auto-detect.
 - Idempotent: re-running after `go install` reports
@@ -141,8 +141,8 @@ new test cases; full mcpserver suite race-clean.
 | `get_pre_compact_context` recovery | ✓ scan backward | ✓ replacement_history |
 | Pre-compact `pre_tokens` quantification | ✓ | ✗ (Codex doesn't expose) |
 | Pre-compact trigger (manual/auto) | ✓ | ✗ (Codex doesn't distinguish) |
-| Slash prompt UX (`/mcp__agentdeck__*`) | ✓ | ✓ |
-| `agentdeck mcp install` | ✓ JSON merge | ✓ TOML merge |
+| Slash prompt UX (`/mcp__klyne__*`) | ✓ | ✓ |
+| `klyne mcp install` | ✓ JSON merge | ✓ TOML merge |
 
 ## Slice 3 patch — Read vs Edit distinction in bloat scorecard
 
@@ -174,7 +174,7 @@ Fix:
 5 new tests cover the fix; 35/35 contexthealth tests green.
 
 This document is the deliberate, honest record of everything in the
-agentdeck MCP server as it stands at the end of slice 2. It exists so
+klyne MCP server as it stands at the end of slice 2. It exists so
 the next person to look at this code (or you, six months from now)
 knows exactly what was built, what was deferred, and what the known
 trust boundaries are.
@@ -187,10 +187,10 @@ will surprise users in the wild.
 
 ## What shipped
 
-### 1. Trust audit foundation (`agentdeck audit-sessions`)
+### 1. Trust audit foundation (`klyne audit-sessions`)
 
 A separate CLI subcommand that re-derives ground truth from raw JSONL
-and compares against agentdeck's stored values. Walks the user's real
+and compares against klyne's stored values. Walks the user's real
 `~/.claude/projects` and `~/.codex/sessions`. Designed to be run
 before believing any MCP tool answer.
 
@@ -218,7 +218,7 @@ raw signals it used.
   failures OR (topic-shifted AND >= 40% fill)` → rescue. `>= 50% OR
   3-4 file reads OR ≥3:1 hidden ratio` → risky. `>= 30%` → drifting.
 
-### 3. MCP server with 4 tools (`internal/mcpserver` + `agentdeck mcp`)
+### 3. MCP server with 4 tools (`internal/mcpserver` + `klyne mcp`)
 
 Stdio transport, official `modelcontextprotocol/go-sdk` v1.6.
 
@@ -361,10 +361,10 @@ deliberately and is worth understanding before changing.
 ### Limitations of the trust foundation (will surprise developers)
 
 9. **Codex DB comparison deferred.** The audit reports JSONL ground
-   truth for Codex but does NOT compare against agentdeck's SQLite
+   truth for Codex but does NOT compare against klyne's SQLite
    store. Codex's connector stores per-turn token deltas as System
    messages, not as latest-assistant rows; comparing requires
-   aggregating those deltas. Until the comparison ships, agentdeck
+   aggregating those deltas. Until the comparison ships, klyne
    could silently store wrong Codex token totals and the audit
    wouldn't catch it. (The MCP server reads JSONL directly so this
    is invisible to the MCP user — but anyone using
@@ -378,7 +378,7 @@ deliberately and is worth understanding before changing.
 11. **Pre-existing test failures are unrelated and untouched.**
     `TestCost_Summary_DefaultGroup` and `TestMigrationsApply` were
     already broken before any of this work; they remain broken.
-    Neither is in agentdeck's hot path or in the MCP server's
+    Neither is in klyne's hot path or in the MCP server's
     dependency graph.
 
 ### Limitations of the install / packaging (will surprise users)
@@ -434,17 +434,17 @@ If anything in this install breaks your Claude Code experience:
 # 1. Restore your previous Claude Code config from the backup
 #    (the install step writes one alongside ~/.claude.json with a
 #    timestamp suffix; replace TIMESTAMP with the backup file's name).
-cp ~/.claude.json.agentdeck-backup-TIMESTAMP ~/.claude.json
+cp ~/.claude.json.klyne-backup-TIMESTAMP ~/.claude.json
 
 # 2. Remove the binary.
-rm ~/.local/bin/agentdeck
+rm ~/.local/bin/klyne
 
 # 3. Restart Claude Code.
 ```
 
 If you only want to disable the MCP server temporarily without
 rolling back the install, edit `~/.claude.json`, find the
-`mcpServers.agentdeck` entry, and remove just that key (keep
+`mcpServers.klyne` entry, and remove just that key (keep
 clinikk-codebase, excalidraw, linear-server intact).
 
 ---
@@ -455,8 +455,8 @@ Listed in dependency order, not priority order:
 
 1. **Codex parity for all 4 MCP tools.** Single biggest unit of work
    remaining. Different JSONL schema (envelope-based), different
-   storage model in agentdeck, different compact event format.
-2. **Real-world integration smoke test.** Run agentdeck inside live
+   storage model in klyne, different compact event format.
+2. **Real-world integration smoke test.** Run klyne inside live
    Claude Code, ask the AI to call the tools mid-conversation, find
    the protocol-edge bugs synthetic tests miss. THIS IS WHAT YOU ARE
    ABOUT TO DO BY USING IT TODAY.
@@ -481,7 +481,7 @@ When the install step below completes, restart Claude Code and try
 these prompts inside any conversation about a project under
 `~/.claude/projects`:
 
-- "Use the agentdeck MCP server's `list_sessions` tool to show me
+- "Use the klyne MCP server's `list_sessions` tool to show me
   every session in this project."
 - "Call `get_context_health` on this session and tell me what state
   it's in."

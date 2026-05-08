@@ -33,7 +33,7 @@
       <div class="text-5xl" aria-hidden="true">🎉</div>
       <h2 class="text-2xl font-bold text-gray-100">You're all set!</h2>
       <p class="text-gray-400 leading-relaxed">
-        agentdeck is now configured and watching your sessions.
+        klyne is now configured and watching your sessions.
         Open Claude Code or Codex CLI and start working — your sessions will appear here automatically.
       </p>
     </div>
@@ -41,7 +41,7 @@
     <div class="flex flex-col gap-3 w-full text-left">
       <div class="flex items-center gap-3 text-sm text-gray-400">
         <span class="text-green-400 font-bold">✓</span>
-        <span>Settings saved to <code class="text-gray-300">~/.agentdeck/config.toml</code></span>
+        <span>Settings saved to <code class="text-gray-300">~/.klyne/config.toml</code></span>
       </div>
       <div class="flex items-center gap-3 text-sm text-gray-400">
         <span class="text-green-400 font-bold">✓</span>

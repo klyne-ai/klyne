@@ -1,30 +1,30 @@
-# agentdeck positioning: competitor comparison and launch gaps
+# klyne positioning: competitor comparison and launch gaps
 
 Review date: 2026-05-07
 
 ## Short positioning
 
-agentdeck should not be positioned as a generic "AI usage dashboard." That
+klyne should not be positioned as a generic "AI usage dashboard." That
 market is already crowded. The sharper wedge is:
 
 > Local mission control for Claude Code and Codex power users: see every active
 > coding session, recover old context, resume from the right project, and know
 > when to compact before a long thread burns through your quota.
 
-This makes agentdeck a workflow/recovery tool first, with analytics as support.
+This makes klyne a workflow/recovery tool first, with analytics as support.
 
 ## Competitor comparison
 
-| Tool | Primary job | Supported tools | Current strengths | Where agentdeck can win | Risk for agentdeck |
+| Tool | Primary job | Supported tools | Current strengths | Where klyne can win | Risk for klyne |
 |---|---|---:|---|---|---|
-| agentdeck | Local cockpit for Claude Code + Codex sessions, search, resume, compact recovery, token/context savings. | 2 today: Claude Code, Codex. | Local-first Go daemon, reads existing JSONL logs, session/project views, live SSE updates, FTS search, copy-safe resume command, cockpit (1 tile per running session), `/compact` detection + rolling AI summaries, live OAuth/JSONL-snapshot rate-limit badge, per-session context-fill + cost-per-turn indicator with compact/restart savings deltas, on-demand AI break advisor (continue / compact / start fresh). | Own the "I have 10 parallel AI coding terminals and need to recover/resume safely" problem. Make `/compact` timing and recovery the killer feature, with cost-forensics (per-turn waterfall, tool-bloat scorecard) as the second moat. | Launch README still says pre-alpha; no release/tag; CI/checks not launch-green; fewer connectors than competitors; cost-forensics differentiators not yet shipped. |
+| klyne | Local cockpit for Claude Code + Codex sessions, search, resume, compact recovery, token/context savings. | 2 today: Claude Code, Codex. | Local-first Go daemon, reads existing JSONL logs, session/project views, live SSE updates, FTS search, copy-safe resume command, cockpit (1 tile per running session), `/compact` detection + rolling AI summaries, live OAuth/JSONL-snapshot rate-limit badge, per-session context-fill + cost-per-turn indicator with compact/restart savings deltas, on-demand AI break advisor (continue / compact / start fresh). | Own the "I have 10 parallel AI coding terminals and need to recover/resume safely" problem. Make `/compact` timing and recovery the killer feature, with cost-forensics (per-turn waterfall, tool-bloat scorecard) as the second moat. | Launch README still says pre-alpha; no release/tag; CI/checks not launch-green; fewer connectors than competitors; cost-forensics differentiators not yet shipped. |
 | [Agentlytics](https://agentlytics.io/) | Unified analytics dashboard for AI coding agents. | Claims 16 editors/agents including Cursor, Windsurf, Antigravity, Claude Code, VS Code, Zed, OpenCode, Codex, Gemini CLI, Copilot CLI, Goose, Kiro, Command Code. | One-command `npx agentlytics`, broad connector coverage, local dashboard, costs, session browser, projects, compare page, subscriptions/rate-limit overview, team relay/MCP sharing. | Avoid competing head-on on "number of connectors" or generic analytics. Focus on live operational cockpit, resume, compact decisioning, and recovery flows. | Very direct competitor for dashboards, search, projects, costs, and local-first story. Already around the 500-star benchmark. |
-| [OpenUsage](https://github.com/robinebers/openusage) | Menu-bar subscription/quota tracker for AI coding tools. | Broad provider list: Claude, Codex, Cursor, Copilot, Gemini, Windsurf, Kiro, OpenCode, Antigravity, and more. | Polished desktop utility, release downloads, auto-updates, plugin-based provider model, local HTTP API, quota/progress display. | agentdeck is not just "how much quota is left"; it should show what work is happening, which session to resume, and how to recover context. | If agentdeck's launch copy says "track usage/quota," OpenUsage looks more mature and broader. |
-| [CliDeck](https://docs.clideck.dev/) | Browser terminal dashboard for running multiple AI coding agents. | Claude Code, Codex, Gemini CLI, OpenCode, custom agents/shells. | Real PTY panels, live status, notifications, session resume, mobile remote, roles, autopilot routing, plugin API. | agentdeck can stay read-only and safer: no terminal wrapping, no workflow interception, no sending messages through the app. Stronger for post-hoc history, search, recovery, and context cost visibility. | CliDeck owns the "run many agents from one browser tab" message. agentdeck must not sound like a weaker terminal dashboard. |
+| [OpenUsage](https://github.com/robinebers/openusage) | Menu-bar subscription/quota tracker for AI coding tools. | Broad provider list: Claude, Codex, Cursor, Copilot, Gemini, Windsurf, Kiro, OpenCode, Antigravity, and more. | Polished desktop utility, release downloads, auto-updates, plugin-based provider model, local HTTP API, quota/progress display. | klyne is not just "how much quota is left"; it should show what work is happening, which session to resume, and how to recover context. | If klyne's launch copy says "track usage/quota," OpenUsage looks more mature and broader. |
+| [CliDeck](https://docs.clideck.dev/) | Browser terminal dashboard for running multiple AI coding agents. | Claude Code, Codex, Gemini CLI, OpenCode, custom agents/shells. | Real PTY panels, live status, notifications, session resume, mobile remote, roles, autopilot routing, plugin API. | klyne can stay read-only and safer: no terminal wrapping, no workflow interception, no sending messages through the app. Stronger for post-hoc history, search, recovery, and context cost visibility. | CliDeck owns the "run many agents from one browser tab" message. klyne must not sound like a weaker terminal dashboard. |
 
 ## Feature matrix
 
-| Feature / user problem | agentdeck now/planned | Agentlytics | OpenUsage | CliDeck |
+| Feature / user problem | klyne now/planned | Agentlytics | OpenUsage | CliDeck |
 |---|---|---|---|---|
 | Local-first, no cloud account | Yes | Yes | Yes | Yes |
 | Reads existing Claude/Codex sessions without changing workflow | Yes | Yes | Partial: usage/quota focus | No/partial: wraps new live PTY sessions |
@@ -49,13 +49,13 @@ This makes agentdeck a workflow/recovery tool first, with analytics as support.
 | Demo mode/sample dataset | Missing | Appears easy via one-command scan only | N/A | Docs/product screenshots |
 | Release binaries / easy install | Missing | `npx` | Desktop releases | `npm install -g` |
 
-## Real user problems agentdeck should cover
+## Real user problems klyne should cover
 
 These are real problems observed from the repo, current competitor messaging,
 and public community posts about Claude/Codex usage. They are inside
-agentdeck's natural scope.
+klyne's natural scope.
 
-| User problem | Why it matters | agentdeck answer | Current gap |
+| User problem | Why it matters | klyne answer | Current gap |
 |---|---|---|---|
 | "I have many Claude/Codex sessions and cannot tell what is active." | Heavy users run parallel terminals and lose track of which agent is still working or waiting. | Cockpit view with live/idle tiles, SSE updates, latest preview, project/branch grouping. | Needs polish, screenshots, and stress testing with many simultaneous sessions. |
 | "I found an old session but cannot resume it correctly." | `claude --resume <id>` can fail or resume wrong context if run from the wrong directory. | Copy a full resume command with `cd '<project_path>' && claude/codex --resume <id>`. | Needs strong README/demo callout because this is a high-value practical fix. |
@@ -91,7 +91,7 @@ These items were "planned/core" in earlier drafts of this doc and are now in
 - **Project view** — multi-CLI tabs with per-session badges so a project
   with both Claude and Codex sessions shows both.
 
-## Missing launch-critical features in agentdeck scope
+## Missing launch-critical features in klyne scope
 
 Priority order for a credible public launch:
 
@@ -100,7 +100,7 @@ Priority order for a credible public launch:
    install steps, supported CLIs, privacy model, known limitations, and roadmap.
 
 2. **Demo mode**  
-   Add `agentdeck demo` or `agentdeck start --demo` using bundled sample
+   Add `klyne demo` or `klyne start --demo` using bundled sample
    Claude/Codex JSONL so people can see the cockpit/search/token flows in under
    two minutes.
 
@@ -118,7 +118,7 @@ Priority order for a credible public launch:
 
 6. **Compact recovery story**  
    The launch demo should show a compacted session, restore bundle, resume
-   command, and "start fresh" decision. This is agentdeck's best differentiator.
+   command, and "start fresh" decision. This is klyne's best differentiator.
 
 7. **Project rollup API**  
    Add a backend `/projects` endpoint instead of relying only on client-side
@@ -130,7 +130,7 @@ Priority order for a credible public launch:
    archival/share problem and fits the read-only local-history scope.
 
 9. **Connector status diagnostics**  
-   `agentdeck doctor` should clearly say which roots were found, how many files
+   `klyne doctor` should clearly say which roots were found, how many files
    were parsed, which sessions failed to parse, and what to do next.
 
 10. **Polished empty/error states**  
@@ -139,7 +139,7 @@ Priority order for a credible public launch:
 
 ## Post-launch differentiators (the second moat)
 
-These are the features that turn agentdeck from "another usage dashboard" into
+These are the features that turn klyne from "another usage dashboard" into
 "the cost-forensics tool for AI coding." None of the three competitors above
 ship them today; together they make the cost-visibility wedge defensible.
 
@@ -162,7 +162,7 @@ ship them today; together they make the cost-visibility wedge defensible.
    Dashboard pane: rolling 7d/30d trend, projected month-end spend, "today
    is 3× your average" banner. Optional desktop notification on threshold
    cross. Reuses existing cost rows; no new ingestion. OpenUsage does
-   per-quota tracking globally; agentdeck does it per-project, which maps
+   per-quota tracking globally; klyne does it per-project, which maps
    to engineering work better.
 
 4. **Compaction trust signal**
@@ -178,7 +178,7 @@ ship them today; together they make the cost-visibility wedge defensible.
    project / search views. Reuses the existing `TaskTitle` selector.
 
 These are listed in priority order — #1 and #2 are the shortest path to
-"agentdeck shows you something nothing else does."
+"klyne shows you something nothing else does."
 
 ## Good later features, but not needed for first launch
 
@@ -196,7 +196,7 @@ Claude/Codex recovery + compact-savings workflow extremely well.
 
 ## Sources checked
 
-- agentdeck local repo: README, UI routes/components, feature docs, API/contracts.
+- klyne local repo: README, UI routes/components, feature docs, API/contracts.
 - [Agentlytics public site](https://agentlytics.io/)
 - [Agentlytics GitHub](https://github.com/f/agentlytics)
 - [OpenUsage GitHub](https://github.com/robinebers/openusage)

@@ -44,9 +44,9 @@ func TestColdStart(t *testing.T) {
 
 	// Create a temp home dir so the daemon doesn't touch ~/.klyne.
 	fakeHome := t.TempDir()
-	agentdeckDir := filepath.Join(fakeHome, ".klyne")
-	if err := os.MkdirAll(agentdeckDir, 0o700); err != nil {
-		t.Fatalf("mkdir .agentdeck: %v", err)
+	klyneDir := filepath.Join(fakeHome, ".klyne")
+	if err := os.MkdirAll(klyneDir, 0o700); err != nil {
+		t.Fatalf("mkdir .klyne: %v", err)
 	}
 
 	// Use a fixed port (unlikely to be in use on CI).
@@ -71,9 +71,9 @@ enabled = false
 summary_model = "off"
 title_model = "off"
 embed_model = "off"
-`, testAddr, agentdeckDir)
+`, testAddr, klyneDir)
 
-	configPath := filepath.Join(agentdeckDir, "config.toml")
+	configPath := filepath.Join(klyneDir, "config.toml")
 	if err := os.WriteFile(configPath, []byte(configTOML), 0o600); err != nil {
 		t.Fatalf("write config.toml: %v", err)
 	}
@@ -147,5 +147,5 @@ func binaryPath(t testing.TB) string {
 	// filename = .../internal/bench/cold_start_test.go
 	// repo root = two dirs up
 	repoRoot := filepath.Join(filepath.Dir(filename), "..", "..")
-	return filepath.Join(repoRoot, "bin", "agentdeck")
+	return filepath.Join(repoRoot, "bin", "klyne")
 }

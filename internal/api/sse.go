@@ -1,7 +1,7 @@
 // Package api — SSE broadcast hub.
 //
 // The Hub is the single fan-out point for all real-time events in the
-// agentdeck daemon. Callers produce events via Publish; each active SSE
+// klyne daemon. Callers produce events via Publish; each active SSE
 // connection calls Subscribe to receive them on a per-subscriber buffered
 // channel.
 //

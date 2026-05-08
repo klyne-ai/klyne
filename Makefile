@@ -5,7 +5,7 @@
 # binaries dyld rejects ("missing LC_UUID load command"). Bump to Go 1.23+
 # and drop this flag once the toolchain catches up to the spec.
 build: build-ui
-	GOTOOLCHAIN=local CGO_ENABLED=0 go build -o bin/agentdeck ./cmd/klyne
+	GOTOOLCHAIN=local CGO_ENABLED=0 go build -o bin/klyne ./cmd/klyne
 
 # Build the SvelteKit UI if ui/package.json exists.
 # The UI build output is embedded via embed.FS (ui/build/).

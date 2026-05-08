@@ -139,9 +139,9 @@ func (f *OAuthFetcher) fetchFresh(ctx context.Context) (*api.OAuthUsage, error) 
 	req.Header.Set("Authorization", "Bearer "+creds.AccessToken)
 	req.Header.Set("anthropic-beta", oauthBeta)
 	req.Header.Set("Accept", "application/json")
-	// Identify ourselves to Anthropic so noisy queries from agentdeck
+	// Identify ourselves to Anthropic so noisy queries from klyne
 	// are distinguishable from the official CLI.
-	req.Header.Set("User-Agent", "agentdeck/0.1 (+https://github.com/klyne-ai/klyne)")
+	req.Header.Set("User-Agent", "klyne/0.1 (+https://github.com/klyne-ai/klyne)")
 
 	resp, err := f.client.Do(req)
 	if err != nil {

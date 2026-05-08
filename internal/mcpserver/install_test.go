@@ -52,7 +52,7 @@ func TestInstallForPlatform_ClaudeAdded(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	report, err := InstallForPlatform(PlatformClaude, "/usr/local/bin/agentdeck")
+	report, err := InstallForPlatform(PlatformClaude, "/usr/local/bin/klyne")
 	if err != nil {
 		t.Fatalf("install: %v", err)
 	}
@@ -76,8 +76,8 @@ func TestInstallForPlatform_ClaudeAdded(t *testing.T) {
 	if !ok {
 		t.Fatalf("klyne entry missing or wrong shape: %v", servers["klyne"])
 	}
-	if ad["command"] != "/usr/local/bin/agentdeck" {
-		t.Errorf("command = %v, want /usr/local/bin/agentdeck", ad["command"])
+	if ad["command"] != "/usr/local/bin/klyne" {
+		t.Errorf("command = %v, want /usr/local/bin/klyne", ad["command"])
 	}
 	args, _ := ad["args"].([]any)
 	if len(args) != 1 || args[0] != "mcp" {
@@ -91,10 +91,10 @@ func TestInstallForPlatform_ClaudeIdempotent(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`{}`), 0o600); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if _, err := InstallForPlatform(PlatformClaude, "/bin/agentdeck"); err != nil {
+	if _, err := InstallForPlatform(PlatformClaude, "/bin/klyne"); err != nil {
 		t.Fatalf("install 1: %v", err)
 	}
-	r2, err := InstallForPlatform(PlatformClaude, "/bin/agentdeck")
+	r2, err := InstallForPlatform(PlatformClaude, "/bin/klyne")
 	if err != nil {
 		t.Fatalf("install 2: %v", err)
 	}
@@ -172,7 +172,7 @@ func TestInstallForPlatform_ClaudeUpdatesStalePath(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`{"mcpServers":{"klyne":{"command":"/old/path","args":["mcp"]}}}`), 0o600); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	r, err := InstallForPlatform(PlatformClaude, "/new/path/agentdeck")
+	r, err := InstallForPlatform(PlatformClaude, "/new/path/klyne")
 	if err != nil {
 		t.Fatalf("install: %v", err)
 	}
@@ -180,7 +180,7 @@ func TestInstallForPlatform_ClaudeUpdatesStalePath(t *testing.T) {
 		t.Errorf("Action = %q, want %q", r.Action, InstallActionUpdated)
 	}
 	body, _ := os.ReadFile(path)
-	if !strings.Contains(string(body), "/new/path/agentdeck") {
+	if !strings.Contains(string(body), "/new/path/klyne") {
 		t.Errorf("file did not pick up new path: %s", body)
 	}
 }
@@ -205,7 +205,7 @@ trust_level = "trusted"
 		t.Fatalf("seed: %v", err)
 	}
 
-	r, err := InstallForPlatform(PlatformCodex, "/usr/local/bin/agentdeck")
+	r, err := InstallForPlatform(PlatformCodex, "/usr/local/bin/klyne")
 	if err != nil {
 		t.Fatalf("install: %v", err)
 	}
@@ -238,7 +238,7 @@ trust_level = "trusted"
 	if !ok {
 		t.Fatalf("klyne entry missing: %v", servers)
 	}
-	if ad["command"] != "/usr/local/bin/agentdeck" {
+	if ad["command"] != "/usr/local/bin/klyne" {
 		t.Errorf("command = %v", ad["command"])
 	}
 }
@@ -252,10 +252,10 @@ func TestInstallForPlatform_CodexIdempotent(t *testing.T) {
 	if err := os.WriteFile(path, []byte(""), 0o600); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if _, err := InstallForPlatform(PlatformCodex, "/bin/agentdeck"); err != nil {
+	if _, err := InstallForPlatform(PlatformCodex, "/bin/klyne"); err != nil {
 		t.Fatalf("install 1: %v", err)
 	}
-	r2, err := InstallForPlatform(PlatformCodex, "/bin/agentdeck")
+	r2, err := InstallForPlatform(PlatformCodex, "/bin/klyne")
 	if err != nil {
 		t.Fatalf("install 2: %v", err)
 	}

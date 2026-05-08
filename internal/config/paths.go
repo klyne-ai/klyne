@@ -13,9 +13,9 @@ import (
 // Override in tests via t.TempDir() to keep the filesystem clean.
 var HomeDir = os.UserHomeDir
 
-// ConfigDir returns the agentdeck configuration directory:
+// ConfigDir returns the klyne configuration directory:
 //   - macOS / Linux: ~/.klyne
-//   - Windows:       %USERPROFILE%\.agentdeck
+//   - Windows:       %USERPROFILE%\.klyne
 //
 // It calls HomeDir() each time so tests can swap the implementation.
 func ConfigDir() string {

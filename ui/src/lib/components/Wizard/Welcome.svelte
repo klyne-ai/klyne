@@ -9,9 +9,9 @@
 <div data-testid="wizard-welcome" class="flex flex-col items-center gap-8 py-12 px-6 max-w-lg mx-auto text-center">
   <div class="flex flex-col gap-3">
     <div class="text-5xl" aria-hidden="true">🗂</div>
-    <h1 class="text-2xl font-bold text-gray-100">Welcome to agentdeck</h1>
+    <h1 class="text-2xl font-bold text-gray-100">Welcome to klyne</h1>
     <p class="text-gray-400 leading-relaxed">
-      agentdeck watches your Claude Code and Codex CLI sessions in real time,
+      klyne watches your Claude Code and Codex CLI sessions in real time,
       giving you cost tracking, full-text search, and context-restore when your
       Claude context gets compacted.
     </p>

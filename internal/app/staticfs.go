@@ -1,7 +1,7 @@
 // Package app — static file system helper for the embedded UI.
 //
 // The SvelteKit static build output lives at ui/build/ and is embedded by
-// the module-root agentdeck.UI variable (see /embed.go). This file exposes
+// the module-root klyne.UI variable (see /embed.go). This file exposes
 // a constructor that returns an http.Handler suitable for mounting under
 // "/" by App.Start.
 //
@@ -37,7 +37,7 @@ const indexFile = "index.html"
 // indexFile for any GET that does not resolve to a real file.
 //
 // The provided FS must contain the build/ subtree (i.e. the parent of
-// index.html). For the production embed at /embed.go, pass agentdeck.UI.
+// index.html). For the production embed at /embed.go, pass klyne.UI.
 func NewStaticFSHandler(rootFS fs.FS) (http.Handler, error) {
 	sub, err := fs.Sub(rootFS, uiSubdir)
 	if err != nil {

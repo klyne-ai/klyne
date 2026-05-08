@@ -20,11 +20,11 @@ type SessionAudit struct {
 	// not just mismatched ones, so the cross-session insight pass can
 	// aggregate without re-reading the files.
 	Compact CompactStats
-	// StoredTokens is the value agentdeck has in its SQLite store for
+	// StoredTokens is the value.klyne has in its SQLite store for
 	// this session's latest assistant message with non-zero TokensIn.
 	// Zero when Found is false.
 	StoredTokens int64
-	// Found is true when the session was located in the agentdeck DB.
+	// Found is true when the session was located in the klyne DB.
 	// False means the daemon never ingested this transcript — itself a
 	// useful diagnostic.
 	Found bool
@@ -32,7 +32,7 @@ type SessionAudit struct {
 	// true. A session that isn't in the DB cannot match; the audit
 	// reports those separately.
 	Match bool
-	// Delta is StoredTokens - Source.Tokens. Negative means agentdeck
+	// Delta is StoredTokens - Source.Tokens. Negative means.klyne
 	// undercounts (the visible bug class). Positive means it overcounts.
 	// Zero when Match is true OR when Found is false.
 	Delta int64
@@ -52,7 +52,7 @@ type Report struct {
 	// Mismatches counts sessions that were Found but had Match=false.
 	Mismatches int
 	// NotInDB counts sessions whose ground truth said tokens > 0 but
-	// the agentdeck DB had no record. Excluded from Mismatches because
+	// the klyne DB had no record. Excluded from Mismatches because
 	// the failure mode is different (ingestion gap vs counting bug).
 	NotInDB int
 	// SkippedNoAssistant counts JSONL files that had no qualifying
@@ -80,14 +80,14 @@ type Report struct {
 	AutoCompacts int
 }
 
-// LookupFunc returns the agentdeck-stored TokensIn for the most-recent
+// LookupFunc returns the klyne-stored TokensIn for the most-recent
 // assistant message of a given session, plus a `found` flag. Implemented
 // against the real *store.DB by the cobra subcommand and against an
 // in-memory map by tests.
 type LookupFunc func(sessionID string) (tokens int64, found bool)
 
 // CodexReport summarises a Codex audit pass. It deliberately does NOT
-// compare against the agentdeck DB — Codex's storage model uses
+// compare against the klyne DB — Codex's storage model uses
 // per-turn deltas as System messages rather than the latest-assistant
 // pattern Claude uses, and an apples-to-apples DB comparison requires
 // reconstruction work that lives in a follow-up slice. Reporting the
@@ -248,14 +248,14 @@ func Run(paths []string, lookup LookupFunc) Report {
 // by failure class.
 func RenderMarkdown(r Report) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "# agentdeck audit report\n\n")
+	fmt.Fprintf(&b, "#.klyne audit report\n\n")
 	fmt.Fprintf(&b, "Generated: %s\n", r.GeneratedAt.Format(time.RFC3339))
 	fmt.Fprintf(&b, "Sessions sampled: %d\n\n", r.Total)
 
 	fmt.Fprintf(&b, "## Summary\n\n")
 	fmt.Fprintf(&b, "- Latest-assistant input_tokens accuracy: %d/%d ✓ (%s)\n",
 		r.Matches, nonZero(r.Matches+r.Mismatches), pct(r.Matches, r.Matches+r.Mismatches))
-	fmt.Fprintf(&b, "- Sessions not yet ingested into agentdeck DB: %d\n", r.NotInDB)
+	fmt.Fprintf(&b, "- Sessions not yet ingested into klyne DB: %d\n", r.NotInDB)
 	fmt.Fprintf(&b, "- Sessions with no assistant turn yet: %d\n", r.SkippedNoAssistant)
 	if r.TotalCompacts > 0 {
 		fmt.Fprintf(&b, "- /compact events detected: %d total (%d manual, %d auto) across %d sessions; ~%s tokens compacted away cumulatively\n",

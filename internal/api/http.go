@@ -1,5 +1,5 @@
 // Package api wires the chi HTTP router, middleware stack, and all
-// read-only handlers for the agentdeck daemon.
+// read-only handlers for the klyne daemon.
 //
 // # RouterMounter — integration contract for W8 (SSE hub) and W15 (wizard/restore)
 //

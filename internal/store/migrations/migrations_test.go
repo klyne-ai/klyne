@@ -47,7 +47,7 @@ func TestMigrationsApply(t *testing.T) {
 		}
 	}
 
-	dbPath := filepath.Join(t.TempDir(), "agentdeck-migrations-test.db")
+	dbPath := filepath.Join(t.TempDir(), "klyne-migrations-test.db")
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)

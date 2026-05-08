@@ -16,7 +16,7 @@ The v1 14-day plan in §15 of the spec is written as a single-developer sequence
 
 - **Single-writer rule.** Each workstream owns disjoint files/directories. No two agents touch the same file at the same time.
 - **W0-owned contracts.** Every type that crosses workstream boundaries lives in exactly one W0 file. Modifying these requires a labeled `contract-change` PR with human review — not a silent edit.
-- **Worktrees, not branches in shared trees.** Each agent works in its own `git worktree` at `~/agentdeck-worktrees/W{N}-{slug}`.
+- **Worktrees, not branches in shared trees.** Each agent works in its own `git worktree` at `~/klyne-worktrees/W{N}-{slug}`.
 - **Coverage + lint + type-check gates** in CI on every PR.
 
 ## Workstream count by wave

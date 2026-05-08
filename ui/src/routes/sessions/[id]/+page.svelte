@@ -24,7 +24,7 @@
   async function handleDelete(): Promise<void> {
     if (!session) return;
     const ok = window.confirm(
-      `Delete this session permanently?\n\nProject: ${session.project_path}\nMessages: ${session.msg_count}\n↓ Tokens: ${kfmt(session.tokens_out)}\n\nThis only removes it from agentdeck — the source JSONL on disk is untouched. Cannot be undone.`
+      `Delete this session permanently?\n\nProject: ${session.project_path}\nMessages: ${session.msg_count}\n↓ Tokens: ${kfmt(session.tokens_out)}\n\nThis only removes it from klyne — the source JSONL on disk is untouched. Cannot be undone.`
     );
     if (!ok) return;
     deleting = true;
@@ -197,7 +197,7 @@
 </script>
 
 <svelte:head>
-  <title>agentdeck — session {sessionId.slice(0, 8)}</title>
+  <title>klyne — session {sessionId.slice(0, 8)}</title>
 </svelte:head>
 
 <div style="padding: 20px 24px 60px; max-width: 980px;">

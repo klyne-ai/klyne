@@ -1,7 +1,7 @@
 // Package audit re-derives "ground truth" from raw JSONL transcripts and
-// compares it against what agentdeck has stored in SQLite. The goal is
+// compares it against what klyne has stored in SQLite. The goal is
 // not testing — it is a reproducible diagnostic the user runs against
-// their own data to know whether agentdeck's numbers are trustworthy
+// their own data to know whether.klyne's numbers are trustworthy
 // before they (or an MCP client) act on them.
 //
 // The Phase 0 audit is intentionally narrow: one check per slice. The

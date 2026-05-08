@@ -17,7 +17,7 @@
 | **R11** | Anthropic ToS changes before launch | Low | Critical | Human | We never reuse OAuth (§17 #2). Even if Anthropic restricts more, we're already conservative. Re-check the ToS page on Day 13 before tagging. |
 | **R12** | Wave 3 integration discovers a contract bug that requires a W0 ripple | Medium | High | Human | Allocate a "contract revision" PR slot in Wave 3. Treat it as a blocking dep: when a contract changes, every affected workstream gets an automatic update PR. |
 | **R13** | Solo dev becomes the bottleneck reviewing 7 agent PRs in Wave 1 | High | Medium | Human | Use `code-review:code-review` skill on each PR; batch reviews twice/day; require agents to self-review with `superpowers:requesting-code-review` before opening PR. |
-| **R14** | Worktree confusion — agent commits to wrong branch | Medium | Medium | Human | Each agent gets a worktree at `~/agentdeck-worktrees/W{N}-{slug}` on a branch `wave{X}/W{N}-{slug}`. Use `superpowers:using-git-worktrees`. CI rejects pushes to `main` that aren't via a labeled PR. |
+| **R14** | Worktree confusion — agent commits to wrong branch | Medium | Medium | Human | Each agent gets a worktree at `~/klyne-worktrees/W{N}-{slug}` on a branch `wave{X}/W{N}-{slug}`. Use `superpowers:using-git-worktrees`. CI rejects pushes to `main` that aren't via a labeled PR. |
 | **R15** | Coverage gate gaming — agent writes shallow tests to hit 80% | Medium | High | Human | Coverage is necessary, not sufficient. Manual review of every test file with `superpowers:requesting-code-review` checklist. |
 
 ---

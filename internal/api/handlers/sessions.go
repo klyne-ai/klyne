@@ -1,4 +1,4 @@
-// Package handlers implements the HTTP handlers for the agentdeck API.
+// Package handlers implements the HTTP handlers for the klyne API.
 // Each handler is a thin translation layer between the HTTP contract
 // (defined in internal/api/contracts.go) and the store DAOs.
 //
@@ -219,7 +219,7 @@ func (h *SessionsHandler) Summary(w http.ResponseWriter, r *http.Request) {
 // (cascade-driven trigger), and any thread/summary children. Returns 204 on
 // success, 404 if no row matched, 500 on unexpected error.
 //
-// Note: this only deletes from the agentdeck DB. The on-disk JSONL files at
+// Note: this only deletes from the klyne DB. The on-disk JSONL files at
 // ~/.claude/projects/* and ~/.codex/sessions/* are NOT touched — the connector
 // will NOT re-ingest them on next start because warm-up uses the dedup-by-ID
 // path on InsertMessage. To prevent re-ingestion on a *fresh* DB rebuild, the

@@ -2,7 +2,7 @@ Now I have the full spec. Let me produce the multi-agent execution plan.
 
 ---
 
-# agentdeck — Multi-Agent Parallel Execution Plan
+# klyne — Multi-Agent Parallel Execution Plan
 
 > Companion to the v1 shipping spec. Read this top-to-bottom once; then execute Section 7 ("Recommended kickoff sequence") to start work today.
 
@@ -41,7 +41,7 @@ Workstreams are listed by ID. Owned paths follow §11 of the spec exactly. Sizes
   - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/store/migrations/embed.go` (just `//go:embed *.sql` + `var FS embed.FS`)
   - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/api/contracts.go` (route list constants, request/response DTOs — **handlers in W7**)
   - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/api/sse_events.go` (SSE event payload types: `MsgNew`, `SummaryReady`, `SessionUpdate`, `CostTick`, `ThreadRebuild`)
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/config/schema.go` (typed struct for `~/.agentdeck/config.toml` — **loader in W6**)
+  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/config/schema.go` (typed struct for `~/.klyne/config.toml` — **loader in W6**)
   - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/cost/pricing_schema.go` (typed struct + JSON tags for the LiteLLM-style pricing table — **table data + lookup in W9**)
   - `/Users/mohitpatel/Desktop/Project/agentdeck/examples/sample-jsonl/README.md` (describes fixture layout)
   - `/Users/mohitpatel/Desktop/Project/agentdeck/examples/sample-jsonl/claude/*.jsonl` (3–5 hand-collected fixture sessions, including one that hits `/compact`)
@@ -58,7 +58,7 @@ Workstreams are listed by ID. Owned paths follow §11 of the spec exactly. Sizes
   - `golangci-lint run` clean.
   - `go test ./...` passes (will be empty).
   - CI green on push.
-  - `agentdeck doctor` exits 0 with a "stub" message.
+  - `klyne doctor` exits 0 with a "stub" message.
   - The 5 spec sections that contracts derive from (§7 schema, §8 selector inputs, §11 layout, §18 decisions, §12 budgets) are referenced by file:line in `docs/contracts.md`.
   - Every type that crosses a workstream boundary lives in exactly one file owned by W0.
 
@@ -161,7 +161,7 @@ Workstreams are listed by ID. Owned paths follow §11 of the spec exactly. Sizes
 - **Acceptance criteria:** mirror of W4, plus: handles the date-partitioned directory layout (today's directory may not exist yet at watcher start; create-aware).
 
 ### W6 — Config loader
-- **Goal:** Read/write `~/.agentdeck/config.toml`, exposing typed config to the rest of the app.
+- **Goal:** Read/write `~/.klyne/config.toml`, exposing typed config to the rest of the app.
 - **Owned paths:**
   - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/config/config.go`
   - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/config/config_test.go`
@@ -221,7 +221,7 @@ Workstreams are listed by ID. Owned paths follow §11 of the spec exactly. Sizes
   - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/cost/pricing.go`
   - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/cost/pricing_test.go`
   - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/cost/pricing.json` (embedded via `//go:embed`)
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/cost/refresh.go` (loads override from `~/.agentdeck/pricing.json` if present)
+  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/cost/refresh.go` (loads override from `~/.klyne/pricing.json` if present)
   - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/cost/refresh_test.go`
 - **Inputs:** W0 (`pricing_schema.go`), W6 (config dir).
 - **Outputs:** `cost.New() *Engine` exposing `Lookup`, `Cost`, `RollupSession(sessionID)`, `RollupProject(path, since)`.
@@ -283,7 +283,7 @@ Workstreams are listed by ID. Owned paths follow §11 of the spec exactly. Sizes
   - 80%+ coverage.
 
 ### W12 — Wiring layer (`internal/app`) + cobra commands
-- **Goal:** Compose all the modules into a running daemon. Implement `agentdeck start`, `agentdeck stop`, `agentdeck doctor`. Bind `127.0.0.1:7878` only.
+- **Goal:** Compose all the modules into a running daemon. Implement `klyne start`, `klyne stop`, `klyne doctor`. Bind `127.0.0.1:7878` only.
 - **Owned paths:**
   - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/app/app.go`
   - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/app/app_test.go`
@@ -299,9 +299,9 @@ Workstreams are listed by ID. Owned paths follow §11 of the spec exactly. Sizes
 - **Recommended agent:** `general-purpose` (Claude Code, opus). Single-agent only.
 - **Effort:** M.
 - **Acceptance criteria:**
-  - `agentdeck` (no args) runs end-to-end against a tempdir with the fixture JSONL: starts, ingests, serves, browser-opens (suppressed in CI).
-  - `agentdeck doctor` reports: detected JSONL roots, detected provider keys, DB path, DB size, schema version, daemon version. Exits 0 if all green, 1 otherwise.
-  - `agentdeck stop` writes pidfile to `~/.agentdeck/daemon.pid` on start; `stop` reads it and SIGTERMs.
+  - `klyne` (no args) runs end-to-end against a tempdir with the fixture JSONL: starts, ingests, serves, browser-opens (suppressed in CI).
+  - `klyne doctor` reports: detected JSONL roots, detected provider keys, DB path, DB size, schema version, daemon version. Exits 0 if all green, 1 otherwise.
+  - `klyne stop` writes pidfile to `~/.klyne/daemon.pid` on start; `stop` reads it and SIGTERMs.
   - SIGTERM → flushes writer queue → closes DB → exits within 2 s.
 
 ### W13 — Frontend foundation: SvelteKit shell + lib + stores
@@ -428,14 +428,14 @@ Workstreams are listed by ID. Owned paths follow §11 of the spec exactly. Sizes
   - `/Users/mohitpatel/Desktop/Project/agentdeck/scripts/install.ps1`
   - `/Users/mohitpatel/Desktop/Project/agentdeck/scripts/release.sh`
   - `/Users/mohitpatel/Desktop/Project/agentdeck/scripts/sign-darwin.sh` (codesign + notarize stub; reads env vars, no-ops if absent)
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/Formula/agentdeck.rb` (homebrew tap stub)
+  - `/Users/mohitpatel/Desktop/Project/agentdeck/Formula/klyne.rb` (homebrew tap stub)
   - `/Users/mohitpatel/Desktop/Project/agentdeck/winget/manifest.yaml`
   - `/Users/mohitpatel/Desktop/Project/agentdeck/README.md` (full copy from spec §16 — overwrites W0 stub)
   - `/Users/mohitpatel/Desktop/Project/agentdeck/docs/architecture.md`
   - `/Users/mohitpatel/Desktop/Project/agentdeck/docs/connector-guide.md`
   - `/Users/mohitpatel/Desktop/Project/agentdeck/docs/byok-matrix.md`
   - `/Users/mohitpatel/Desktop/Project/agentdeck/docs/CHANGELOG.md`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/docs/landing/` (static site for `agentdeck.dev`, deployable to Cloudflare Pages)
+  - `/Users/mohitpatel/Desktop/Project/agentdeck/docs/landing/` (static site for `klyne.dev`, deployable to Cloudflare Pages)
 - **Inputs:** W12 (working binary), W14 (built UI), W16 (perf docs).
 - **Outputs:** Tagged v1.0.0 release with darwin/linux/windows × amd64/arm64 artifacts. brew formula, winget manifest, install.sh.
 - **Dependencies:** W12, W14, W16.
@@ -523,10 +523,10 @@ The two non-critical tracks that absorb agents in parallel:
 
 ### Wave 1 — Foundation fan-out (Days 2–4, 7 agents)
 - **Workstreams:** W1, W4, W5, W6, W9, W10, W13
-- **Agents in parallel:** 7 (one per workstream; assign each to its own git worktree under `~/agentdeck-worktrees/W{N}-{name}`)
+- **Agents in parallel:** 7 (one per workstream; assign each to its own git worktree under `~/klyne-worktrees/W{N}-{name}`)
 - **Merge point:** all 7 land green to `main`. Use the `superpowers:using-git-worktrees` and `superpowers:dispatching-parallel-agents` skills.
 - **Integration risk:** medium. The contracts make collisions structurally unlikely, but watch for:
-  - W1 + W9 both touching `~/.agentdeck/` paths logically — W1 owns DB file, W9 owns pricing override file; document in `docs/contracts.md`.
+  - W1 + W9 both touching `~/.klyne/` paths logically — W1 owns DB file, W9 owns pricing override file; document in `docs/contracts.md`.
   - W4 + W5 both depending on `examples/sample-jsonl/` fixtures — fixtures were committed by W0 and are read-only here.
   - W13 will inevitably need a TS type that's missing from W0 — agent should open a PR back to W0's contract files (treated as human-reviewed change, not silent edit).
 
@@ -539,13 +539,13 @@ The two non-critical tracks that absorb agents in parallel:
   - W8 starts when W7 has merged its `Mount` hook.
   - W11 starts when W3, W8, W10 are green.
   - W14 starts when W13 lands and W7+W8 are partially up (mocks are fine until they aren't).
-- **Merge point:** `agentdeck start` (W12 is next wave) is buildable. `make dev` runs daemon + UI together with hot reload.
+- **Merge point:** `klyne start` (W12 is next wave) is buildable. `make dev` runs daemon + UI together with hot reload.
 - **Integration risk:** medium-high — this is where SSE event shapes get exercised end-to-end. If W8's `MsgNew` payload doesn't match what W14's `SessionList` expects, both think the other is wrong. Mitigation: `ui/scripts/check-contracts.ts` (built in W13) runs in CI on every PR and rejects type drift.
 
 ### Wave 3 — Integration (Days 8–10, 2 agents)
 - **Workstreams:** W12, W15
 - **Agents in parallel:** 2. **W12 must be one agent only**, because it touches every package's exported API.
-- **Merge point:** the four user flows in §6 work end-to-end on a fresh machine with fixture data. `agentdeck doctor` green.
+- **Merge point:** the four user flows in §6 work end-to-end on a fresh machine with fixture data. `klyne doctor` green.
 - **Integration risk:** high. This is when bugs that survived unit tests because mocks lied surface. Allocate a full day of buffer. Use `superpowers:systematic-debugging` and `verification-loop` skills.
 
 ### Wave 4 — Hardening (Days 11–13, 2 agents)
@@ -566,7 +566,7 @@ The two non-critical tracks that absorb agents in parallel:
 
 These are the artifacts W0 must finalize before fan-out. Each line is a file path or a typed contract; a deviation requires a cross-stream PR, never a silent in-stream change.
 
-1. **Go module name + skeleton.** `go.mod` declares `module github.com/<owner>/agentdeck`, Go 1.23, with deps pinned per spec §10:
+1. **Go module name + skeleton.** `go.mod` declares `module github.com/<owner>/klyne`, Go 1.23, with deps pinned per spec §10:
    - `modernc.org/sqlite v1.44.3`
    - `github.com/fsnotify/fsnotify v1.7.x`
    - `github.com/shirou/gopsutil/v3 v3.x`
@@ -601,14 +601,14 @@ These are the artifacts W0 must finalize before fan-out. Each line is a file pat
    - `ThreadRebuild{thread_count, ts}` (v1.1 stub now to avoid event-name drift later)
    - `CompactDetected{session_id, ts}` (W15 needs it)
    - Each event JSON-tagged. Each event has a corresponding TS type in `ui/src/lib/types.ts`.
-7. **`~/.agentdeck/config.toml` schema** in `internal/config/schema.go`:
+7. **`~/.klyne/config.toml` schema** in `internal/config/schema.go`:
    ```toml
    [server]
    addr = "127.0.0.1:7878"
 
    [paths]
-   db = "~/.agentdeck/agentdeck.db"
-   pricing_override = "~/.agentdeck/pricing.json"
+   db = "~/.klyne/klyne.db"
+   pricing_override = "~/.klyne/pricing.json"
 
    [connectors.claude]
    enabled = true
@@ -647,14 +647,14 @@ These are the artifacts W0 must finalize before fan-out. Each line is a file pat
 Every prompt below is self-contained — paste into a fresh agent session, no other context required (other than the spec file path). Each prompt assumes the agent has access to `superpowers:test-driven-development` and the Go/TS skills it'll need; the prompts mention them but don't depend on them being auto-loaded.
 
 > **Universal preamble (prepend to every prompt below):**
-> You are working on the agentdeck repository at `/Users/mohitpatel/Desktop/Project/agentdeck`. The shipping spec is `compass_artifact_wf-d189e421-ff1d-443c-95b8-19b52fcd59b4_text_markdown.md` in the repo root. Read §1, §5, §7, §11, §18 before touching code. The `docs/contracts.md` file (produced in W0) lists every contract you must conform to. Decisions in spec §18 are LOCKED — do not propose alternatives.
+> You are working on the klyne repository at `/Users/mohitpatel/Desktop/Project/agentdeck`. The shipping spec is `compass_artifact_wf-d189e421-ff1d-443c-95b8-19b52fcd59b4_text_markdown.md` in the repo root. Read §1, §5, §7, §11, §18 before touching code. The `docs/contracts.md` file (produced in W0) lists every contract you must conform to. Decisions in spec §18 are LOCKED — do not propose alternatives.
 >
 > **TDD is mandatory.** Write tests first using the `superpowers:test-driven-development` skill. Target ≥80% coverage on new code; CI enforces this on changed lines. After every change >30 lines, run the project's quality gate (`make ci` or the equivalent commands listed in W0's `Makefile`). Use `superpowers:verification-before-completion` before claiming done.
 >
 > **Single-writer rule.** You may only modify files under "owned paths" below. To change anything else, open a PR against W0's `docs/contracts.md` first and wait for human review.
 
 ### W0 prompt
-> **Goal:** Bootstrap the agentdeck repo. Produce the Go module, repo skeleton from spec §11, locked contracts (`Connector` interface, `Message` struct, SQLite migrations, HTTP API DTOs, SSE event types, config schema, pricing schema), CI pipeline, fixture JSONL, and `docs/contracts.md`.
+> **Goal:** Bootstrap the klyne repo. Produce the Go module, repo skeleton from spec §11, locked contracts (`Connector` interface, `Message` struct, SQLite migrations, HTTP API DTOs, SSE event types, config schema, pricing schema), CI pipeline, fixture JSONL, and `docs/contracts.md`.
 >
 > **Spec sections:** §5 (PRAGMAs), §7 (schema, pipeline), §10 (versions), §11 (repo layout, `Connector` interface), §17 (non-goals), §18 (locked decisions).
 >
@@ -753,7 +753,7 @@ Every prompt below is self-contained — paste into a fresh agent session, no ot
 > *Identical structure to W4 but for Codex. Path: `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`. Note the date-partitioned dirs may not exist at watcher start; use `fsnotify` create-aware patterns.*
 
 ### W6 prompt
-> **Goal:** Implement `~/.agentdeck/config.toml` load/save with defaults and atomic write.
+> **Goal:** Implement `~/.klyne/config.toml` load/save with defaults and atomic write.
 >
 > **Spec sections:** §11, §18 (telemetry off in v1).
 >
@@ -764,7 +764,7 @@ Every prompt below is self-contained — paste into a fresh agent session, no ot
 > **Acceptance criteria:**
 > - `Load()` returns defaults if file missing and writes them.
 > - `Save()` writes atomically (temp + rename) so a crash mid-write doesn't corrupt the file.
-> - XDG-aware paths: macOS uses `~/Library/Application Support/agentdeck`, Linux uses `$XDG_CONFIG_HOME/agentdeck`, Windows uses `%APPDATA%\agentdeck`. Spec says `~/.agentdeck/` everywhere — for v1, do that on macOS+Linux and use `%USERPROFILE%\.agentdeck\` on Windows; XDG is a v1.1 polish.
+> - XDG-aware paths: macOS uses `~/Library/Application Support/klyne`, Linux uses `$XDG_CONFIG_HOME/klyne`, Windows uses `%APPDATA%\klyne`. Spec says `~/.klyne/` everywhere — for v1, do that on macOS+Linux and use `%USERPROFILE%\.klyne\` on Windows; XDG is a v1.1 polish.
 > - 80%+ coverage.
 >
 > **Testing:** TDD using `t.TempDir()`. Override the home dir via an injected function.
@@ -821,7 +821,7 @@ Every prompt below is self-contained — paste into a fresh agent session, no ot
 > - All listed models present in `pricing.json` (see §1 plan).
 > - `Cost(tokensIn, tokensOut, model)` returns USD; 0 with a warning log if model unknown.
 > - Per-session $ matches `ccusage` to within 0.5% on a fixture.
-> - Override file in `~/.agentdeck/pricing.json` takes precedence.
+> - Override file in `~/.klyne/pricing.json` takes precedence.
 > - 80%+ coverage.
 >
 > **Testing:** TDD. Golden file from `ccusage` is the truth source.
@@ -863,7 +863,7 @@ Every prompt below is self-contained — paste into a fresh agent session, no ot
 > **Testing:** TDD. Use `cost-aware-llm-pipeline` skill to validate routing logic. Mock providers from W10 via the `Provider` interface.
 
 ### W12 prompt
-> **Goal:** Wire all packages into a running daemon. `agentdeck start` (or `agentdeck` no-arg) opens browser at `127.0.0.1:7878`. Implement `agentdeck stop` (pidfile) and `agentdeck doctor`.
+> **Goal:** Wire all packages into a running daemon. `klyne start` (or `klyne` no-arg) opens browser at `127.0.0.1:7878`. Implement `klyne stop` (pidfile) and `klyne doctor`.
 >
 > **Spec sections:** §6 flows A & B, §11.
 >
@@ -872,8 +872,8 @@ Every prompt below is self-contained — paste into a fresh agent session, no ot
 > **Inputs:** W1–W11.
 >
 > **Acceptance criteria:**
-> - Fresh-machine smoke: `agentdeck` against tempdir with fixture JSONL → ingests, serves UI (embedded), opens browser (suppress in CI), all 4 spec §6 flows work.
-> - `agentdeck doctor` returns structured JSON with: detected JSONL roots, detected provider keys, DB path/size, schema version, daemon version. Exit 0 if green, 1 otherwise.
+> - Fresh-machine smoke: `klyne` against tempdir with fixture JSONL → ingests, serves UI (embedded), opens browser (suppress in CI), all 4 spec §6 flows work.
+> - `klyne doctor` returns structured JSON with: detected JSONL roots, detected provider keys, DB path/size, schema version, daemon version. Exit 0 if green, 1 otherwise.
 > - SIGTERM → flush writer queue → close DB → exit within 2 s.
 > - 80%+ coverage on `internal/app/`.
 >
@@ -994,7 +994,7 @@ Every prompt below is self-contained — paste into a fresh agent session, no ot
 | R11 | **Anthropic ToS changes** before launch | Low | Critical | Human | We never reuse OAuth (§17 #2). Even if Anthropic restricts more, we're already conservative. Re-check the ToS page on Day 13 before tagging. |
 | R12 | **Wave 3 integration discovers a contract bug** that requires a W0 ripple | Medium | High | Human | Allocate a "contract revision" PR slot in Wave 3. Treat it as a blocking dep: when a contract changes, every affected workstream gets an automatic update PR. |
 | R13 | **Solo dev becomes the bottleneck** reviewing 7 agent PRs in Wave 1 | High | Medium | Human | Use `code-review:code-review` skill on each PR; batch reviews twice/day; require agents to self-review with `superpowers:requesting-code-review` before opening PR. |
-| R14 | **Worktree confusion** — agent commits to wrong branch | Medium | Medium | Human | Each agent gets a worktree at `~/agentdeck-worktrees/W{N}-{slug}` on a branch `wave{X}/W{N}-{slug}`. Use `superpowers:using-git-worktrees`. CI rejects pushes to `main` that aren't via a labeled PR. |
+| R14 | **Worktree confusion** — agent commits to wrong branch | Medium | Medium | Human | Each agent gets a worktree at `~/klyne-worktrees/W{N}-{slug}` on a branch `wave{X}/W{N}-{slug}`. Use `superpowers:using-git-worktrees`. CI rejects pushes to `main` that aren't via a labeled PR. |
 | R15 | **Coverage gate gaming** — agent writes shallow tests to hit 80% | Medium | High | Human | Coverage is necessary, not sufficient. Manual review of every test file with `superpowers:requesting-code-review` checklist. |
 
 ---
@@ -1012,7 +1012,7 @@ These 5 dispatches start the project. Each line is a discrete action.
    git commit -m "chore: vendor shipping spec v1.0"
    git remote add origin <your-private-github-url>
    git push -u origin main
-   mkdir -p ~/agentdeck-worktrees
+   mkdir -p ~/klyne-worktrees
    ```
 
 2. **Dispatch W0 (bootstrap agent) in a fresh Claude Code session.**
@@ -1020,13 +1020,13 @@ These 5 dispatches start the project. Each line is a discrete action.
 
 3. **After W0 lands and is reviewed: create 7 Wave-1 worktrees.**
    ```
-   git worktree add ~/agentdeck-worktrees/W1-store     wave1/W1-store
-   git worktree add ~/agentdeck-worktrees/W4-claude    wave1/W4-claude
-   git worktree add ~/agentdeck-worktrees/W5-codex     wave1/W5-codex
-   git worktree add ~/agentdeck-worktrees/W6-config    wave1/W6-config
-   git worktree add ~/agentdeck-worktrees/W9-cost      wave1/W9-cost
-   git worktree add ~/agentdeck-worktrees/W10-ai       wave1/W10-ai
-   git worktree add ~/agentdeck-worktrees/W13-ui-shell wave1/W13-ui-shell
+   git worktree add ~/klyne-worktrees/W1-store     wave1/W1-store
+   git worktree add ~/klyne-worktrees/W4-claude    wave1/W4-claude
+   git worktree add ~/klyne-worktrees/W5-codex     wave1/W5-codex
+   git worktree add ~/klyne-worktrees/W6-config    wave1/W6-config
+   git worktree add ~/klyne-worktrees/W9-cost      wave1/W9-cost
+   git worktree add ~/klyne-worktrees/W10-ai       wave1/W10-ai
+   git worktree add ~/klyne-worktrees/W13-ui-shell wave1/W13-ui-shell
    ```
 
 4. **Fan out 7 Wave-1 agents.**

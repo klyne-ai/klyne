@@ -240,7 +240,7 @@ func TestConfigDir_HomeDirError(t *testing.T) {
 		t.Error("ConfigDir() returned empty string on HomeDir error")
 	}
 	if filepath.Base(got) != ".klyne" {
-		t.Errorf("ConfigDir() base = %q; want .agentdeck", filepath.Base(got))
+		t.Errorf("ConfigDir() base = %q; want .klyne", filepath.Base(got))
 	}
 }
 
@@ -257,7 +257,7 @@ func TestSave_MkdirAllError(t *testing.T) {
 	// Make the parent of ConfigDir a read-only file (not a dir) so that
 	// MkdirAll fails.
 	home, _ := HomeDir()
-	// Create a plain file at the path where .agentdeck should be created.
+	// Create a plain file at the path where .klyne should be created.
 	blocker := filepath.Join(home, ".klyne")
 	if err := os.WriteFile(blocker, []byte("blocker"), 0o600); err != nil {
 		t.Fatalf("WriteFile blocker: %v", err)

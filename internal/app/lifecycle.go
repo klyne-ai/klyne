@@ -25,7 +25,7 @@ import (
 const PidfileName = "daemon.pid"
 
 // PidfilePath returns the absolute path to the daemon pidfile inside the
-// agentdeck config directory (e.g. ~/.klyne/daemon.pid).
+// klyne config directory (e.g. ~/.klyne/daemon.pid).
 func PidfilePath() string {
 	return filepath.Join(config.ConfigDir(), PidfileName)
 }

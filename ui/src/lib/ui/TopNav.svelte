@@ -75,7 +75,7 @@
   <!-- Logo -->
   <div style="display: flex; align-items: center; gap: 8px;">
     <div style="width: 18px; height: 18px; border-radius: 4px; background: var(--ad-fg); display: grid; place-items: center; color: var(--ad-bg); font-weight: 800; font-size: 11px; font-family: var(--ad-font-mono);">a</div>
-    <span style="font-weight: 600; letter-spacing: -0.01em;">agentdeck</span>
+    <span style="font-weight: 600; letter-spacing: -0.01em;">klyne</span>
   </div>
 
   <!-- Nav items -->

@@ -1,5 +1,5 @@
 // Package ai defines the Provider interface and shared types for AI model
-// access in agentdeck. All providers are keyed by BYOK (Bring Your Own Key)
+// access in klyne. All providers are keyed by BYOK (Bring Your Own Key)
 // using environment variables only.
 //
 // CRITICAL LEGAL CONSTRAINT (spec §8, enforced 2026-04-04):

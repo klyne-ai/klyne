@@ -6,7 +6,7 @@
 
 ## Universal preamble
 
-You are working on the agentdeck repo. Spec at `compass_artifact_wf-d189e421-ff1d-443c-95b8-19b52fcd59b4_text_markdown.md`. §18 decisions are LOCKED. TDD-first; ≥80% coverage. After every change >30 lines run `make ci`. Use `superpowers:verification-before-completion` before claiming done.
+You are working on the klyne repo. Spec at `compass_artifact_wf-d189e421-ff1d-443c-95b8-19b52fcd59b4_text_markdown.md`. §18 decisions are LOCKED. TDD-first; ≥80% coverage. After every change >30 lines run `make ci`. Use `superpowers:verification-before-completion` before claiming done.
 
 **Single-writer rule:** modify only files under "Owned paths".
 
@@ -14,7 +14,7 @@ You are working on the agentdeck repo. Spec at `compass_artifact_wf-d189e421-ff1
 
 ## Goal
 
-Read/write `~/.agentdeck/config.toml`, exposing typed config to the rest of the app. Atomic writes. Defaults applied if file missing.
+Read/write `~/.klyne/config.toml`, exposing typed config to the rest of the app. Atomic writes. Defaults applied if file missing.
 
 ---
 
@@ -47,13 +47,13 @@ internal/config/paths_test.go
 ```go
 package config
 
-func Load() (*Config, error)         // reads ~/.agentdeck/config.toml; returns defaults if missing (and writes them)
+func Load() (*Config, error)         // reads ~/.klyne/config.toml; returns defaults if missing (and writes them)
 func Save(*Config) error             // atomic write (temp + rename)
 
 // paths.go
-func ConfigDir() string              // ~/.agentdeck on macOS+Linux, %USERPROFILE%\.agentdeck on Windows
+func ConfigDir() string              // ~/.klyne on macOS+Linux, %USERPROFILE%\.klyne on Windows
 func ConfigFile() string             // ConfigDir + "/config.toml"
-func DBPath() string                 // ConfigDir + "/agentdeck.db"
+func DBPath() string                 // ConfigDir + "/klyne.db"
 func PricingOverridePath() string    // ConfigDir + "/pricing.json"
 ```
 
@@ -63,8 +63,8 @@ For testability, expose package-level vars (e.g., `var HomeDir = os.UserHomeDir`
 
 ## Per-OS path policy (v1)
 
-- **macOS / Linux:** `~/.agentdeck/`
-- **Windows:** `%USERPROFILE%\.agentdeck\`
+- **macOS / Linux:** `~/.klyne/`
+- **Windows:** `%USERPROFILE%\.klyne\`
 - XDG support is v1.1 polish — not in scope.
 
 ---

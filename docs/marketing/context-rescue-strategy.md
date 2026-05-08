@@ -1,22 +1,22 @@
-# agentdeck context rescue strategy
+# klyne context rescue strategy
 
 Review date: 2026-05-08
 
 ## The decision
 
-agentdeck should stop trying to feel like a generic AI coding dashboard. That
+klyne should stop trying to feel like a generic AI coding dashboard. That
 position is crowded, and the current product does not create enough urgency:
 seeing sessions, tokens, and search results is useful, but it is not a strong
 reason for a user to install and keep a new local daemon running.
 
 The sharper product promise is:
 
-> agentdeck is the black-box recorder for Claude Code and Codex sessions. It
+> klyne is the black-box recorder for Claude Code and Codex sessions. It
 > tells you when a session is becoming unreliable, what is poisoning the
 > context, and gives you a clean restart prompt before the agent wastes more
 > quota or loses the thread.
 
-This turns agentdeck from "session viewer" into "context rescue."
+This turns klyne from "session viewer" into "context rescue."
 
 ## Why this is the right wedge
 
@@ -31,16 +31,16 @@ painful because it appears in the middle of real work:
 - Compacting feels opaque.
 - Continuing burns tokens and may lower quality.
 
-agentdeck already has the raw material for this problem: local JSONL history,
+klyne already has the raw material for this problem: local JSONL history,
 tool calls, tool outputs, timestamps, token counts, project paths, resume
 commands, and context-fill estimates. The missing part is turning those raw
 signals into an opinionated rescue workflow.
 
 ## What we can learn from code-review-graph
 
-`code-review-graph` is not a direct competitor to agentdeck. It operates before
+`code-review-graph` is not a direct competitor to klyne. It operates before
 or during an AI coding task: parse the repo, build a structural graph, then give
-the agent minimal relevant code context. agentdeck operates after and alongside
+the agent minimal relevant code context. klyne operates after and alongside
 the AI coding task: read the session logs, explain what happened, and rescue the
 conversation when context gets bloated.
 
@@ -51,13 +51,13 @@ Useful lessons:
 
 1. **Make the token-saving promise measurable.**  
    `code-review-graph` leads with concrete reduction claims and benchmarks.
-   agentdeck should do the same for session rescue: "this restart prompt is
+   klyne should do the same for session rescue: "this restart prompt is
    12x smaller than the current session context" is stronger than "copy
    handoff prompt."
 
 2. **Create a minimal-context primitive.**  
    Their `get_minimal_context` returns a compact summary, risk, key entities,
-   communities, flows, and next-tool suggestions. agentdeck needs the session
+   communities, flows, and next-tool suggestions. klyne needs the session
    equivalent: `GET /sessions/{id}/handoff` should return the smallest useful
    context needed to continue the task.
 
@@ -70,33 +70,33 @@ Useful lessons:
 
 4. **Prefer structured output over transcript browsing.**  
    Their tools return compact, typed, task-shaped data instead of dumping all
-   code. agentdeck should stop making the transcript the primary object and
+   code. klyne should stop making the transcript the primary object and
    make context health, bloat sources, decisions, and next steps the primary
    objects.
 
 5. **Add next-step suggestions.**  
    Their hint system infers workflow intent from recent tool calls and suggests
-   the next useful tool. agentdeck can infer session intent from recent messages
+   the next useful tool. klyne can infer session intent from recent messages
    and suggest `continue`, `compact`, `start fresh with handoff`, or `open
    related prior session`.
 
 6. **Local-first plus auto-ignored state matters.**  
-   Their graph lives locally under `.code-review-graph/`. agentdeck should keep
+   Their graph lives locally under `.code-review-graph/`. klyne should keep
    its local-first positioning, but also make the generated handoff/export
    artifacts clearly local and inspectable.
 
 7. **Benchmarks are marketing, not only engineering.**  
    The repository's README uses screenshots, benchmark tables, and limitation
-   notes to create trust. agentdeck needs a similar benchmark: current session
+   notes to create trust. klyne needs a similar benchmark: current session
    context size vs rescue handoff size, plus before/after continuation quality
    examples.
 
 What not to copy:
 
-- Do not build a full Tree-sitter code graph inside agentdeck for v1. That is a
+- Do not build a full Tree-sitter code graph inside klyne for v1. That is a
   different product and a large maintenance burden.
-- Do not route other tools' MCP calls. That would make agentdeck a weaker
-  workflow orchestrator. Do consider exposing agentdeck's own session
+- Do not route other tools' MCP calls. That would make klyne a weaker
+  workflow orchestrator. Do consider exposing klyne's own session
   intelligence as MCP tools; that is the path from "product the user opens" to
   "memory layer the AI can query." Decide deliberately instead of drifting into
   it.
@@ -111,27 +111,27 @@ Optional code-review-graph integration:
   shell out to `code-review-graph get-minimal-context` and add its compact repo
   summary to the restart prompt.
 - This should be a v1 enhancement, not a hard dependency. It gives a strong
-  demo and costs little because agentdeck only detects an existing local graph;
+  demo and costs little because klyne only detects an existing local graph;
   it does not install Python or build the graph itself.
 - Context Rescue must still work from JSONL alone.
 
 ## Strategic fork: UI product or MCP memory layer
 
-The code-review-graph installer exposes a decision agentdeck should make
+The code-review-graph installer exposes a decision klyne should make
 explicitly.
 
-### Option A: agentdeck-as-UI, code-review-graph-as-data
+### Option A: klyne-as-UI, code-review-graph-as-data
 
-agentdeck remains a Go daemon plus Svelte UI. It reads sessions, computes
+klyne remains a Go daemon plus Svelte UI. It reads sessions, computes
 context health, and generates handoff prompts. When `.code-review-graph/`
 exists, it enriches the handoff by calling code-review-graph locally.
 
 This is a feature. It is the right default for v1 because it preserves
-agentdeck's read-only, local-first, no-runtime-surprises posture.
+klyne's read-only, local-first, no-runtime-surprises posture.
 
-### Option B: agentdeck-as-MCP-server
+### Option B: klyne-as-MCP-server
 
-agentdeck exposes session intelligence as MCP tools:
+klyne exposes session intelligence as MCP tools:
 
 - `get_session_history`
 - `find_similar_session`
@@ -139,8 +139,8 @@ agentdeck exposes session intelligence as MCP tools:
 - `get_context_health`
 - `generate_handoff_prompt`
 
-Then Claude Code or Codex can ask agentdeck what happened in this repo last
-week without the user opening the UI. This makes agentdeck an AI memory layer
+Then Claude Code or Codex can ask klyne what happened in this repo last
+week without the user opening the UI. This makes klyne an AI memory layer
 across sessions.
 
 This is not just a feature. It changes distribution, installer work, launch
@@ -284,7 +284,7 @@ real fear: "Will I lose work if I leave this session?"
 - Broad connector roadmap as a headline.
 - Menu-bar quota widget ideas.
 - Team sharing, relay, plugin API, or mobile remote.
-- Any feature that makes agentdeck look like a weaker CliDeck.
+- Any feature that makes klyne look like a weaker CliDeck.
 
 These are not bad features, but they pull the product into better-funded or
 more mature categories.
@@ -309,7 +309,7 @@ more mature categories.
 The demo should be a single story:
 
 1. A long Codex or Claude session is at high context fill.
-2. agentdeck shows `Context Health: Risky`.
+2. klyne shows `Context Health: Risky`.
 3. The bloat scorecard identifies repeated file reads and test output.
 4. The user clicks `Copy clean restart prompt`.
 5. The generated handoff contains goal, files touched, decisions, failures,
@@ -320,14 +320,14 @@ The demo should be a single story:
 Launch copy:
 
 ```text
-Show HN: agentdeck — rescue bloated Claude Code and Codex sessions before they
+Show HN: klyne — rescue bloated Claude Code and Codex sessions before they
 lose the plot
 ```
 
 Alternative:
 
 ```text
-agentdeck shows what is poisoning your AI coding session and gives you a clean
+klyne shows what is poisoning your AI coding session and gives you a clean
 restart prompt.
 ```
 
@@ -335,14 +335,14 @@ restart prompt.
 
 ### Phase 0: trust audit
 
-Before adding more verdicts, validate the numbers agentdeck already shows.
+Before adding more verdicts, validate the numbers klyne already shows.
 Every rescue recommendation depends on context-fill, token, and cost accuracy.
 
 Backend/CLI:
 
-- Add `agentdeck audit-sessions`.
+- Add `klyne audit-sessions`.
 - Walk `~/.claude/projects` and `~/.codex/sessions`.
-- Sample real sessions and compare agentdeck's stored messages, tokens,
+- Sample real sessions and compare klyne's stored messages, tokens,
   context-fill, and costs against ground truth parsed directly from JSONL.
 - Print mismatches by source file and parser field.
 
@@ -359,7 +359,7 @@ Steal code-review-graph's benchmark pattern, not its architecture.
 
 Backend/CLI:
 
-- Add `agentdeck eval --all`.
+- Add `klyne eval --all`.
 - Run Context Health against labelled fixture sessions.
 - Write `evaluate/reports/summary.md`.
 - Track `false_rescue`, `missed_rescue`, `handoff_token_ratio`, and
@@ -417,7 +417,7 @@ Frontend:
 
 ### Phase 5: explicit MCP decision
 
-After Context Rescue works in the UI, decide whether agentdeck should also be
+After Context Rescue works in the UI, decide whether klyne should also be
 an MCP memory layer.
 
 If yes:
@@ -450,7 +450,7 @@ The feature is worth launching only if it can answer these questions in under
 - Should I continue, compact, or start fresh?
 - Can I start fresh without manually reconstructing everything?
 
-If agentdeck can answer those, it solves a real daily pain for AI coding power
+If klyne can answer those, it solves a real daily pain for AI coding power
 users. If it only lists sessions and token counts, it remains a nice-to-have
 dashboard.
 

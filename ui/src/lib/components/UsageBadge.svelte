@@ -41,7 +41,7 @@
     business: { label: 'Business', fiveHourOut:  5_000_000, sevenDayOut: 60_000_000 }
   };
 
-  const LS_CODEX_KEY = 'agentdeck.usage.plan.codex';
+  const LS_CODEX_KEY = 'klyne.usage.plan.codex';
 
   function readCodexTier(): CodexTier {
     if (typeof localStorage === 'undefined') return 'plus';

@@ -14,7 +14,7 @@ import (
 //
 // No AI dependency. No call to any provider. The handoff is built
 // entirely from JSONL ground truth so it works in air-gapped
-// environments and in fresh agentdeck installs that have no BYOK key.
+// environments and in fresh klyne installs that have no BYOK key.
 func HandleGenerateHandoff(_ context.Context, _ *mcp.CallToolRequest, in HandoffInput) (*mcp.CallToolResult, HandoffOutput, error) {
 	path, ambiguous, cands, err := resolveSession(GetContextHealthInput{
 		SessionID: in.SessionID,
