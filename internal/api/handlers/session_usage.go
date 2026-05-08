@@ -10,10 +10,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/mohitpatell/agentdeck/internal/api"
-	"github.com/mohitpatell/agentdeck/internal/connectors"
-	"github.com/mohitpatell/agentdeck/internal/store"
-	"github.com/mohitpatell/agentdeck/internal/usage"
+	"github.com/klyne-ai/klyne/internal/api"
+	"github.com/klyne-ai/klyne/internal/connectors"
+	"github.com/klyne-ai/klyne/internal/store"
+	"github.com/klyne-ai/klyne/internal/usage"
 )
 
 // CompactRatio is the assumed post-/compact size as a fraction of the

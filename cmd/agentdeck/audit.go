@@ -11,10 +11,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/mohitpatell/agentdeck/internal/audit"
-	"github.com/mohitpatell/agentdeck/internal/config"
-	"github.com/mohitpatell/agentdeck/internal/connectors"
-	"github.com/mohitpatell/agentdeck/internal/store"
+	"github.com/klyne-ai/klyne/internal/audit"
+	"github.com/klyne-ai/klyne/internal/config"
+	"github.com/klyne-ai/klyne/internal/connectors"
+	"github.com/klyne-ai/klyne/internal/store"
 )
 
 // defaultAuditLimit caps how many transcripts the audit walks by default.

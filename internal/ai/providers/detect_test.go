@@ -6,8 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/mohitpatell/agentdeck/internal/ai"
-	"github.com/mohitpatell/agentdeck/internal/ai/providers"
+	"github.com/klyne-ai/klyne/internal/ai"
+	"github.com/klyne-ai/klyne/internal/ai/providers"
 )
 
 // findProvider is a helper to locate a ProviderInfo by name.

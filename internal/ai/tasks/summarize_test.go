@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mohitpatell/agentdeck/internal/ai"
-	"github.com/mohitpatell/agentdeck/internal/ai/tasks"
-	"github.com/mohitpatell/agentdeck/internal/connectors"
-	"github.com/mohitpatell/agentdeck/internal/store"
+	"github.com/klyne-ai/klyne/internal/ai"
+	"github.com/klyne-ai/klyne/internal/ai/tasks"
+	"github.com/klyne-ai/klyne/internal/connectors"
+	"github.com/klyne-ai/klyne/internal/store"
 )
 
 // openTestDB opens a fresh SQLite DB in a temp directory and registers a

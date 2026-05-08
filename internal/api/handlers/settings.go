@@ -5,9 +5,9 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/mohitpatell/agentdeck/internal/ai/providers"
-	"github.com/mohitpatell/agentdeck/internal/api"
-	"github.com/mohitpatell/agentdeck/internal/config"
+	"github.com/klyne-ai/klyne/internal/ai/providers"
+	"github.com/klyne-ai/klyne/internal/api"
+	"github.com/klyne-ai/klyne/internal/config"
 )
 
 // SettingsHandler handles GET /settings and PUT /settings.

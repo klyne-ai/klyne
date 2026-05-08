@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mohitpatell/agentdeck/internal/ai"
-	"github.com/mohitpatell/agentdeck/internal/ai/providers"
+	"github.com/klyne-ai/klyne/internal/ai"
+	"github.com/klyne-ai/klyne/internal/ai/providers"
 )
 
 // anthropicSuccessResponse returns a realistic Anthropic Messages API

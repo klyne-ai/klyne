@@ -8,8 +8,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/mohitpatell/agentdeck/internal/connectors"
-	"github.com/mohitpatell/agentdeck/internal/contexthealth"
+	"github.com/klyne-ai/klyne/internal/connectors"
+	"github.com/klyne-ai/klyne/internal/contexthealth"
 )
 
 // GetContextHealthInput is the JSON-Schema input for the

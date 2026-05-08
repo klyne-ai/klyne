@@ -8,7 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/mohitpatell/agentdeck/internal/mcpserver"
+	"github.com/klyne-ai/klyne/internal/mcpserver"
 )
 
 // newMcpCmd registers `agentdeck mcp`.

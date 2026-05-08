@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mohitpatell/agentdeck/internal/app"
-	"github.com/mohitpatell/agentdeck/internal/config"
-	"github.com/mohitpatell/agentdeck/internal/connectors"
-	"github.com/mohitpatell/agentdeck/internal/store"
+	"github.com/klyne-ai/klyne/internal/app"
+	"github.com/klyne-ai/klyne/internal/config"
+	"github.com/klyne-ai/klyne/internal/connectors"
+	"github.com/klyne-ai/klyne/internal/store"
 )
 
 // TestIdleRAM measures the process RSS after constructing an App (but before

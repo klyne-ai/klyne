@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mohitpatell/agentdeck/internal/connectors"
+	"github.com/klyne-ai/klyne/internal/connectors"
 )
 
 // readResult builds the role=tool reply for the readCall at callIdx,

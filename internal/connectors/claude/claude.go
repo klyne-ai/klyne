@@ -12,7 +12,7 @@ package claude
 import (
 	"context"
 
-	"github.com/mohitpatell/agentdeck/internal/connectors"
+	"github.com/klyne-ai/klyne/internal/connectors"
 )
 
 // Connector implements connectors.Connector for the Claude Code CLI.

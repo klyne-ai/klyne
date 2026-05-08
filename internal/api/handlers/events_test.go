@@ -12,7 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/mohitpatell/agentdeck/internal/api"
+	"github.com/klyne-ai/klyne/internal/api"
 )
 
 // ---------------------------------------------------------------------------

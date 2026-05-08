@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/mohitpatell/agentdeck/internal/connectors"
+	"github.com/klyne-ai/klyne/internal/connectors"
 )
 
 // loadFixture parses every line from a JSONL fixture file and returns the

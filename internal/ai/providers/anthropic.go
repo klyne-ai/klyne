@@ -17,7 +17,7 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/mohitpatell/agentdeck/internal/ai"
+	"github.com/klyne-ai/klyne/internal/ai"
 )
 
 const (

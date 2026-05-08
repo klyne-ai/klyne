@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mohitpatell/agentdeck/internal/ai"
-	"github.com/mohitpatell/agentdeck/internal/store"
+	"github.com/klyne-ai/klyne/internal/ai"
+	"github.com/klyne-ai/klyne/internal/store"
 )
 
 const summarizeSystemPrompt = "You are a session summarizer. Output a concise rolling summary."

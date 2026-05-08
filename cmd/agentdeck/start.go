@@ -11,8 +11,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/mohitpatell/agentdeck/internal/app"
-	"github.com/mohitpatell/agentdeck/internal/config"
+	"github.com/klyne-ai/klyne/internal/app"
+	"github.com/klyne-ai/klyne/internal/config"
 )
 
 // defaultDemoFixturesDir is the in-repo path to the canonical sample

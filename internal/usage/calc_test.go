@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mohitpatell/agentdeck/internal/connectors"
-	"github.com/mohitpatell/agentdeck/internal/store"
-	"github.com/mohitpatell/agentdeck/internal/usage"
+	"github.com/klyne-ai/klyne/internal/connectors"
+	"github.com/klyne-ai/klyne/internal/store"
+	"github.com/klyne-ai/klyne/internal/usage"
 )
 
 func openTestDB(t *testing.T) *store.DB {

@@ -164,7 +164,7 @@ agentdeck does **not** guard against:
 
 If you believe you have found a security vulnerability in agentdeck,
 please open a private security advisory on the GitHub repository
-(`https://github.com/mohitpatell/agentdeck` — see the User-Agent at
+(`https://github.com/klyne-ai/klyne` — see the User-Agent at
 `internal/usage/oauth.go:144`). Please do not file a public issue for
 exploitable vulnerabilities until a fix is available. If a maintainer
 contact email is published in the repository root, that is also an

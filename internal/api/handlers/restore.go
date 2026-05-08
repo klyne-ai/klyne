@@ -10,10 +10,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/mohitpatell/agentdeck/internal/api"
-	"github.com/mohitpatell/agentdeck/internal/connectors"
-	"github.com/mohitpatell/agentdeck/internal/resume"
-	"github.com/mohitpatell/agentdeck/internal/store"
+	"github.com/klyne-ai/klyne/internal/api"
+	"github.com/klyne-ai/klyne/internal/connectors"
+	"github.com/klyne-ai/klyne/internal/resume"
+	"github.com/klyne-ai/klyne/internal/store"
 )
 
 // restoreTailSize is the number of tail messages to include in the restore bundle.

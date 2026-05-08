@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mohitpatell/agentdeck/internal/connectors"
+	"github.com/klyne-ai/klyne/internal/connectors"
 )
 
 // codexSessionsDir returns the absolute path to ~/.codex/sessions, the

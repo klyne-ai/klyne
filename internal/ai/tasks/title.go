@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mohitpatell/agentdeck/internal/ai"
-	"github.com/mohitpatell/agentdeck/internal/store"
+	"github.com/klyne-ai/klyne/internal/ai"
+	"github.com/klyne-ai/klyne/internal/store"
 )
 
 const (

@@ -7,10 +7,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/mohitpatell/agentdeck/internal/ai"
-	"github.com/mohitpatell/agentdeck/internal/ai/providers"
-	"github.com/mohitpatell/agentdeck/internal/api"
-	"github.com/mohitpatell/agentdeck/internal/config"
+	"github.com/klyne-ai/klyne/internal/ai"
+	"github.com/klyne-ai/klyne/internal/ai/providers"
+	"github.com/klyne-ai/klyne/internal/api"
+	"github.com/klyne-ai/klyne/internal/config"
 )
 
 // WizardCompleteRequest is the body for POST /wizard/complete.

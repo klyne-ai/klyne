@@ -19,7 +19,7 @@
 // key.
 package contexthealth
 
-import "github.com/mohitpatell/agentdeck/internal/connectors"
+import "github.com/klyne-ai/klyne/internal/connectors"
 
 // State is the headline classification surfaced in the UI.
 type State string

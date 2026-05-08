@@ -27,7 +27,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/mohitpatell/agentdeck/internal/api"
+	"github.com/klyne-ai/klyne/internal/api"
 )
 
 // frameEventID is a process-wide monotonic counter for SSE `id:` frame fields.

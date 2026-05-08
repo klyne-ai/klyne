@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mohitpatell/agentdeck/internal/ai"
-	"github.com/mohitpatell/agentdeck/internal/ai/tasks"
-	"github.com/mohitpatell/agentdeck/internal/api"
-	"github.com/mohitpatell/agentdeck/internal/store"
+	"github.com/klyne-ai/klyne/internal/ai"
+	"github.com/klyne-ai/klyne/internal/ai/tasks"
+	"github.com/klyne-ai/klyne/internal/api"
+	"github.com/klyne-ai/klyne/internal/store"
 )
 
 // runnerTestDeps builds the dependencies for a Runner under test.

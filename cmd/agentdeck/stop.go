@@ -9,7 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/mohitpatell/agentdeck/internal/app"
+	"github.com/klyne-ai/klyne/internal/app"
 )
 
 // stopWaitInterval is the polling interval used while waiting for the

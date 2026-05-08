@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/mohitpatell/agentdeck/internal/ai/tasks"
+	"github.com/klyne-ai/klyne/internal/ai/tasks"
 )
 
 // TestTitle_HappyPath verifies that Title returns the provider's trimmed

@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/mohitpatell/agentdeck/internal/config"
+	"github.com/klyne-ai/klyne/internal/config"
 	_ "modernc.org/sqlite" // register "sqlite" driver for rollup tests
 )
 

@@ -17,9 +17,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mohitpatell/agentdeck/internal/api"
-	"github.com/mohitpatell/agentdeck/internal/connectors"
-	"github.com/mohitpatell/agentdeck/internal/store"
+	"github.com/klyne-ai/klyne/internal/api"
+	"github.com/klyne-ai/klyne/internal/connectors"
+	"github.com/klyne-ai/klyne/internal/store"
 )
 
 // Window sizes, in seconds. Spec §usage: rolling windows mirror the

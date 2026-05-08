@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/mohitpatell/agentdeck/internal/connectors"
+	"github.com/klyne-ai/klyne/internal/connectors"
 )
 
 // handoffMaxRecentTurns caps how many of the latest user/assistant

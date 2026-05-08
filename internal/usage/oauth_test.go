@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mohitpatell/agentdeck/internal/claudeauth"
+	"github.com/klyne-ai/klyne/internal/claudeauth"
 )
 
 // roundTripFn lets a test inject a synthetic HTTP response without a real

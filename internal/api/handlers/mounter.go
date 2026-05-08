@@ -5,10 +5,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/mohitpatell/agentdeck/internal/api"
-	"github.com/mohitpatell/agentdeck/internal/config"
-	"github.com/mohitpatell/agentdeck/internal/cost"
-	"github.com/mohitpatell/agentdeck/internal/store"
+	"github.com/klyne-ai/klyne/internal/api"
+	"github.com/klyne-ai/klyne/internal/config"
+	"github.com/klyne-ai/klyne/internal/cost"
+	"github.com/klyne-ai/klyne/internal/store"
 )
 
 // Deps holds the dependencies needed by all W7 handlers.

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mohitpatell/agentdeck/internal/store"
+	"github.com/klyne-ai/klyne/internal/store"
 )
 
 // openTestDB is a helper that opens a fresh in-memory-like database using a

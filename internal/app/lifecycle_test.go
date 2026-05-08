@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/mohitpatell/agentdeck/internal/config"
+	"github.com/klyne-ai/klyne/internal/config"
 )
 
 // withTempHome redirects config.HomeDir to t.TempDir() for the duration of

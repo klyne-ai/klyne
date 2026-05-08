@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/mohitpatell/agentdeck/internal/config"
+	"github.com/klyne-ai/klyne/internal/config"
 )
 
 //go:embed pricing.json

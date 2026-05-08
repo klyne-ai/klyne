@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mohitpatell/agentdeck/internal/store/migrations"
+	"github.com/klyne-ai/klyne/internal/store/migrations"
 )
 
 // migrationVersionRe extracts the leading decimal version number from a

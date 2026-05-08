@@ -20,7 +20,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/mohitpatell/agentdeck/internal/connectors"
+	"github.com/klyne-ai/klyne/internal/connectors"
 )
 
 // fileMeta holds the per-file state accumulated while parsing a JSONL file.

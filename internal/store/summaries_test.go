@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mohitpatell/agentdeck/internal/store"
+	"github.com/klyne-ai/klyne/internal/store"
 )
 
 // openSummaryTestDB opens a fresh test database and seeds a session row for

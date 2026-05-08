@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/mohitpatell/agentdeck/internal/store"
-	"github.com/mohitpatell/agentdeck/internal/usage"
+	"github.com/klyne-ai/klyne/internal/store"
+	"github.com/klyne-ai/klyne/internal/usage"
 )
 
 // UsageHandler serves GET /usage. Returns rolling 5h, 7d, and 7d-Sonnet

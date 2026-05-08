@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mohitpatell/agentdeck/internal/connectors"
+	"github.com/klyne-ai/klyne/internal/connectors"
 )
 
 // userMsg builds a minimal user message with the given content. ID and Ts

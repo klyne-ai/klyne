@@ -3,9 +3,9 @@ package connectors_test
 import (
 	"testing"
 
-	"github.com/mohitpatell/agentdeck/internal/connectors"
-	"github.com/mohitpatell/agentdeck/internal/connectors/claude"
-	"github.com/mohitpatell/agentdeck/internal/connectors/codex"
+	"github.com/klyne-ai/klyne/internal/connectors"
+	"github.com/klyne-ai/klyne/internal/connectors/claude"
+	"github.com/klyne-ai/klyne/internal/connectors/codex"
 )
 
 // Compile-time assertions that both connectors satisfy the W0-frozen interface.

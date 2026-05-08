@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/mohitpatell/agentdeck/internal/connectors"
+	"github.com/klyne-ai/klyne/internal/connectors"
 )
 
 func nowMillis() int64 { return time.Now().UnixMilli() }

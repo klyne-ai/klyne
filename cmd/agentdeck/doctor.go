@@ -12,9 +12,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/mohitpatell/agentdeck/internal/ai/providers"
-	"github.com/mohitpatell/agentdeck/internal/config"
-	"github.com/mohitpatell/agentdeck/internal/store"
+	"github.com/klyne-ai/klyne/internal/ai/providers"
+	"github.com/klyne-ai/klyne/internal/config"
+	"github.com/klyne-ai/klyne/internal/store"
 )
 
 // newDoctorCmd registers `agentdeck doctor`.

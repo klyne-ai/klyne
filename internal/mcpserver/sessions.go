@@ -21,7 +21,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mohitpatell/agentdeck/internal/connectors"
+	"github.com/klyne-ai/klyne/internal/connectors"
 )
 
 // activeWindow is how recent a JSONL's mtime must be for the session

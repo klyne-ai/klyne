@@ -21,7 +21,7 @@
 package claude
 
 import (
-	"github.com/mohitpatell/agentdeck/internal/connectors"
+	"github.com/klyne-ai/klyne/internal/connectors"
 )
 
 // tokenDropThreshold is the fraction of prior TokensIn below which a

@@ -17,7 +17,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/mohitpatell/agentdeck/internal/config"
+	"github.com/klyne-ai/klyne/internal/config"
 )
 
 // PidfileName is the filename within ConfigDir() that holds the running

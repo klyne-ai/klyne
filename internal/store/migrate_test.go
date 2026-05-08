@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/mohitpatell/agentdeck/internal/store"
+	"github.com/klyne-ai/klyne/internal/store"
 )
 
 // TestApply_AppliesAllMigrations verifies that Apply records all migration

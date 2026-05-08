@@ -15,7 +15,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/mohitpatell/agentdeck/internal/connectors"
+	"github.com/klyne-ai/klyne/internal/connectors"
 )
 
 // InsertMessage inserts a canonical message and, in the same transaction,

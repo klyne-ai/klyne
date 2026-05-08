@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mohitpatell/agentdeck/internal/store"
+	"github.com/klyne-ai/klyne/internal/store"
 )
 
 // TestOpen_InvalidPath verifies that Open returns an error when the path is

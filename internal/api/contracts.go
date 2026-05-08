@@ -16,7 +16,7 @@
 //   - spec §8 (settings / wizard for BYOK)
 package api
 
-import "github.com/mohitpatell/agentdeck/internal/connectors"
+import "github.com/klyne-ai/klyne/internal/connectors"
 
 // ---------------------------------------------------------------------------
 // Routes

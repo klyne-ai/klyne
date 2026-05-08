@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mohitpatell/agentdeck/internal/api"
-	"github.com/mohitpatell/agentdeck/internal/claudeauth"
+	"github.com/klyne-ai/klyne/internal/api"
+	"github.com/klyne-ai/klyne/internal/claudeauth"
 )
 
 // OAuth endpoint and headers Claude Code uses on macOS. Confirmed by
@@ -141,7 +141,7 @@ func (f *OAuthFetcher) fetchFresh(ctx context.Context) (*api.OAuthUsage, error) 
 	req.Header.Set("Accept", "application/json")
 	// Identify ourselves to Anthropic so noisy queries from agentdeck
 	// are distinguishable from the official CLI.
-	req.Header.Set("User-Agent", "agentdeck/0.1 (+https://github.com/mohitpatell/agentdeck)")
+	req.Header.Set("User-Agent", "agentdeck/0.1 (+https://github.com/klyne-ai/klyne)")
 
 	resp, err := f.client.Do(req)
 	if err != nil {

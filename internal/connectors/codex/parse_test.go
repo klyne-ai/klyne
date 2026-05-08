@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/mohitpatell/agentdeck/internal/connectors"
+	"github.com/klyne-ai/klyne/internal/connectors"
 )
 
 // fakePath is the default path used in parse tests.

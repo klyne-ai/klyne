@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/mohitpatell/agentdeck/internal/audit"
-	"github.com/mohitpatell/agentdeck/internal/connectors"
-	claudeparse "github.com/mohitpatell/agentdeck/internal/connectors/claude"
-	codexparse "github.com/mohitpatell/agentdeck/internal/connectors/codex"
-	"github.com/mohitpatell/agentdeck/internal/usage"
+	"github.com/klyne-ai/klyne/internal/audit"
+	"github.com/klyne-ai/klyne/internal/connectors"
+	claudeparse "github.com/klyne-ai/klyne/internal/connectors/claude"
+	codexparse "github.com/klyne-ai/klyne/internal/connectors/codex"
+	"github.com/klyne-ai/klyne/internal/usage"
 )
 
 // SessionSnapshot is everything a tool needs to call contexthealth.Classify

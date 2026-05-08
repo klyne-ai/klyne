@@ -7,8 +7,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/mohitpatell/agentdeck/internal/connectors"
-	claudeparse "github.com/mohitpatell/agentdeck/internal/connectors/claude"
+	"github.com/klyne-ai/klyne/internal/connectors"
+	claudeparse "github.com/klyne-ai/klyne/internal/connectors/claude"
 )
 
 // preCompactDefaultLimit caps the messages returned by

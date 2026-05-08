@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/mohitpatell/agentdeck/internal/ai"
+	"github.com/klyne-ai/klyne/internal/ai"
 )
 
 const (

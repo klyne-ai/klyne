@@ -1,4 +1,4 @@
-module github.com/mohitpatell/agentdeck
+module github.com/klyne-ai/klyne
 
 go 1.25.0
 

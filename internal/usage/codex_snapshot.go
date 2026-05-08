@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mohitpatell/agentdeck/internal/api"
+	"github.com/klyne-ai/klyne/internal/api"
 )
 
 // defaultCodexSessionsDir returns the v1 default Codex sessions root.
