@@ -47,6 +47,14 @@ type HandoffOutput struct {
 	Candidates   []CandidateRow `json:"candidates,omitempty" jsonschema:"sessions to choose from when ambiguous"`
 }
 
+// RenderHandoff is the exported entry point used by the docs/proof
+// tests (and any external consumer that wants to render a handoff
+// from a snapshot they already loaded). Delegates to renderHandoff
+// so the internal call sites stay unchanged.
+func RenderHandoff(snap *SessionSnapshot) string {
+	return renderHandoff(snap)
+}
+
 // renderHandoff turns a SessionSnapshot into the deterministic
 // Markdown handoff. Pure function — no I/O — so callers (tests,
 // future code that wants to re-render from cached snapshots) can

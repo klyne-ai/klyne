@@ -1,4 +1,4 @@
-.PHONY: build build-ui dev test vet lint tidy ci clean release
+.PHONY: build build-ui dev test vet lint tidy ci clean release proof
 
 # Default target. CGO is off because modernc.org/sqlite is pure-Go (spec §5);
 # leaving CGO on with the macOS 26 + Go 1.21 internal linker can produce
@@ -59,3 +59,14 @@ clean:
 # goreleaser release --clean
 release:
 	@echo "Release is wired in W17 (goreleaser). Run: goreleaser release --clean"
+
+# Run every reproducible-proof test under docs/proof/. Each subdirectory
+# is a self-contained scenario with a fixture + a Go test asserting the
+# claim made in claim.md. This target is what readers of the README run
+# to verify Klyne does what it says.
+#
+# GOTOOLCHAIN=auto: project requires Go 1.25 (per go.mod); auto lets
+# Go fetch the toolchain when the system Go is older.
+proof:
+	@echo "Running reproducible-proof tests (docs/proof/...)"
+	@GOTOOLCHAIN=auto CGO_ENABLED=0 go test -v -count=1 ./docs/proof/...
