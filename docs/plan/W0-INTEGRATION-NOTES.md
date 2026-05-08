@@ -56,7 +56,7 @@ Other packages have no test files yet — they're skeletons. Wave 1 agents are r
 - `internal/api/handlers/**`, `internal/api/http.go`, `internal/api/sse.go` — **W7 / W8**
 - `internal/cost/pricing.go`, `pricing.json`, `refresh.go` — **W9**
 - `internal/ai/**` — **W10 / W11**
-- `internal/app/**`, `cmd/agentdeck/start.go|stop.go|doctor.go` real bodies — **W12** (cobra stubs exist now, prints "not implemented (W12)")
+- `internal/app/**`, `cmd/klyne/start.go|stop.go|doctor.go` real bodies — **W12** (cobra stubs exist now, prints "not implemented (W12)")
 - `ui/**` — **W13 / W14**
 - `internal/bench/**` — **W16**
 - Release pipeline (`.goreleaser.yaml`, install scripts, brew formula, winget manifest, full README, landing page) — **W17**
@@ -65,8 +65,8 @@ Other packages have no test files yet — they're skeletons. Wave 1 agents are r
 
 - `make vet` ✅
 - `make test` ✅ (race + coverage)
-- `go run ./cmd/agentdeck doctor` ✅ (prints stub JSON, exits 0)
-- `go run ./cmd/agentdeck --version` ✅ (prints `v0.0.0-bootstrap`)
+- `go run ./cmd/klyne doctor` ✅ (prints stub JSON, exits 0)
+- `go run ./cmd/klyne --version` ✅ (prints `v0.0.0-bootstrap`)
 - 6 fixtures parse as valid JSON ✅
 - `go run ./tools/dump-contracts` ✅ (31 structs dumped; all 14 cross-stream types present)
 - 31 cross-stream types live in exactly one file each (no drift)
@@ -79,5 +79,5 @@ Other packages have no test files yet — they're skeletons. Wave 1 agents are r
 - [ ] Sight-read the 3 SQL migration files (and the `compact_events` table)
 - [ ] Sight-read `internal/cost/pricing_schema.go` and `internal/config/schema.go`
 - [ ] Sight-read `docs/contracts.md`
-- [ ] Confirm `cmd/agentdeck doctor` output is acceptable as a stub
+- [ ] Confirm `cmd/klyne doctor` output is acceptable as a stub
 - [ ] Decide on `tool_calls` storage shape (option A vs B above) and update `docs/contracts.md`

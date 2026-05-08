@@ -93,7 +93,7 @@ Build from source:
 ```sh
 git clone https://github.com/klyne-ai/klyne
 cd agentdeck
-GOTOOLCHAIN=auto CGO_ENABLED=0 go build -o ./bin/agentdeck ./cmd/agentdeck
+GOTOOLCHAIN=auto CGO_ENABLED=0 go build -o ./bin/agentdeck ./cmd/klyne
 ./bin/agentdeck start
 ```
 

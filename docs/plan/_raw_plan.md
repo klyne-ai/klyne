@@ -33,7 +33,7 @@ Workstreams are listed by ID. Owned paths follow §11 of the spec exactly. Sizes
   - `/Users/mohitpatel/Desktop/Project/agentdeck/.editorconfig`
   - `/Users/mohitpatel/Desktop/Project/agentdeck/.github/workflows/ci.yml` (lint + test only; release in W17)
   - `/Users/mohitpatel/Desktop/Project/agentdeck/.github/ISSUE_TEMPLATE/*.yml`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/cmd/agentdeck/main.go` (cobra root with `start`/`stop`/`doctor` subcommand stubs returning "not implemented")
+  - `/Users/mohitpatel/Desktop/Project/agentdeck/cmd/klyne/main.go` (cobra root with `start`/`stop`/`doctor` subcommand stubs returning "not implemented")
   - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/connectors/connector.go` (interface + `RawEvent`, `Message`, `PricingTable` types — **no implementations**)
   - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/store/migrations/001_init.sql`
   - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/store/migrations/002_fts.sql`
@@ -290,9 +290,9 @@ Workstreams are listed by ID. Owned paths follow §11 of the spec exactly. Sizes
   - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/app/lifecycle.go` (graceful shutdown, signal handling)
   - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/app/lifecycle_test.go`
   - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/app/openbrowser.go` (cross-OS `xdg-open`/`open`/`start`)
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/cmd/agentdeck/start.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/cmd/agentdeck/stop.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/cmd/agentdeck/doctor.go`
+  - `/Users/mohitpatel/Desktop/Project/agentdeck/cmd/klyne/start.go`
+  - `/Users/mohitpatel/Desktop/Project/agentdeck/cmd/klyne/stop.go`
+  - `/Users/mohitpatel/Desktop/Project/agentdeck/cmd/klyne/doctor.go`
 - **Inputs:** all of W1–W11.
 - **Outputs:** A single binary that, when invoked with no args (cobra root → start), spins up the watcher, store, API, SSE, AI runner, and opens the browser.
 - **Dependencies:** W1, W2, W3, W4, W5, W6, W7, W8, W9, W10, W11. **This is the integration node.**

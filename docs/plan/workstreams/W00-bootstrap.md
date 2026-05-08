@@ -49,7 +49,7 @@ LICENSE
 .github/ISSUE_TEMPLATE/bug.yml
 .github/ISSUE_TEMPLATE/feature.yml
 .github/ISSUE_TEMPLATE/connector_request.yml
-cmd/agentdeck/main.go              (cobra root + start/stop/doctor stubs returning "not implemented")
+cmd/klyne/main.go              (cobra root + start/stop/doctor stubs returning "not implemented")
 internal/connectors/connector.go   (interface + RawEvent, Message, Session, PricingTable, ToolCall, ToolResult — NO IMPLEMENTATIONS)
 internal/store/migrations/001_init.sql
 internal/store/migrations/002_fts.sql

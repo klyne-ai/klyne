@@ -274,7 +274,7 @@ deliberately and is worth understanding before changing.
    itself destroyed).
 
 4. **Stdout discipline enforced at the entry point.** All `log.*`
-   redirected to stderr in `cmd/agentdeck/mcp.go:69-71`. Any future
+   redirected to stderr in `cmd/klyne/mcp.go:69-71`. Any future
    tool that writes to `os.Stdout` directly will silently corrupt the
    JSON-RPC framing. There is no automated check for this — code
    review is the guard.

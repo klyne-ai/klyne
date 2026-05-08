@@ -5,7 +5,7 @@
 # binaries dyld rejects ("missing LC_UUID load command"). Bump to Go 1.23+
 # and drop this flag once the toolchain catches up to the spec.
 build: build-ui
-	GOTOOLCHAIN=local CGO_ENABLED=0 go build -o bin/agentdeck ./cmd/agentdeck
+	GOTOOLCHAIN=local CGO_ENABLED=0 go build -o bin/agentdeck ./cmd/klyne
 
 # Build the SvelteKit UI if ui/package.json exists.
 # The UI build output is embedded via embed.FS (ui/build/).
@@ -22,7 +22,7 @@ build-ui:
 # W13 wires real hot-reload; for now this is a placeholder.
 dev:
 	@echo "Run the following in separate terminals:"
-	@echo "  go run ./cmd/agentdeck"
+	@echo "  go run ./cmd/klyne"
 	@echo "  cd ui && npm run dev"
 
 # Run all Go tests with race detector and coverage output.

@@ -36,9 +36,9 @@ internal/app/lifecycle.go            (graceful shutdown, signal handling)
 internal/app/lifecycle_test.go
 internal/app/openbrowser.go          (cross-OS xdg-open / open / start)
 internal/app/openbrowser_test.go
-cmd/agentdeck/start.go
-cmd/agentdeck/stop.go
-cmd/agentdeck/doctor.go
+cmd/klyne/start.go
+cmd/klyne/stop.go
+cmd/klyne/doctor.go
 ```
 
 ---

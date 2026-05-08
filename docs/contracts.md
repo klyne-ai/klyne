@@ -210,10 +210,10 @@ Run from the repo root: `go run ./tools/dump-contracts -out contracts.json`
 
 **Files:**
 
-- [`cmd/agentdeck/main.go`](../cmd/agentdeck/main.go)
-- [`cmd/agentdeck/start.go`](../cmd/agentdeck/start.go)
-- [`cmd/agentdeck/stop.go`](../cmd/agentdeck/stop.go)
-- [`cmd/agentdeck/doctor.go`](../cmd/agentdeck/doctor.go)
+- [`cmd/klyne/main.go`](../cmd/klyne/main.go)
+- [`cmd/klyne/start.go`](../cmd/klyne/start.go)
+- [`cmd/klyne/stop.go`](../cmd/klyne/stop.go)
+- [`cmd/klyne/doctor.go`](../cmd/klyne/doctor.go)
 
 W0 ships stubs only. Every body prints `not implemented (W12)` (or, for
 `doctor`, a JSON envelope `{"status":"stub","note":"not implemented (W12)"}`)

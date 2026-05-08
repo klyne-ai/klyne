@@ -623,7 +623,7 @@ The plan assumes a solo dev driving an AI agent team (Claude Code + Codex), ~6 f
 
 | Day | Backend (Go) | Frontend (Svelte) | Done when |
 |---|---|---|---|
-| **D1** | Repo scaffold, `cmd/agentdeck`, cobra root, `internal/store/db.go` with WAL pragmas + dual handles, migration 001 | `npm create svelte@latest ui`, Tailwind, app shell, dummy `+page.svelte` | `agentdeck` starts, opens browser, blank page renders |
+| **D1** | Repo scaffold, `cmd/klyne`, cobra root, `internal/store/db.go` with WAL pragmas + dual handles, migration 001 | `npm create svelte@latest ui`, Tailwind, app shell, dummy `+page.svelte` | `agentdeck` starts, opens browser, blank page renders |
 | **D2** | `Connector` interface, Claude connector: Discover + Parse (no watch yet), unit tests against fixture JSONL | API client `lib/api.ts`, SessionList component (mock data) | `GET /sessions` returns parsed Claude sessions |
 | **D3** | Claude connector: fsnotify watch + writer goroutine, FTS5 migration 002 | SessionList wired to live `/sessions` | new Claude messages appear in DB within 1 s |
 | **D4** | Codex connector (Discover, Parse, Watch) — same shape as Claude | SessionView component (renders messages + tool calls) | both CLIs show in unified list |

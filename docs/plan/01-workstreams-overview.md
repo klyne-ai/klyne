@@ -18,7 +18,7 @@ Effort sizes: **XS** ≤ 0.5d · **S** ≤ 1d · **M** ≤ 1.5d · **L** ≤ 2.5
 | **W9**  | Cost engine + pricing table            | 1 | S  | `internal/cost/**` | W0, W6 | [`workstreams/W09-cost-engine.md`](./workstreams/W09-cost-engine.md) |
 | **W10** | AI providers (Anthropic/OpenAI/Gemini/Ollama) | 1 | M  | `internal/ai/provider.go`, `providers/**` | W0 | [`workstreams/W10-ai-providers.md`](./workstreams/W10-ai-providers.md) |
 | **W11** | Smart selector + summarize/title tasks | 2 | M  | `internal/ai/selector.go`, `tasks/**` | W0, W3, W8, W10 | [`workstreams/W11-selector-summarize.md`](./workstreams/W11-selector-summarize.md) |
-| **W12** | Wiring layer + cobra commands          | 3 | M  | `internal/app/**`, `cmd/agentdeck/**` | W1–W11 | [`workstreams/W12-app-wiring.md`](./workstreams/W12-app-wiring.md) |
+| **W12** | Wiring layer + cobra commands          | 3 | M  | `internal/app/**`, `cmd/klyne/**` | W1–W11 | [`workstreams/W12-app-wiring.md`](./workstreams/W12-app-wiring.md) |
 | **W13** | Frontend foundation (shell + lib)      | 1 | M  | `ui/` shell, `ui/src/lib/**` | W0 | [`workstreams/W13-ui-shell.md`](./workstreams/W13-ui-shell.md) |
 | **W14** | Frontend components + routes           | 2 | L  | `ui/src/lib/components/**` (non-wizard), business routes | W13, W7, W8 | [`workstreams/W14-ui-components.md`](./workstreams/W14-ui-components.md) |
 | **W15** | Compact recovery + wizard + restore    | 3 | L  | restore/wizard handlers, compact heuristic, wizard UI | W4, W7, W11, W14 | [`workstreams/W15-compact-wizard.md`](./workstreams/W15-compact-wizard.md) |

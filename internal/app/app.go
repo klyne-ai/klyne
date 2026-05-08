@@ -2,7 +2,7 @@
 //
 // It wires every Wave 1+2 module — store, connectors, cost, SSE hub,
 // HTTP router, AI runner — into a single App value with a Start/Stop
-// lifecycle. The cobra commands in cmd/agentdeck/ are thin shells that
+// lifecycle. The cobra commands in cmd/klyne/ are thin shells that
 // delegate to App.
 //
 // # Wiring topology (spec §11)
@@ -48,7 +48,7 @@
 //
 // W15's wizard and restore endpoints are owned by a parallel agent. Their
 // package may not exist when this code compiles. The composition root
-// exposes App.AppendMounter so the parent (cmd/agentdeck or a test) can
+// exposes App.AppendMounter so the parent (cmd/klyne or a test) can
 // register additional api.RouterMounter implementations BEFORE Start is
 // called. After Start, mounters are frozen.
 //
@@ -264,7 +264,7 @@ func New(cfg *config.Config) (*App, error) {
 // when Start builds the chi router. Must be called before Start. After
 // Start, mounters are frozen.
 //
-// W15 (wizard/restore) is the canonical caller from cmd/agentdeck:
+// W15 (wizard/restore) is the canonical caller from cmd/klyne:
 //
 //	app.AppendMounter(wizard.NewMounter(...))
 //	app.AppendMounter(restore.NewMounter(...))

@@ -4,7 +4,7 @@
 //   - Pidfile read / write / remove (atomic best-effort).
 //   - Path resolution for the daemon pidfile.
 //
-// Signal handling itself lives in cmd/agentdeck/start.go via signal.NotifyContext;
+// Signal handling itself lives in cmd/klyne/start.go via signal.NotifyContext;
 // only the pidfile primitives are factored out here so they can be unit-tested
 // with a tempdir HOME.
 package app
