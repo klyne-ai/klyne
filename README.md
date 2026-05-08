@@ -1,34 +1,59 @@
 # klyne
 
-AI coding sessions do not only get long. They lose working memory after
-`/compact`.
+> **The source of truth for what your AI session has actually done — including the parts the AI itself can no longer see.**
 
-klyne is a local-first session rescue layer for Claude Code and Codex
-power users. It reads the JSONL files your AI coding tools already write,
-shows when a session is drifting or bloated, recovers context that `/compact`
-buried, and generates a clean handoff prompt for a fresh session.
+klyne is a local-first session rescue layer for Claude Code and Codex power users. It reads the JSONL files your AI coding tools already write — and gives you back the context that `/compact`, rate-limits, and fresh sessions destroy.
 
 No cloud. No proxy. No telemetry. Read-only by design.
 
 ![The Context Loss Problem](docs/assets/readme/context-loss-problem.png)
 
-## The Problem
+---
 
-When an AI coding session gets too large, you usually have two bad options:
+## The two problems klyne solves
 
-- keep going in a bloated session where the assistant rereads files, repeats
-  failed commands, and loses focus;
-- run `/compact`, which shrinks the live context but buries exact decisions,
-  files, failures, and reasoning inside a summary.
+These are the two pains every Claude Code / Codex power user hits weekly. **Each claim below is backed by a reproducible Go test** under [`docs/proof/`](docs/proof/) — run `make proof` and watch them pass against real fixtures.
 
-klyne gives the AI a way to inspect the raw local session history again.
-That turns "I lost the thread" into "recover the important context and continue
-cleanly."
+### 1. After `/compact`, your AI has lost context. klyne recovers it.
 
-## Real Evidence
+Anthropic's 5-hour rate-limit window doesn't end when you hit a hard limit — it ends earlier, when each turn becomes prohibitively expensive because the full conversation is being re-fed to the model. `/compact` is the official escape hatch, but it permanently deletes the original turns from the AI's view. The post-compact summary often misses the specifics that mattered: exact file paths, the regex literal you and the AI debugged, the off-the-cuff observation that turned out to be the bug.
 
-This is from a local `klyne audit-sessions --limit 20` run on real Claude
-Code and Codex transcripts:
+**klyne's `get_pre_compact_context` reads the JSONL bytes the AI no longer has access to.** Same session, same transcript on disk, but klyne can return content the AI's view literally does not contain.
+
+> **Proof:** [`docs/proof/01-compact-recovery/`](docs/proof/01-compact-recovery/) — synthetic Claude session about a bank-SMS regex bug. Twelve pre-compact messages, a `/compact`, two post-compact messages. The test asserts that high-signal strings (file paths, the user-verified `XX1234` mask, the exact npm command, the test result) appear in klyne's recovery output AND do **not** appear anywhere in the post-compact lines. **1165 bytes of conversational context recovered per fixture run** — content the AI would otherwise need re-input to know about.
+
+### 2. Vanilla Claude's "summarise what we did" is variable; klyne's handoff is deterministic.
+
+When you hit the rate-limit and need to bootstrap a fresh session, you typically ask the AI: *"summarise what we just did so I can paste it into a new chat."* That paragraph reads fine, but it varies turn-to-turn, glosses over the file paths and command stems the new session actually needs, and burns input tokens on something the AI already knows.
+
+**klyne's `generate_handoff` reads the JSONL transcript and emits a structured Markdown prompt with fixed sections** — same input always produces the same output, every section a structured pull from the actual session events. Project path, files touched (with reuse counts), commands run, known failures, recent exchanges verbatim.
+
+> **Proof:** [`docs/proof/02-handoff-equivalence/`](docs/proof/02-handoff-equivalence/) — synthetic webhook-retry session paused mid-task. Three assertions: every structural section is present and populated; rendering twice produces byte-identical output; files touched 3 times are marked `(×3)` so the new session knows which file is central. **Side-by-side with vanilla Claude's likely output is rendered in the claim doc.**
+
+---
+
+## See the proof yourself
+
+```bash
+# Clone, build, and run the reproducible proof
+git clone https://github.com/klyne-ai/klyne && cd klyne
+make build
+make proof
+```
+
+`make proof` runs every test under `docs/proof/`. Each scenario has a fixture you can `cat`, a Go test you can read, and a `claim.md` with the exact side-by-side. **If any claim ever stops holding, the test fails red.** Marketing and code stay locked together by design.
+
+---
+
+## Real evidence (from your machine)
+
+Once installed, run klyne against your own Claude/Codex transcripts:
+
+```bash
+klyne audit-sessions --limit 20
+```
+
+A real run on this maintainer's transcripts:
 
 ```text
 Claude sessions sampled: 20
@@ -38,164 +63,150 @@ Sessions affected: 4
 Context compacted away: ~3.3M tokens
 
 One real session:
-Before /compact: 538,831 tokens
-After /compact:   14,875 tokens
-Compression:      36x
+  Before /compact: 538,831 tokens
+  After /compact:   14,875 tokens
+  Compression:      36×
 ```
 
-That is the core use case: the details still exist in the local JSONL, but the
-current AI session no longer has them in live context. klyne exposes those
-details through a small MCP tool surface.
+That ~3.3M tokens of "compacted away" context is exactly what `get_pre_compact_context` reads back from the JSONL.
 
-## How It Works
+---
+
+## How it works
 
 ![How klyne works](docs/assets/readme/how-klyne-works.png)
 
 klyne runs in two complementary modes:
 
-- **Local web cockpit**: browse sessions, search messages, inspect token usage,
-  and copy safe resume commands.
-- **MCP session rescue server**: lets Claude Code ask klyne for context
-  health, pre-compact recovery, and handoff prompts.
+- **Local web cockpit** at `http://127.0.0.1:7878` — browse sessions, search messages across every project, inspect token usage, copy safe resume commands.
+- **MCP session rescue server** — Claude Code (and Codex CLI) spawn it as a subprocess. The AI itself can call klyne's tools mid-session.
 
-The MCP server does not require the daemon. It reads JSONL directly so it can
-answer from the latest on-disk session state.
+The MCP server is independent of the daemon. It reads JSONL directly so it works in fresh sessions before the daemon has had a chance to ingest them. **Only one tool — `search_messages` — depends on the daemon, because full-text search needs SQLite.**
 
-## MCP Tools
-
-| Tool | What it solves | When to use it |
-|---|---|---|
-| `list_sessions` | Finds candidate sessions for the current project | When multiple terminals or resumes exist |
-| `get_context_health` | Classifies a session as `healthy`, `drifting`, `risky`, or `rescue_now` | Before compacting or continuing a long task |
-| `generate_handoff` | Produces a deterministic Markdown handoff prompt | When starting a fresh AI session |
-| `get_pre_compact_context` | Recovers messages immediately before the last `/compact` | When the compact summary lost important details |
-
-Example MCP request flow:
-
-```text
-User: "This session feels lost. Should I compact or restart?"
-
-AI calls get_context_health
-→ klyne reports context fill, repeated reads, failed command loops, bloat
-
-AI calls generate_handoff
-→ klyne returns files touched, commands run, known failures, recent task,
-  and last useful exchanges
-
-User starts fresh session
-→ fresh AI continues with the recovered context instead of guessing
-```
+---
 
 ## Install
 
-Build from source:
+```bash
+# Build from source (requires Go 1.25+)
+git clone https://github.com/klyne-ai/klyne && cd klyne
+make build
 
-```sh
-git clone https://github.com/klyne-ai/klyne
-cd klyne
-GOTOOLCHAIN=auto CGO_ENABLED=0 go build -o ./bin/klyne ./cmd/klyne
-./bin/klyne start
+# Register the MCP server in Claude Code and/or Codex configs.
+# Idempotent: safe to re-run on every binary upgrade.
+./bin/klyne mcp install
+
+# Start the daemon + open the web UI
+./bin/klyne
 ```
 
-Then open:
+The `mcp install` command auto-detects host configs:
 
-```text
-http://127.0.0.1:7878
-```
+| Host | Config | Entry written |
+|---|---|---|
+| Claude Code | `~/.claude.json` | `mcpServers.klyne` |
+| Codex CLI | `~/.codex/config.toml` | `[mcp_servers.klyne]` |
 
-To run the MCP server:
+It also removes any legacy `agentdeck` entry from those configs (klyne was renamed from agentdeck during early development). Pass `--platform claude` or `--platform codex` to scope the install.
 
-```sh
-klyne mcp
-```
+---
 
-Example Claude Code MCP config:
+## MCP surface
 
-```json
-{
-  "mcpServers": {
-    "klyne": {
-      "command": "klyne",
-      "args": ["mcp"]
-    }
-  }
-}
-```
+### Tools (auto-invoked by the AI)
 
-## Quick Start
+| Tool | What it solves | When to use it |
+|---|---|---|
+| `list_sessions` | Enumerates Claude + Codex sessions in this project | Disambiguate between parallel terminals or `--resume` invocations |
+| `get_context_health` | Classifies a session as `healthy` / `drifting` / `risky` / `rescue_now` plus a bloat scorecard | Before compacting or continuing a long task |
+| `search_messages` | Full-text search across every indexed session | "Where did we discuss X two weeks ago?" — requires daemon running |
+| `generate_handoff` | Deterministic Markdown handoff prompt for fresh sessions | When you've hit your rate-limit and need to start over |
+| `get_pre_compact_context` | Recovers messages preceding the last `/compact` (Claude) or `replacement_history` (Codex) | When the compact summary lost important details |
 
-1. Build and start klyne.
-2. Open `http://127.0.0.1:7878`.
-3. Run `klyne audit-sessions --limit 20` to verify the local trust
-   foundation.
-4. Add `klyne mcp` to Claude Code.
-5. In a long Claude Code session, ask: "Use klyne to check whether this
-   session should continue, compact, or restart."
+### Slash prompts (user-triggered via `/` menu in Claude Code)
 
-## What You Get
+| Slash command | What it runs |
+|---|---|
+| `/mcp__klyne__health` | Live `get_context_health` |
+| `/mcp__klyne__sessions` | Live `list_sessions` |
+| `/mcp__klyne__search` | Live `search_messages` (takes a `query` argument) |
+| `/mcp__klyne__handoff` | Live `generate_handoff` |
+| `/mcp__klyne__precompact` | Live `get_pre_compact_context` |
 
-- **Context health**: a deterministic classifier for long-session risk.
-- **Bloat scorecard**: top files, commands, and tool outputs contributing to
-  context noise.
-- **Pre-compact recovery**: raw messages before the latest `/compact` boundary.
-- **Handoff prompts**: clean restart prompts built from transcript ground truth.
-- **Session search**: local FTS over historical AI coding conversations.
-- **Resume commands**: copy-safe `claude --resume` and Codex recovery commands
-  from the correct project directory.
-- **Audit reports**: compare stored metrics against raw JSONL so the numbers
-  are not trusted blindly.
+The prompts run server-side and inject the result as user-message content — no AI roundtrip needed for the fetch.
+
+---
 
 ## Supported CLIs
 
-| CLI | Status | Data source |
-|---|---:|---|
-| Claude Code | Primary | `~/.claude/projects/**/*.jsonl` |
-| Codex | Partial | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` |
+| CLI | Tools | Search | Pre-compact recovery |
+|---|---|---|---|
+| Claude Code | All 5 tools | ✅ | ✅ via `compact_boundary` lines |
+| Codex | All 5 tools | ✅ | ✅ via embedded `replacement_history` |
 
-Claude Code is the primary launch path for MCP rescue tools. Codex transcript
-discovery and audit reporting exist, but full MCP parity is still in progress.
+For Codex sessions, `pre_tokens` and `trigger` (manual/auto) fields are not exposed in the output — Codex's `compacted` envelope doesn't carry that metadata. The recovered messages themselves are returned identically.
 
-## Privacy Model
+---
+
+## What klyne does *not* claim
+
+To stay honest:
+
+- **klyne does NOT reduce Claude's per-turn token cost.** It doesn't intercept the AI loop.
+- **klyne does NOT save a guaranteed % of your rate-limit budget.** The savings depend on whether you would otherwise have re-explained the lost context — varies by user and session.
+- **klyne does NOT replace `/compact`.** Use `/compact` when you need it; klyne lets you survive it without losing recoverable context.
+- **klyne does NOT call any AI model in the core flow.** Every tool here is deterministic over JSONL bytes. The optional summary/title features in the web UI are BYOK and clearly gated.
+
+---
+
+## Privacy model
 
 klyne is local-first:
 
 - reads local JSONL transcripts;
-- stores local SQLite data;
+- stores local SQLite data under `~/.klyne/`;
 - binds the web UI to `127.0.0.1`;
 - never uploads or proxies conversations;
 - never writes to the source transcript files.
 
-Optional AI features require your own provider key. Core audit and MCP rescue
-features are deterministic and do not require an AI API key.
+Optional AI features (summary, title generation, etc.) require your own provider key. Core audit, MCP rescue, search, and handoff features are deterministic and do not require an AI API key.
 
-## Current Limitations
+---
 
-- MCP rescue tools are launch-ready for Claude Code first; Codex support is
-  still being completed.
-- The classifier thresholds are deterministic heuristics, not a labelled
-  benchmark yet.
-- Very large JSONL lines need scan-error handling before the MCP result should
-  be treated as fully authoritative.
-- Release binaries, Homebrew, and one-command install are not shipped yet.
-- The full test suite currently has unrelated red tests around cost default
-  grouping and migration-count expectations.
+## Quick start
 
-## Roadmap
+1. **Build:** `make build` (binary lands at `./bin/klyne`)
+2. **Install MCP:** `./bin/klyne mcp install`
+3. **Restart Claude Code** so it picks up the new MCP server + slash prompts
+4. **Run the daemon:** `./bin/klyne` (opens `http://127.0.0.1:7878` in your browser)
+5. **In a long session, ask Claude:** *"Use klyne to check whether this session should continue, compact, or restart."*
+6. **Verify trust:** `./bin/klyne audit-sessions --limit 20` (compares klyne's stored metrics against raw JSONL)
 
-1. Finish Codex MCP parity or explicitly gate Codex out of MCP v1.
-2. Add a labelled context-health eval suite, similar to benchmark reports in
-   code-review-graph.
-3. Ship release binaries and a one-command installer.
-4. Add README/demo fixtures so users can try the rescue flow without existing
-   local transcripts.
-5. Add optional code-review-graph enrichment when `.code-review-graph/` exists.
+---
 
 ## Documentation
 
-- [MCP ship log](docs/MCP-SHIP-LOG.md)
+- [Reproducible proof index](docs/proof/) — every claim, with a fixture and a Go test
+- [Compact-recovery proof](docs/proof/01-compact-recovery/claim.md) — side-by-side vs vanilla Claude
+- [Handoff-equivalence proof](docs/proof/02-handoff-equivalence/claim.md) — verbatim handoff output
+- [MCP ship log](docs/MCP-SHIP-LOG.md) — every slice that landed, in order
 - [Context rescue strategy](docs/marketing/context-rescue-strategy.md)
 - [Comparison and gaps](docs/marketing/comparison-and-gaps.md)
 - [Security model](docs/SECURITY.md)
+
+---
+
+## Roadmap
+
+1. ~~Codex MCP parity~~ — ✅ shipped (slice 4)
+2. ~~Cross-session full-text search~~ — ✅ shipped (slice 5)
+3. ~~Reproducible proof artifacts~~ — ✅ shipped (this slice)
+4. **`suggest_session_name`** — generate a meaningful name from JSONL for Claude Code's "rename" UI (queued)
+5. **Labelled context-health eval suite** — move classifier thresholds from heuristics to data
+6. **Release binaries** + Homebrew tap + one-command installer
+7. Optional [code-review-graph](https://github.com/tirth8205/code-review-graph) enrichment when `.code-review-graph/` exists in the repo
+
+---
 
 ## License
 
