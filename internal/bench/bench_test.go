@@ -71,7 +71,7 @@ func BenchmarkFTS5Search(b *testing.B) {
 	// Warm up the FTS5 index cache before measuring. This ensures we measure
 	// steady-state (warm-cache) performance rather than cold-start page loads.
 	for i := 0; i < warmupQueries; i++ {
-		_, _ = store.Search(ctx, db, queries[i%len(queries)], 20)
+		_, _ = store.Search(ctx, db, queries[i%len(queries)], 20, store.SearchSortRelevance)
 	}
 
 	latencies := make([]int64, 0, b.N*queriesPerRound)
@@ -81,7 +81,7 @@ func BenchmarkFTS5Search(b *testing.B) {
 		for qi := 0; qi < queriesPerRound; qi++ {
 			q := queries[qi%len(queries)]
 			start := time.Now()
-			hits, err := store.Search(ctx, db, q, 20)
+			hits, err := store.Search(ctx, db, q, 20, store.SearchSortRelevance)
 			elapsed := time.Since(start).Nanoseconds()
 			if err != nil {
 				b.Fatalf("Search(%q): %v", q, err)

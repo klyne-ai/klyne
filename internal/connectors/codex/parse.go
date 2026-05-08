@@ -324,6 +324,7 @@ func handleTokenCount(raw json.RawMessage, line []byte, meta *fileMeta, mu *sync
 		SessionID:         sessionID,
 		CLI:               connectors.CLICodex,
 		ProjectPath:       projectPath,
+		Cwd:               projectPath,
 		Role:              connectors.RoleSystem,
 		Content:           "",
 		TokensIn:          deltaIn,
@@ -394,6 +395,7 @@ func handleMessage(p itemPayload, line []byte, meta *fileMeta, mu *sync.Mutex, p
 			SessionID:   sessionID,
 			CLI:         connectors.CLICodex,
 			ProjectPath: projectPath,
+			Cwd:         projectPath, // Codex doesn't emit per-message cwd; equals project root
 			Role:        connectors.RoleUser,
 			Content:     content,
 			Model:       model,
@@ -407,6 +409,7 @@ func handleMessage(p itemPayload, line []byte, meta *fileMeta, mu *sync.Mutex, p
 			SessionID:   sessionID,
 			CLI:         connectors.CLICodex,
 			ProjectPath: projectPath,
+			Cwd:         projectPath, // Codex doesn't emit per-message cwd; equals project root
 			Role:        connectors.RoleAssistant,
 			Content:     content,
 			Model:       model,
@@ -437,6 +440,7 @@ func handleFunctionCall(p itemPayload, line []byte, meta *fileMeta, mu *sync.Mut
 		SessionID:   sessionID,
 		CLI:         connectors.CLICodex,
 		ProjectPath: projectPath,
+		Cwd:         projectPath, // Codex doesn't emit per-message cwd; equals project root
 		Role:        connectors.RoleAssistant,
 		Content:     "",
 		ToolCalls: []connectors.ToolCall{
@@ -465,6 +469,7 @@ func handleFunctionCallOutput(p itemPayload, line []byte, meta *fileMeta, mu *sy
 		SessionID:   sessionID,
 		CLI:         connectors.CLICodex,
 		ProjectPath: projectPath,
+		Cwd:         projectPath, // Codex doesn't emit per-message cwd; equals project root
 		Role:        connectors.RoleTool,
 		Content:     p.Output,
 		ToolResults: []connectors.ToolResult{

@@ -73,6 +73,10 @@ export interface Message {
   ts: number;
   /** May be absent (omitempty in Go). */
   parent_uuid?: string;
+  /** May be absent (omitempty in Go). */
+  git_branch?: string;
+  /** May be absent (omitempty in Go). */
+  cwd?: string;
 }
 
 /**
@@ -166,6 +170,72 @@ export interface SummaryResponse {
   ts: number;
 }
 
+// --- /sessions/{id}/usage — token-savings indicator ---
+
+/**
+ * SessionUsageResponse is GET /sessions/{id}/usage. Backs the per-session
+ * "context fill + cost-per-turn" indicator and the savings deltas for
+ * compacting/restarting.
+ *
+ * All `*_pct_5h` fields are percentages of the user's 5-hour rate-limit
+ * cap, NOT of the context window. They are -1 when the server cannot
+ * calibrate (no recent /usage data, or zero observed utilization). The UI
+ * MUST render -1 as "—" rather than a misleading number.
+ */
+export interface SessionUsageResponse {
+  session_id: string;
+  /** Most-recent assistant model used; empty for fresh sessions. */
+  model: string;
+  /** Model's max context size in tokens (0 when unknown). */
+  context_window: number;
+  /** Approx tokens that the next turn would re-send as input. */
+  context_used: number;
+  /** context_used / context_window * 100. May exceed 100 on overflow. */
+  context_fill_pct: number;
+  /** Projected % of 5h limit the next turn will consume; -1 when uncalibrated. */
+  next_turn_pct_5h: number;
+  /** Same projection AFTER /compact, using compact_ratio. -1 when uncalibrated. */
+  compacted_next_turn_pct_5h: number;
+  /** Same projection in a FRESH session (system-prompt floor). -1 when uncalibrated. */
+  restarted_next_turn_pct_5h: number;
+  /** next_turn_pct_5h - compacted_next_turn_pct_5h. -1 when uncalibrated. */
+  compact_savings_pct_5h: number;
+  /** next_turn_pct_5h - restarted_next_turn_pct_5h. -1 when uncalibrated. */
+  restart_savings_pct_5h: number;
+  /** Assumed post-compact size as fraction of current context (e.g. 0.15). */
+  compact_ratio: number;
+  /** True when percentages came from vendor /usage; false when fallback. */
+  calibrated_from_oauth: boolean;
+}
+
+// --- /sessions/{id}/break-advice — AI-powered session-break recommender ---
+
+/** BreakAdviceVerdict mirrors the Go enum string values. */
+export type BreakAdviceVerdict =
+  | 'start_fresh'
+  | 'compact'
+  | 'continue'
+  | 'unavailable';
+
+/**
+ * BreakAdviceResponse is GET /sessions/{id}/break-advice. Cached in-memory
+ * for 10 min per session on the server, so re-clicks are free.
+ */
+export interface BreakAdviceResponse {
+  session_id: string;
+  verdict: BreakAdviceVerdict;
+  /** One-sentence human-readable reason. Always populated. */
+  reason: string;
+  /** Short topic label for the new session when verdict is "start_fresh". */
+  suggested_topic?: string;
+  /** AI provider that generated the advice ("anthropic", "gemini", …). */
+  provider?: string;
+  /** Model identifier used. Empty when verdict is "unavailable". */
+  model?: string;
+  /** Epoch-ms when this advice was generated. */
+  cached_at: number;
+}
+
 // --- /search ---
 
 /** SearchHit is one ranked FTS5 result. */
@@ -210,6 +280,99 @@ export interface CostSummaryResponse {
   until: number;
   buckets: CostBucket[];
   total: CostBucket;
+}
+
+// --- /usage ---
+
+/**
+ * UsageWindow is one rolling-window aggregate (5h, 7d, or 7d-Sonnet).
+ * Tokens are returned raw; the UI converts to percentage against a
+ * locally-stored plan-tier table. Vendor caps are not published and the
+ * server deliberately stays out of that calibration.
+ */
+export interface UsageWindow {
+  /** Window size in seconds (e.g. 18000 = 5h, 604800 = 7d). */
+  window_seconds: number;
+  /** tokens_in + tokens_out within the window. */
+  tokens: number;
+  tokens_in: number;
+  tokens_out: number;
+  messages: number;
+  /**
+   * Epoch-ms of the oldest message inside the window. Zero when empty.
+   * The frontend computes `resets_at = first_msg_ts + window_seconds*1000`.
+   */
+  first_msg_ts: number;
+}
+
+/**
+ * OAuthWindow is one vendor-canonical rolling-window utilization slice
+ * returned by Anthropic's /api/oauth/usage. Prefer this over the local
+ * token estimate because it's bound to the user's actual plan tier.
+ */
+export interface OAuthWindow {
+  /** Percentage of plan cap consumed (0–100+). */
+  utilization_pct: number;
+  /** Epoch-ms at which the window rolls over (0 if omitted). */
+  resets_at: number;
+}
+
+/** OAuthUsage mirrors the relevant subset of /api/oauth/usage. */
+export interface OAuthUsage {
+  five_hour?: OAuthWindow;
+  seven_day?: OAuthWindow;
+  seven_day_sonnet?: OAuthWindow;
+  /** Plan label (e.g. "pro", "max"). */
+  subscription_type?: string;
+}
+
+/** UsageCLI groups all rolling-window aggregates for a single CLI. */
+export interface UsageCLI {
+  window_5h: UsageWindow;
+  window_7d: UsageWindow;
+  /** Anthropic-specific Sonnet sub-window. Zero-valued for non-Claude CLIs. */
+  window_7d_sonnet: UsageWindow;
+  /**
+   * Vendor-canonical utilization, when available. Always nil for non-Claude
+   * CLIs in v1. The frontend MUST prefer these percentages over the local
+   * token estimate when present.
+   */
+  oauth?: OAuthUsage;
+}
+
+/** UsageResponse is GET /usage. */
+export interface UsageResponse {
+  /** Server clock at calculation time (epoch-ms). */
+  now: number;
+  claude: UsageCLI;
+  codex: UsageCLI;
+}
+
+// --- /cockpit/threads ---
+
+/**
+ * CockpitThread is one tile on the cockpit page. A "thread" is a
+ * (session_id, git_branch, cwd) tuple — Claude Code shares a sessionId
+ * across parallel `claude --resume <id>` invocations, so we use the
+ * branch + cwd a message was written from to disambiguate them.
+ */
+export interface CockpitThread {
+  session_id: string;
+  cli: string;
+  project_path: string;
+  git_branch: string;
+  cwd: string;
+  model: string;
+  /** Epoch-ms of the most recent message in this bucket. */
+  last_msg_at: number;
+  msg_count: number;
+  tokens_in: number;
+  tokens_out: number;
+}
+
+/** CockpitThreadsResponse is GET /cockpit/threads. */
+export interface CockpitThreadsResponse {
+  threads: CockpitThread[];
 }
 
 // --- /settings ---
@@ -352,6 +515,13 @@ export interface SessionListQuery {
 export interface MessageListQuery {
   limit?: number;
   before?: number;
+  /** Default 'asc'. Use 'desc' for cockpit-style "give me the tail" reads. */
+  order?: 'asc' | 'desc';
+  /** Filter to messages emitted from this git branch. Send the empty
+   *  string to match rows whose branch is unknown / pre-migration. */
+  branch?: string;
+  /** Filter to messages emitted from this working directory. */
+  cwd?: string;
 }
 
 export interface CostSummaryQuery {

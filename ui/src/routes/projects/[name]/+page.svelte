@@ -2,10 +2,11 @@
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
-  import { fetchSessions } from '$lib/api.js';
+  import { fetchSessions, deleteSession, fetchMessages } from '$lib/api.js';
   import { projectsStore, refreshProjects } from '$lib/projects.svelte.js';
-  import { kfmt, costFmt, relAgo, dayLabel } from '$lib/format.js';
-  import type { Session } from '$lib/types.js';
+  import { removeSession } from '$lib/stores.svelte.js';
+  import { kfmt, relAgo, dayLabel } from '$lib/format.js';
+  import type { Session, Message } from '$lib/types.js';
   import CliBadge from '$lib/ui/CliBadge.svelte';
   import StatusBadge from '$lib/ui/StatusBadge.svelte';
 
@@ -17,7 +18,29 @@
   );
 
   let sessions = $state<Session[]>([]);
+  let sessionPreviews = $state<Record<string, string>>({});
   let loadError = $state<string | null>(null);
+  let deletingId = $state<string | null>(null);
+  let previewLoadSeq = 0;
+
+  async function handleDelete(s: Session, e: Event): Promise<void> {
+    e.stopPropagation();
+    const ok = window.confirm(
+      `Delete session ${s.id.slice(0, 8)}?\n\n${s.msg_count} msgs · ↓ ${kfmt(s.tokens_out)} tokens\n\nThis cannot be undone. The source JSONL on disk is untouched.`
+    );
+    if (!ok) return;
+    deletingId = s.id;
+    try {
+      await deleteSession(s.id);
+      removeSession(s.id);
+      sessions = sessions.filter((x) => x.id !== s.id);
+      void refreshProjects();
+    } catch (err) {
+      loadError = err instanceof Error ? err.message : 'delete failed';
+    } finally {
+      deletingId = null;
+    }
+  }
 
   // Tab filter: all | claude | codex. Defaults to 'all'.
   let cliFilter = $state<'all' | 'claude' | 'codex'>('all');
@@ -46,14 +69,43 @@
     return g;
   });
 
+  function isPreviewable(m: Message): boolean {
+    if (m.role === 'tool' || m.role === 'system') return false;
+    return (m.content?.trim().length ?? 0) > 0;
+  }
+
+  function compactPreview(text: string): string {
+    return text.replace(/\s+/g, ' ').trim().slice(0, 140);
+  }
+
+  async function loadSessionPreviews(sessionList: Session[]): Promise<void> {
+    const seq = ++previewLoadSeq;
+    const targets = sessionList.slice(0, 120);
+    const entries = await Promise.all(targets.map(async (s) => {
+      try {
+        const resp = await fetchMessages(s.id, { limit: 30, order: 'desc' });
+        const preview = resp.messages.find(isPreviewable);
+        if (!preview) return null;
+        return [s.id, compactPreview(preview.content)] as const;
+      } catch {
+        return null;
+      }
+    }));
+    if (seq !== previewLoadSeq) return;
+    sessionPreviews = Object.fromEntries(entries.filter((entry): entry is readonly [string, string] => entry !== null));
+  }
+
   async function loadSessions(): Promise<void> {
     loadError = null;
     try {
       const resp = await fetchSessions({ limit: 500 });
       // Filter by project path matching the project name
-      sessions = resp.sessions.filter(
+      const next = resp.sessions.filter(
         (s) => s.project_path.endsWith('/' + projectName) || s.project_path === projectName
       );
+      sessions = next;
+      sessionPreviews = {};
+      void loadSessionPreviews(next);
     } catch (e) {
       loadError = e instanceof Error ? e.message : 'Failed to load sessions';
     }
@@ -98,15 +150,14 @@
     </div>
 
     <!-- Stats strip -->
-    <div class="ad-card" style="display: grid; grid-template-columns: repeat(5, 1fr); padding: 0; margin-bottom: 20px;">
+    <div class="ad-card" style="display: grid; grid-template-columns: repeat(4, 1fr); padding: 0; margin-bottom: 20px;">
       {#each [
         ['Sessions', String(project.sessions)],
         ['Messages', String(project.msgs)],
         ['↑ tokens in', kfmt(project.tokensIn)],
         ['↓ tokens out', kfmt(project.tokensOut)],
-        ['Cost', costFmt(project.cost, project.priced)],
       ] as [label, value], i}
-        <div style="padding: 14px 16px; border-right: {i < 4 ? '1px solid var(--ad-border-soft)' : 'none'};">
+        <div style="padding: 14px 16px; border-right: {i < 3 ? '1px solid var(--ad-border-soft)' : 'none'};">
           <div style="font-size: 11px; color: var(--ad-faint); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 4px;">{label}</div>
           <div class="ad-mono ad-tnum" style="font-size: 18px; font-weight: 600;">{value}</div>
         </div>
@@ -167,16 +218,32 @@
               tabindex="0"
               onclick={() => goto(`/sessions/${encodeURIComponent(s.id)}`)}
               onkeydown={(e) => { if (e.key === 'Enter') goto(`/sessions/${encodeURIComponent(s.id)}`); }}
-              style="display: grid; grid-template-columns: 70px 1fr 80px 90px 70px 110px 20px; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: {i < list.length - 1 ? '1px solid var(--ad-border-soft)' : 'none'}; font-size: 13px; cursor: pointer;"
+              style="display: grid; grid-template-columns: 70px minmax(0, 1fr) 80px 90px 110px 28px 20px; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: {i < list.length - 1 ? '1px solid var(--ad-border-soft)' : 'none'}; font-size: 13px; cursor: pointer;"
               onmouseenter={(e) => ((e.currentTarget as HTMLElement).style.background = 'var(--ad-panel-hi)')}
               onmouseleave={(e) => ((e.currentTarget as HTMLElement).style.background = 'transparent')}
             >
               <span><CliBadge cli={s.cli} /></span>
-              <span class="ad-mono ad-truncate" style="color: var(--ad-fg-2);">{s.id}</span>
+              <span style="min-width: 0;">
+                <span class="ad-truncate" style="display: block; color: var(--ad-fg); font-weight: 500;">
+                  {sessionPreviews[s.id] ?? 'Loading recent activity...'}
+                </span>
+                <span class="ad-mono ad-truncate" style="display: block; color: var(--ad-faint); font-size: 11px; margin-top: 2px;">
+                  {s.id}
+                </span>
+              </span>
               <span class="ad-mono ad-tnum num" style="text-align: right; color: var(--ad-fg-2);">{s.msg_count} msgs</span>
               <span class="ad-mono ad-tnum num" style="text-align: right; color: var(--ad-muted);">↓ {kfmt(s.tokens_out)}</span>
-              <span class="ad-mono ad-tnum num" style="text-align: right; color: {s.cost_usd > 0 ? 'var(--ad-active)' : 'var(--ad-faint)'};">{costFmt(s.cost_usd, s.cost_usd > 0)}</span>
-              <span><StatusBadge status={s.status} /></span>
+              <span><StatusBadge status={s.status === 'compacted' ? 'compacted' : (Date.now() - s.last_msg_at < 60_000 ? 'active' : 'idle')} /></span>
+              <button
+                type="button"
+                onclick={(e) => handleDelete(s, e)}
+                disabled={deletingId === s.id}
+                title="Delete this session"
+                aria-label="Delete session"
+                style="background: transparent; border: 0; color: var(--ad-faint); font-size: 14px; cursor: pointer; padding: 2px 4px; border-radius: 3px;"
+                onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--ad-error, #f87171)'; (e.currentTarget as HTMLElement).style.background = 'var(--ad-bg-2)'; }}
+                onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--ad-faint)'; (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
+              >{deletingId === s.id ? '…' : '✕'}</button>
               <span style="color: var(--ad-faint);">›</span>
             </div>
           {/each}

@@ -2,6 +2,7 @@
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
   import Kbd from './Kbd.svelte';
+  import UsageBadge from '$lib/components/UsageBadge.svelte';
 
   interface Props {
     onsearch?: () => void;
@@ -11,15 +12,19 @@
 
   const items = [
     { id: 'dashboard', label: 'Dashboard', path: '/' },
+    { id: 'cockpit',   label: 'Cockpit',   path: '/cockpit' },
     { id: 'projects',  label: 'Projects',  path: '/projects' },
     { id: 'search',    label: 'Search',    path: '/search' },
   ];
 
   let searchInputRef: HTMLInputElement | null = $state(null);
+  let searchValue = $state('');
+  let searchTimer: ReturnType<typeof setTimeout> | null = null;
 
   function currentRoute(): string {
     const pathname = $page.url.pathname;
     if (pathname === '/') return 'dashboard';
+    if (pathname.startsWith('/cockpit')) return 'cockpit';
     if (pathname.startsWith('/projects')) return 'projects';
     if (pathname.startsWith('/search')) return 'search';
     if (pathname.startsWith('/settings')) return 'settings';
@@ -28,6 +33,25 @@
   }
 
   const route = $derived(currentRoute());
+
+  // Reflect the URL ?q= into the input so the value sticks across navigations.
+  $effect(() => {
+    const urlQ = $page.url.searchParams.get('q') ?? '';
+    if (route === 'search' && urlQ !== searchValue) {
+      searchValue = urlQ;
+    }
+  });
+
+  function submitSearch(value: string, immediate = false): void {
+    if (searchTimer !== null) clearTimeout(searchTimer);
+    const trimmed = value.trim();
+    const run = () => {
+      const target = trimmed ? `/search?q=${encodeURIComponent(trimmed)}` : '/search';
+      void goto(target, { keepFocus: true, replaceState: route === 'search' });
+    };
+    if (immediate) run();
+    else searchTimer = setTimeout(run, 250);
+  }
 
   function onKey(e: KeyboardEvent) {
     const target = e.target as HTMLElement;
@@ -72,6 +96,17 @@
       class="ad-input"
       placeholder="Search messages, sessions, projects…"
       style="padding-left: 30px; padding-right: 36px;"
+      bind:value={searchValue}
+      oninput={(e) => submitSearch((e.target as HTMLInputElement).value)}
+      onkeydown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          submitSearch(searchValue, true);
+        } else if (e.key === 'Escape') {
+          searchValue = '';
+          submitSearch('', true);
+        }
+      }}
       onfocus={() => onsearch?.()}
     />
     <span style="position: absolute; left: 10px; top: 7px; color: var(--ad-faint); font-family: var(--ad-font-mono); font-size: 12px;">⌕</span>
@@ -80,6 +115,7 @@
 
   <!-- Right actions -->
   <div style="margin-left: auto; display: flex; gap: 4px; align-items: center;">
+    <UsageBadge />
     <button class="ad-btn ad-btn--ghost" onclick={() => goto('/wizard')}>Wizard</button>
     <button class="ad-btn ad-btn--ghost" onclick={() => goto('/settings')}>⚙ Settings</button>
     <div style="width: 26px; height: 26px; border-radius: 50%; background: var(--ad-claude-bg); color: var(--ad-claude); display: grid; place-items: center; font-size: 11px; font-weight: 700; margin-left: 6px;">M</div>

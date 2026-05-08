@@ -6,6 +6,8 @@
  */
 
 import type {
+  BreakAdviceResponse,
+  CockpitThreadsResponse,
   CostSummaryQuery,
   CostSummaryResponse,
   HealthzResponse,
@@ -16,9 +18,11 @@ import type {
   SessionListQuery,
   SessionListResponse,
   SessionResponse,
+  SessionUsageResponse,
   SettingsResponse,
   SettingsUpdateRequest,
   SummaryResponse,
+  UsageResponse,
   WizardDetectResponse
 } from './types.js';
 
@@ -136,6 +140,18 @@ export async function fetchSession(id: string): Promise<SessionResponse> {
   return get<SessionResponse>(`/sessions/${encodeURIComponent(id)}`);
 }
 
+/** DELETE /sessions/{id} — permanently remove the session, its messages, and FTS rows. */
+export async function deleteSession(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/sessions/${encodeURIComponent(id)}`, {
+    method: 'DELETE'
+  });
+  if (!res.ok && res.status !== 204) {
+    let body: unknown;
+    try { body = await res.json(); } catch { body = await res.text(); }
+    throw new Error(`DELETE /sessions/${id} failed (${res.status}): ${typeof body === 'string' ? body : JSON.stringify(body)}`);
+  }
+}
+
 /** GET /sessions/{id}/messages — paginated message list. */
 export async function fetchMessages(
   sessionId: string,
@@ -143,7 +159,10 @@ export async function fetchMessages(
 ): Promise<MessageListResponse> {
   return get<MessageListResponse>(`/sessions/${encodeURIComponent(sessionId)}/messages`, {
     limit: opts?.limit,
-    before: opts?.before
+    before: opts?.before,
+    order: opts?.order,
+    branch: opts?.branch,
+    cwd: opts?.cwd
   });
 }
 
@@ -157,13 +176,37 @@ export async function fetchSummary(sessionId: string): Promise<SummaryResponse> 
   return get<SummaryResponse>(`/sessions/${encodeURIComponent(sessionId)}/summary`);
 }
 
+/**
+ * GET /sessions/{id}/usage — context-fill + per-turn cost projection used
+ * by the per-session token-savings indicator. Projections are calibrated
+ * against the user's 5h rate-limit window when vendor /usage data is
+ * available; otherwise the *_pct_5h fields come back as -1 and the UI
+ * must render them as "—".
+ */
+export async function fetchSessionUsage(id: string): Promise<SessionUsageResponse> {
+  return get<SessionUsageResponse>(`/sessions/${encodeURIComponent(id)}/usage`);
+}
+
+/**
+ * GET /sessions/{id}/break-advice — AI-generated recommendation on
+ * whether to start a fresh session, /compact, or keep going. Server
+ * caches per-session for 10 minutes, so repeated calls are cheap.
+ */
+export async function fetchBreakAdvice(id: string): Promise<BreakAdviceResponse> {
+  return get<BreakAdviceResponse>(`/sessions/${encodeURIComponent(id)}/break-advice`);
+}
+
 // ---------------------------------------------------------------------------
 // /search
 // ---------------------------------------------------------------------------
 
-/** GET /search?q=&limit= — full-text search over messages. */
-export async function search(q: string, limit?: number): Promise<SearchResponse> {
-  return get<SearchResponse>('/search', { q, limit });
+/** Sort order for /search results. 'recent' (default) ranks by ts DESC,
+ *  'relevance' ranks by FTS5 BM25. */
+export type SearchSort = 'recent' | 'relevance';
+
+/** GET /search?q=&limit=&sort= — full-text search over messages. */
+export async function search(q: string, limit?: number, sort: SearchSort = 'recent'): Promise<SearchResponse> {
+  return get<SearchResponse>('/search', { q, limit, sort });
 }
 
 // ---------------------------------------------------------------------------
@@ -176,6 +219,28 @@ export async function fetchCostSummary(opts: CostSummaryQuery): Promise<CostSumm
     group: opts.group,
     since: opts.since,
     until: opts.until
+  });
+}
+
+// ---------------------------------------------------------------------------
+// /usage
+// ---------------------------------------------------------------------------
+
+/** GET /usage — rolling 5h, 7d, and 7d-Sonnet token aggregates per CLI. */
+export async function fetchUsage(): Promise<UsageResponse> {
+  return get<UsageResponse>('/usage');
+}
+
+// ---------------------------------------------------------------------------
+// /cockpit/threads
+// ---------------------------------------------------------------------------
+
+/** GET /cockpit/threads — per-(session, branch, cwd) buckets for the
+ *  cockpit grid. `since` defaults to the last 7 days; pass 0 for unbounded. */
+export async function fetchCockpitThreads(opts?: { since?: number; limit?: number }): Promise<CockpitThreadsResponse> {
+  return get<CockpitThreadsResponse>('/cockpit/threads', {
+    since: opts?.since,
+    limit: opts?.limit
   });
 }
 

@@ -46,11 +46,6 @@
     return path.split('/').filter(Boolean).pop() ?? path;
   }
 
-  function formatUsd(val: number): string {
-    if (val === 0) return '$0.00';
-    if (val < 0.01) return `$${val.toFixed(4)}`;
-    return `$${val.toFixed(2)}`;
-  }
 </script>
 
 <section data-testid="session-list" class="flex flex-col h-full">
@@ -132,10 +127,10 @@
             </time>
           </div>
 
-          <!-- Row 2: msg count + cost -->
+          <!-- Row 2: msg count + tokens -->
           <div class="flex items-center gap-3 text-xs text-gray-500">
             <span>{session.msg_count} msgs</span>
-            <span data-testid="session-cost">{formatUsd(session.cost_usd)}</span>
+            <span data-testid="session-tokens-out">↓ {session.tokens_out}</span>
             {#if session.status !== 'idle'}
               <span
                 class="rounded px-1 {session.status === 'active'

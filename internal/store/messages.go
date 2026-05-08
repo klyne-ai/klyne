@@ -55,12 +55,12 @@ INSERT INTO messages
     (id, session_id, parent_uuid, role, content,
      tool_calls_json, tool_results_json,
      tokens_in, tokens_out, cached_read_tokens, cached_write_tokens,
-     cost_usd, model, ts)
+     cost_usd, model, ts, git_branch, cwd)
 VALUES
     (?, ?, ?, ?, ?,
      ?, ?,
      ?, ?, ?, ?,
-     ?, ?, ?)`
+     ?, ?, ?, ?, ?)`
 
 	if _, err := tx.ExecContext(ctx, insertMsg,
 		m.ID,
@@ -77,6 +77,8 @@ VALUES
 		m.CostUSD,
 		nullableStr(m.Model),
 		m.Ts,
+		m.GitBranch,
+		m.Cwd,
 	); err != nil {
 		_ = tx.Rollback()
 		return fmt.Errorf("store: insert message %q: %w", m.ID, err)
@@ -148,39 +150,81 @@ func ListMessagesBySession(
 	limit int,
 	before int64,
 ) ([]*connectors.Message, error) {
+	return ListMessagesBySessionOrdered(ctx, db, sessionID, limit, before, "asc")
+}
+
+// ListMessagesBySessionOrdered is the explicit-order variant of
+// ListMessagesBySession. order="desc" returns the most recent rows first,
+// useful when the caller only needs the tail of a long session (cockpit
+// previews). Any value other than "desc" is treated as "asc".
+func ListMessagesBySessionOrdered(
+	ctx context.Context,
+	db *DB,
+	sessionID string,
+	limit int,
+	before int64,
+	order string,
+) ([]*connectors.Message, error) {
+	return ListMessagesBySessionFiltered(ctx, db, sessionID, limit, before, order, MessageFilter{})
+}
+
+// MessageFilter narrows ListMessagesBySessionFiltered to a sub-thread of a
+// session — used by the cockpit to fetch the tail of one (branch, cwd)
+// bucket when two parallel terminals share the same sessionId.
+//
+// Filters are AND-ed; empty values are ignored. Pass UnsetBranch/UnsetCwd
+// (just the empty string sentinel) to filter "branch is empty" specifically.
+type MessageFilter struct {
+	Branch    string
+	Cwd       string
+	BranchSet bool // distinguishes "filter by empty string" from "no filter"
+	CwdSet    bool
+}
+
+// ListMessagesBySessionFiltered is the most general read path: ordered,
+// paginated, optionally filtered by (git_branch, cwd) tuple.
+func ListMessagesBySessionFiltered(
+	ctx context.Context,
+	db *DB,
+	sessionID string,
+	limit int,
+	before int64,
+	order string,
+	filter MessageFilter,
+) ([]*connectors.Message, error) {
 	const defaultMsgLimit = 100
 	if limit <= 0 {
 		limit = defaultMsgLimit
 	}
 
-	var (
-		q    string
-		args []any
-	)
-
-	if before == 0 {
-		q = `
-SELECT id, session_id, parent_uuid, role, content,
-       tool_calls_json, tool_results_json,
-       tokens_in, tokens_out, cached_read_tokens, cached_write_tokens,
-       cost_usd, model, ts
-FROM messages
-WHERE session_id = ?
-ORDER BY ts ASC, id ASC
-LIMIT ?`
-		args = []any{sessionID, limit}
-	} else {
-		q = `
-SELECT id, session_id, parent_uuid, role, content,
-       tool_calls_json, tool_results_json,
-       tokens_in, tokens_out, cached_read_tokens, cached_write_tokens,
-       cost_usd, model, ts
-FROM messages
-WHERE session_id = ? AND ts < ?
-ORDER BY ts ASC, id ASC
-LIMIT ?`
-		args = []any{sessionID, before, limit}
+	dir := "ASC"
+	if order == "desc" {
+		dir = "DESC"
 	}
+
+	q := `
+SELECT id, session_id, parent_uuid, role, content,
+       tool_calls_json, tool_results_json,
+       tokens_in, tokens_out, cached_read_tokens, cached_write_tokens,
+       cost_usd, model, ts, git_branch, cwd
+FROM messages
+WHERE session_id = ?`
+	args := []any{sessionID}
+
+	if before > 0 {
+		q += " AND ts < ?"
+		args = append(args, before)
+	}
+	if filter.BranchSet {
+		q += " AND git_branch = ?"
+		args = append(args, filter.Branch)
+	}
+	if filter.CwdSet {
+		q += " AND cwd = ?"
+		args = append(args, filter.Cwd)
+	}
+	q += " ORDER BY ts " + dir + ", id " + dir + " LIMIT ?"
+	args = append(args, limit)
 
 	rows, err := db.Read().QueryContext(ctx, q, args...)
 	if err != nil {
@@ -234,6 +278,8 @@ func scanMessage(r messageScanner) (*connectors.Message, error) {
 		&m.CostUSD,
 		&model,
 		&m.Ts,
+		&m.GitBranch,
+		&m.Cwd,
 	)
 	if err != nil {
 		return nil, err

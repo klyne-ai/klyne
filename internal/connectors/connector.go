@@ -186,6 +186,17 @@ type Message struct {
 	// ParentUUID points at the parent message in a CLI's native message
 	// graph (used to reconstruct branching threads). Empty for roots.
 	ParentUUID string `json:"parent_uuid,omitempty"`
+	// GitBranch is the git branch reported by the CLI for the cwd at
+	// this message's timestamp. Empty when unknown (Codex doesn't emit
+	// it, and pre-migration rows have no value). Used by the cockpit to
+	// disambiguate parallel `claude --resume <id>` invocations that
+	// share a sessionId but run from different worktrees.
+	GitBranch string `json:"git_branch,omitempty"`
+	// Cwd is the absolute working directory the CLI was invoked from at
+	// the time of this message. Differs from Session.ProjectPath when
+	// the user ran the CLI from a subdirectory. Used together with
+	// GitBranch to split parallel terminals into separate cockpit tiles.
+	Cwd string `json:"cwd,omitempty"`
 }
 
 // Session is the canonical session row, mirroring the `sessions` SQL

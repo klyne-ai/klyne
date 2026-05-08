@@ -18,6 +18,12 @@ type Deps struct {
 	Cfg    *config.Config
 	Cost   *cost.Engine
 	Logger *slog.Logger
+
+	// AIFactory is used by the break-advice handler to obtain a
+	// Haiku-class chat provider on demand. When nil (no AI provider
+	// configured at app boot), the handler returns the "unavailable"
+	// verdict without touching the network.
+	AIFactory AIProviderFactory
 }
 
 // Mounter implements api.RouterMounter and registers all W7 read-only
@@ -47,6 +53,7 @@ func (m *Mounter) Mount(r chi.Router) {
 	hSessions := NewSessionsHandler(m.deps.DB)
 	r.Get(api.RouteSessions, hSessions.List)
 	r.Get(api.RouteSession, hSessions.Get)
+	r.Delete(api.RouteSession, hSessions.Delete)
 	r.Get(api.RouteSessionMessages, hSessions.Messages)
 	r.Get(api.RouteSessionSummary, hSessions.Summary)
 
@@ -55,6 +62,29 @@ func (m *Mounter) Mount(r chi.Router) {
 
 	hCost := NewCostHandler(m.deps.DB, m.deps.Cost)
 	r.Get(api.RouteCostSummary, hCost.Summary)
+
+	hUsage := NewUsageHandler(m.deps.DB, logger)
+	r.Get(api.RouteUsage, hUsage.Get)
+
+	// Session-scoped usage projection — same calibration data sources
+	// as /usage so the percentages line up with the dashboard badge.
+	hSessionUsage := NewSessionUsageHandler(SessionUsageDeps{
+		DB:        m.deps.DB,
+		OAuth:     hUsage.oauth,
+		CodexSnap: hUsage.codexSnap,
+		Logger:    logger,
+	})
+	r.Get(api.RouteSessionUsage, hSessionUsage.Get)
+
+	hBreakAdvice := NewBreakAdviceHandler(BreakAdviceDeps{
+		DB:        m.deps.DB,
+		Logger:    logger,
+		AIFactory: m.deps.AIFactory,
+	})
+	r.Get(api.RouteSessionBreakAdvice, hBreakAdvice.Get)
+
+	hCockpit := NewCockpitHandler(m.deps.DB)
+	r.Get(api.RouteCockpitThreads, hCockpit.Threads)
 
 	hSettings := NewSettingsHandler(m.deps.Cfg, logger)
 	r.Get(api.RouteSettings, hSettings.Get)

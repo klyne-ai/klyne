@@ -17,6 +17,12 @@ import (
 const (
 	// backstopInterval is how often we scan for new files not caught by fsnotify.
 	backstopInterval = 30 * time.Second
+	// maxLineSize is the largest single JSONL line we will tolerate. Claude
+	// tool results (file reads, command outputs) routinely exceed 1MB; the
+	// bufio.Scanner default of 64KB silently drops anything larger and the
+	// loop exits without an error. 16MB is a comfortable ceiling — files
+	// bigger than this are pathological and worth logging.
+	maxLineSize = 16 * 1024 * 1024
 )
 
 // fileState tracks read progress for a watched JSONL file.
@@ -172,6 +178,7 @@ func (w *Watcher) replay(ctx context.Context, path string, events chan<- connect
 	defer f.Close()
 
 	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 64*1024), maxLineSize)
 	for scanner.Scan() {
 		if ctx.Err() != nil {
 			break
@@ -188,16 +195,17 @@ func (w *Watcher) replay(ctx context.Context, path string, events chan<- connect
 			return
 		}
 	}
+	if err := scanner.Err(); err != nil {
+		log.Printf("claude watch: replay scan %s: %v (line larger than %d bytes will be skipped)", path, err, maxLineSize)
+	}
 
-	// Advance offset to end of file so tail won't re-emit these lines.
-	pos, err := f.Seek(0, 1)
-	if err == nil {
+	// Advance offset to actual end of file (Stat) — relying on Seek(0,1)
+	// after a scanner error returns the buffered position, not the on-disk
+	// size, which would cause us to re-read truncated bytes on next tail.
+	if info, err := f.Stat(); err == nil {
+		fs.offset = info.Size()
+	} else if pos, err2 := f.Seek(0, 1); err2 == nil {
 		fs.offset = pos
-	} else {
-		info, err2 := f.Stat()
-		if err2 == nil {
-			fs.offset = info.Size()
-		}
 	}
 }
 
@@ -227,6 +235,7 @@ func (w *Watcher) tail(ctx context.Context, path string, events chan<- connector
 	}
 
 	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 64*1024), maxLineSize)
 	for scanner.Scan() {
 		if ctx.Err() != nil {
 			break
@@ -243,10 +252,17 @@ func (w *Watcher) tail(ctx context.Context, path string, events chan<- connector
 			return
 		}
 	}
+	if err := scanner.Err(); err != nil {
+		log.Printf("claude watch: tail scan %s: %v (line larger than %d bytes will be skipped)", path, err, maxLineSize)
+	}
 
-	// Update offset to current file position.
-	pos, _ := f.Seek(0, 1)
-	fs.offset = pos
+	// Use Stat() rather than Seek(0,1) so a scanner error doesn't leave the
+	// offset short of the real on-disk size and cause permanent re-tailing.
+	if info, err := f.Stat(); err == nil {
+		fs.offset = info.Size()
+	} else if pos, err2 := f.Seek(0, 1); err2 == nil {
+		fs.offset = pos
+	}
 }
 
 // ── directory watching helpers ────────────────────────────────────────────────

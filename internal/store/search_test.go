@@ -69,7 +69,7 @@ func TestSearch_RanksNeedle(t *testing.T) {
 	// Seed the needle message.
 	seedMessage(t, db, "msg-needle", sessID, "user", needle)
 
-	hits, err := store.Search(ctx, db, "xyloquartz frobnicate zyzzyva", 10)
+	hits, err := store.Search(ctx, db, "xyloquartz frobnicate zyzzyva", 10, store.SearchSortRelevance)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestSearch_EmptyQuery(t *testing.T) {
 	db, _ := openSearchTestDB(t)
 	ctx := context.Background()
 
-	hits, err := store.Search(ctx, db, "", 10)
+	hits, err := store.Search(ctx, db, "", 10, store.SearchSortRelevance)
 	if err != nil {
 		t.Fatalf("Search with empty query returned error: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestSearch_WhitespaceQuery(t *testing.T) {
 	db, _ := openSearchTestDB(t)
 	ctx := context.Background()
 
-	hits, err := store.Search(ctx, db, "   \t  ", 10)
+	hits, err := store.Search(ctx, db, "   \t  ", 10, store.SearchSortRelevance)
 	if err != nil {
 		t.Fatalf("Search with whitespace query returned error: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestSearch_LimitRespected(t *testing.T) {
 	}
 
 	const limit = 10
-	hits, err := store.Search(ctx, db, "apple banana cherry", limit)
+	hits, err := store.Search(ctx, db, "apple banana cherry", limit, store.SearchSortRelevance)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -159,7 +159,7 @@ func TestSearch_SpecialChars(t *testing.T) {
 
 	for _, q := range queries {
 		t.Run(fmt.Sprintf("q=%s", q), func(t *testing.T) {
-			_, err := store.Search(ctx, db, q, 10)
+			_, err := store.Search(ctx, db, q, 10, store.SearchSortRelevance)
 			if err != nil {
 				t.Errorf("Search(%q) returned unexpected error: %v", q, err)
 			}
@@ -175,7 +175,7 @@ func TestSearch_Snippet(t *testing.T) {
 	seedMessage(t, db, "msg-snip-1", sessID, "assistant",
 		"The magnificent elephant roams the savanna gracefully at dawn")
 
-	hits, err := store.Search(ctx, db, "magnificent elephant", 5)
+	hits, err := store.Search(ctx, db, "magnificent elephant", 5, store.SearchSortRelevance)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -195,7 +195,7 @@ func TestSearch_ReturnsFields(t *testing.T) {
 	seedMessage(t, db, "msg-fields-1", sessID, "user",
 		"unique phrase for field verification quasar")
 
-	hits, err := store.Search(ctx, db, "quasar", 5)
+	hits, err := store.Search(ctx, db, "quasar", 5, store.SearchSortRelevance)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -230,7 +230,7 @@ func TestSearch_RankOrdering(t *testing.T) {
 	seedMessage(t, db, "msg-rank-weak", sessID, "user",
 		"canary is also a songbird")
 
-	hits, err := store.Search(ctx, db, "canary", 10)
+	hits, err := store.Search(ctx, db, "canary", 10, store.SearchSortRelevance)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}

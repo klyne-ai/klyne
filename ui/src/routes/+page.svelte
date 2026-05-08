@@ -4,15 +4,16 @@
   import { fetchCostSummary } from '$lib/api.js';
   import { subscribe } from '$lib/sse.js';
   import { projectsStore, refreshProjects } from '$lib/projects.svelte.js';
-  import { kfmt, costFmt, relAgo } from '$lib/format.js';
-  import Sparkline from '$lib/ui/Sparkline.svelte';
+  import { kfmt, relAgo } from '$lib/format.js';
   import BarColumns from '$lib/ui/BarColumns.svelte';
-  import StatusBadge from '$lib/ui/StatusBadge.svelte';
   import CliBadge from '$lib/ui/CliBadge.svelte';
   import Kbd from '$lib/ui/Kbd.svelte';
 
-  // Cost series from /cost/summary?group=day
-  let costByDay = $state<{ cost: number; tokensOut: number }[]>([]);
+  // Activity series (output tokens per day) from /cost/summary?group=day.
+  // We piggy-back on the cost-summary endpoint because it already buckets by
+  // day and returns tokens_out; the dollar-cost field is intentionally ignored
+  // — flat-subscription users don't care about provider compute prices.
+  let tokensByDay = $state<number[]>([]);
 
   const projects = $derived(projectsStore.items);
 
@@ -20,8 +21,14 @@
     [...projects].sort((a, b) => a.lastMsAgo - b.lastMsAgo).slice(0, 6)
   );
 
-  const activeProj = $derived(
-    projects.find((p) => p.status === 'active') ?? projects[0]
+  // Tick every 5s so 'active' status / 'last msg N seconds ago' stay live
+  // without depending on a fresh server fetch.
+  let tick = $state(Date.now());
+
+  const activeProjs = $derived(
+    projects
+      .filter((p) => tick - p.lastMsAt < 60_000)
+      .sort((a, b) => a.lastMsAt > b.lastMsAt ? -1 : 1)
   );
 
   const totals = $derived(
@@ -29,43 +36,57 @@
       (acc, p) => ({
         sessions: acc.sessions + p.sessions,
         msgs: acc.msgs + p.msgs,
+        tokensIn: acc.tokensIn + p.tokensIn,
         tokensOut: acc.tokensOut + p.tokensOut,
-        cost: acc.cost + p.cost,
       }),
-      { sessions: 0, msgs: 0, tokensOut: 0, cost: 0 }
+      { sessions: 0, msgs: 0, tokensIn: 0, tokensOut: 0 }
     )
   );
 
-  const costSeries = $derived(costByDay.map((d) => d.cost));
-  const tokenSeries = $derived(costByDay.map((d) => d.tokensOut));
-  const totalTokens = $derived(tokenSeries.reduce((a, b) => a + b, 0));
+  const totalTokens = $derived(tokensByDay.reduce((a, b) => a + b, 0));
 
-  // Load cost data
-  async function loadCostData(): Promise<void> {
+  async function loadActivityData(): Promise<void> {
     try {
       const since = Date.now() - 14 * 86_400_000;
       const resp = await fetchCostSummary({ group: 'day', since });
-      costByDay = resp.buckets.map((b) => ({ cost: b.cost_usd, tokensOut: b.tokens_out }));
+      tokensByDay = resp.buckets.map((b) => b.tokens_out);
     } catch {
-      // silently ignore — cost chart is optional
+      // chart is optional; silent ignore
     }
   }
 
   let unsubscribe: (() => void) | null = null;
+  let tickHandle: ReturnType<typeof setInterval> | null = null;
+  let refreshHandle: ReturnType<typeof setTimeout> | null = null;
+
+  // Coalesce SSE bursts: a single live CLI session emits MsgNew at high
+  // frequency. Refreshing on every event hammers /sessions and flickers the
+  // list; debouncing to 800ms lands new sessions promptly without thrash.
+  function scheduleRefresh(): void {
+    if (refreshHandle !== null) return;
+    refreshHandle = setTimeout(() => {
+      refreshHandle = null;
+      void refreshProjects();
+    }, 800);
+  }
 
   onMount(() => {
-    void loadCostData();
+    void loadActivityData();
     if (projectsStore.items.length === 0) void refreshProjects();
 
     unsubscribe = subscribe({
-      onMsgNew: () => void refreshProjects(),
-      onSessionUpdate: () => void refreshProjects(),
+      onMsgNew: () => scheduleRefresh(),
+      onSessionUpdate: () => scheduleRefresh(),
     });
+
+    tickHandle = setInterval(() => { tick = Date.now(); }, 5_000);
   });
 
   onDestroy(() => {
     unsubscribe?.();
     unsubscribe = null;
+    if (tickHandle !== null) { clearInterval(tickHandle); tickHandle = null; }
+    if (refreshHandle !== null) { clearTimeout(refreshHandle); refreshHandle = null; }
   });
 </script>
 
@@ -88,34 +109,38 @@
   <!-- Active now -->
   <section style="margin-bottom: 24px;">
     <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
-      <h2 class="ad-section-h" style="margin: 0;">Active now</h2>
-      <span class="ad-mono ad-faint" style="font-size: 11px;">via SSE · live</span>
+      <h2 class="ad-section-h" style="margin: 0;">Active now {#if activeProjs.length > 0}<span class="ad-faint" style="font-weight: 400;">· {activeProjs.length}</span>{/if}</h2>
+      <span class="ad-mono ad-faint" style="font-size: 11px;">via SSE · live · idle &gt; 60s</span>
     </div>
-    {#if activeProj}
-      <div class="ad-card" style="padding: 16px; display: flex; align-items: center; gap: 16px;">
-        <span class="ad-dot ad-dot--active" style="width: 8px; height: 8px;"></span>
-        <div style="flex: 1; min-width: 0;">
-          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+    {#if activeProjs.length > 0}
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        {#each activeProjs as p}
+          <div class="ad-card" style="padding: 16px; display: flex; align-items: center; gap: 16px;">
+            <span class="ad-dot ad-dot--active" style="width: 8px; height: 8px;"></span>
+            <div style="flex: 1; min-width: 0;">
+              <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                <button
+                  style="font-weight: 600; font-size: 15px; color: var(--ad-fg);"
+                  onclick={() => goto(`/projects/${encodeURIComponent(p.name)}`)}
+                >{p.name}</button>
+                {#each p.clis as c}
+                  <CliBadge cli={c} />
+                {/each}
+                <span class="ad-badge ad-badge--ghost ad-mono" style="font-size: 11px;">{p.model}</span>
+              </div>
+              <div style="display: flex; gap: 16px; font-size: 12px; color: var(--ad-muted);">
+                <span><span class="ad-mono ad-tnum">{p.msgs}</span> msgs</span>
+                <span>↑ <span class="ad-mono ad-tnum">{kfmt(p.tokensIn)}</span></span>
+                <span>↓ <span class="ad-mono ad-tnum">{kfmt(p.tokensOut)}</span></span>
+                <span>last msg <span style="color: var(--ad-active);">{relAgo(p.lastMsAgo)}</span></span>
+              </div>
+            </div>
             <button
-              style="font-weight: 600; font-size: 15px; color: var(--ad-fg);"
-              onclick={() => goto(`/projects/${encodeURIComponent(activeProj.name)}`)}
-            >{activeProj.name}</button>
-            {#each activeProj.clis as c}
-              <CliBadge cli={c} />
-            {/each}
-            <span class="ad-badge ad-badge--ghost ad-mono" style="font-size: 11px;">{activeProj.model}</span>
+              class="ad-btn ad-btn--primary"
+              onclick={() => goto(`/projects/${encodeURIComponent(p.name)}`)}
+            >Open project →</button>
           </div>
-          <div style="display: flex; gap: 16px; font-size: 12px; color: var(--ad-muted);">
-            <span><span class="ad-mono ad-tnum">{activeProj.msgs}</span> msgs</span>
-            <span>↑ <span class="ad-mono ad-tnum">{kfmt(activeProj.tokensIn)}</span></span>
-            <span>↓ <span class="ad-mono ad-tnum">{kfmt(activeProj.tokensOut)}</span></span>
-            <span>last msg <span style="color: var(--ad-active);">{relAgo(activeProj.lastMsAgo)}</span></span>
-          </div>
-        </div>
-        <button
-          class="ad-btn ad-btn--primary"
-          onclick={() => goto(`/projects/${encodeURIComponent(activeProj.name)}`)}
-        >Open project →</button>
+        {/each}
       </div>
     {:else if projectsStore.loading}
       <div class="ad-card" style="padding: 16px; color: var(--ad-muted); font-size: 13px;">Loading…</div>
@@ -146,7 +171,7 @@
               <CliBadge cli={c} />
             {/each}
           </div>
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; font-size: 12px;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px 12px; font-size: 12px;">
             <div>
               <div class="ad-mono ad-tnum" style="font-size: 14px; font-weight: 600; color: var(--ad-fg);">{p.sessions}</div>
               <div style="font-size: 10px; color: var(--ad-faint); text-transform: uppercase; letter-spacing: 0.06em;">sessions</div>
@@ -159,10 +184,6 @@
               <div class="ad-mono ad-tnum" style="font-size: 14px; font-weight: 600; color: var(--ad-fg);">{kfmt(p.tokensOut)}</div>
               <div style="font-size: 10px; color: var(--ad-faint); text-transform: uppercase; letter-spacing: 0.06em;">↓ tokens</div>
             </div>
-            <div>
-              <div class="ad-mono ad-tnum" style="font-size: 14px; font-weight: 600; color: {p.cost > 0 ? 'var(--ad-active)' : 'var(--ad-fg)'};">{costFmt(p.cost, p.priced)}</div>
-              <div style="font-size: 10px; color: var(--ad-faint); text-transform: uppercase; letter-spacing: 0.06em;">cost</div>
-            </div>
           </div>
           <div style="font-size: 11px; color: var(--ad-faint); margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--ad-border-soft);">
             {relAgo(p.lastMsAgo)} · <span class="ad-mono">{p.model}</span>
@@ -172,43 +193,33 @@
     </div>
   </section>
 
-  <!-- Cost + activity charts -->
-  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-    <div class="ad-card" style="padding: 16px;">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-        <span class="ad-section-h">Cost · last 14 days</span>
-        <button class="ad-btn ad-btn--ghost ad-btn--sm">drill in →</button>
-      </div>
-      <div style="font-size: 28px; font-weight: 600; font-family: var(--ad-font-mono); margin-bottom: 2px;">
-        ${totals.cost.toFixed(2)}
-      </div>
-      <div class="ad-muted" style="font-size: 12px; margin-bottom: 16px;">
-        across all priced models
-      </div>
-      {#if costSeries.length > 0}
-        <Sparkline data={costSeries} height={48} />
-      {:else}
-        <div style="height: 48px; background: var(--ad-bg-2); border-radius: 4px;"></div>
-      {/if}
+  <!-- Activity (last 14 days) -->
+  <div class="ad-card" style="padding: 16px;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+      <span class="ad-section-h">Activity · last 14 days</span>
+      <span class="ad-mono ad-faint" style="font-size: 11px;">output tokens</span>
     </div>
-
-    <div class="ad-card" style="padding: 16px;">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-        <span class="ad-section-h">Activity · output tokens</span>
-        <span class="ad-mono ad-faint" style="font-size: 11px;">14d</span>
+    <div style="display: flex; align-items: baseline; gap: 24px; margin-bottom: 16px; flex-wrap: wrap;">
+      <div>
+        <div style="font-size: 28px; font-weight: 600; font-family: var(--ad-font-mono);">
+          {kfmt(totalTokens || totals.tokensOut)}
+        </div>
+        <div class="ad-muted" style="font-size: 12px;">↓ tokens generated</div>
       </div>
-      <div style="font-size: 28px; font-weight: 600; font-family: var(--ad-font-mono); margin-bottom: 2px;">
-        {kfmt(totalTokens || totals.tokensOut)}
+      <div>
+        <div style="font-size: 22px; font-weight: 600; font-family: var(--ad-font-mono);">{totals.msgs}</div>
+        <div class="ad-muted" style="font-size: 12px;">messages</div>
       </div>
-      <div class="ad-muted" style="font-size: 12px; margin-bottom: 16px;">
-        {totals.msgs} messages
+      <div>
+        <div style="font-size: 22px; font-weight: 600; font-family: var(--ad-font-mono);">{totals.sessions}</div>
+        <div class="ad-muted" style="font-size: 12px;">sessions</div>
       </div>
-      {#if tokenSeries.length > 0}
-        <BarColumns data={tokenSeries} height={48} />
-      {:else}
-        <div style="height: 48px; background: var(--ad-bg-2); border-radius: 4px;"></div>
-      {/if}
     </div>
+    {#if tokensByDay.length > 0}
+      <BarColumns data={tokensByDay} height={48} />
+    {:else}
+      <div style="height: 48px; background: var(--ad-bg-2); border-radius: 4px;"></div>
+    {/if}
   </div>
 
   <!-- Keyboard hints -->

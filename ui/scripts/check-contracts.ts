@@ -154,6 +154,8 @@ const GO_TO_TS_NAME: Record<string, string> = {
   MessageListResponse: 'MessageListResponse',
   RestoreResponse: 'RestoreResponse',
   SummaryResponse: 'SummaryResponse',
+  SessionUsageResponse: 'SessionUsageResponse',
+  BreakAdviceResponse: 'BreakAdviceResponse',
   SearchHit: 'SearchHit',
   SearchResponse: 'SearchResponse',
   CostBucket: 'CostBucket',

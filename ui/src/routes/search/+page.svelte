@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
-  import { search as apiSearch } from '$lib/api.js';
+  import { search as apiSearch, type SearchSort } from '$lib/api.js';
   import { projectsStore } from '$lib/projects.svelte.js';
   import { relTime } from '$lib/format.js';
   import type { SearchHit } from '$lib/types.js';
@@ -13,6 +13,7 @@
   let hits = $state<SearchHit[]>([]);
   let loading = $state(false);
   let tookMs = $state(0);
+  let sort = $state<SearchSort>(($page.url.searchParams.get('sort') as SearchSort) || 'recent');
   let filters = $state<{ cli: string; role: string; project: string }>({
     cli: 'all',
     role: 'all',
@@ -45,7 +46,7 @@
     }
     loading = true;
     try {
-      const res = await apiSearch(query, 50);
+      const res = await apiSearch(query, 50, sort);
       hits = res.hits;
       tookMs = res.took_ms;
     } catch {
@@ -53,6 +54,15 @@
     } finally {
       loading = false;
     }
+  }
+
+  function setSort(next: SearchSort): void {
+    if (next === sort) return;
+    sort = next;
+    const url = new URL(window.location.href);
+    url.searchParams.set('sort', next);
+    void goto(url.pathname + url.search, { replaceState: true, keepFocus: true });
+    if (q.trim()) void doSearch(q);
   }
 
   function handleInput(value: string): void {
@@ -133,8 +143,20 @@
       </div>
     {/each}
     <button class="ad-btn ad-btn--ghost ad-btn--sm" onclick={clearFilters}>clear filters</button>
-    <div style="margin-left: auto; font-size: 11px; color: var(--ad-faint);" class="ad-mono">
-      rank: bm25 · since: 35d
+    <div style="margin-left: auto; display: flex; align-items: center; gap: 6px;">
+      <span style="font-size: 10px; color: var(--ad-faint); text-transform: uppercase; letter-spacing: 0.06em;">sort:</span>
+      <div style="display: inline-flex; border: 1px solid var(--ad-border); border-radius: 4px; overflow: hidden;">
+        <button
+          class="ad-btn ad-btn--ghost ad-btn--sm"
+          onclick={() => setSort('recent')}
+          style="border-radius: 0; border: 0; background: {sort === 'recent' ? 'var(--ad-panel-hi)' : 'transparent'}; color: {sort === 'recent' ? 'var(--ad-fg)' : 'var(--ad-muted)'}; font-weight: {sort === 'recent' ? 600 : 500};"
+        >recent</button>
+        <button
+          class="ad-btn ad-btn--ghost ad-btn--sm"
+          onclick={() => setSort('relevance')}
+          style="border-radius: 0; border: 0; border-left: 1px solid var(--ad-border); background: {sort === 'relevance' ? 'var(--ad-panel-hi)' : 'transparent'}; color: {sort === 'relevance' ? 'var(--ad-fg)' : 'var(--ad-muted)'}; font-weight: {sort === 'relevance' ? 600 : 500};"
+        >best match</button>
+      </div>
     </div>
   </div>
 

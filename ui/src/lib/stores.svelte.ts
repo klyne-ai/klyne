@@ -62,6 +62,14 @@ export function prependSession(session: Session): void {
   sessions.items = [session, ...sessions.items];
 }
 
+/** Drop a session from the list and clear it from currentSession if matched. */
+export function removeSession(id: string): void {
+  sessions.items = sessions.items.filter((s) => s.id !== id);
+  if (currentSession.data?.session.id === id) {
+    currentSession.data = null;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // currentSession
 // ---------------------------------------------------------------------------

@@ -26,18 +26,22 @@ import "github.com/mohitpatell/agentdeck/internal/connectors"
 // MUST be unique (verified by contracts_test.go). Path parameters use
 // the chi-router ":id" syntax.
 const (
-	RouteSessions         = "/sessions"
-	RouteSession          = "/sessions/{id}"
-	RouteSessionMessages  = "/sessions/{id}/messages"
-	RouteSessionRestore   = "/sessions/{id}/restore"
-	RouteSessionSummary   = "/sessions/{id}/summary"
-	RouteSearch           = "/search"
-	RouteCostSummary      = "/cost/summary"
-	RouteSettings         = "/settings"
-	RouteWizardDetect     = "/wizard/detect"
-	RouteWizardComplete   = "/wizard/complete"
-	RouteEvents           = "/events"
-	RouteHealthz          = "/healthz"
+	RouteSessions            = "/sessions"
+	RouteSession             = "/sessions/{id}"
+	RouteSessionMessages     = "/sessions/{id}/messages"
+	RouteSessionRestore      = "/sessions/{id}/restore"
+	RouteSessionSummary      = "/sessions/{id}/summary"
+	RouteSessionUsage        = "/sessions/{id}/usage"
+	RouteSessionBreakAdvice  = "/sessions/{id}/break-advice"
+	RouteSearch              = "/search"
+	RouteCostSummary         = "/cost/summary"
+	RouteUsage               = "/usage"
+	RouteCockpitThreads      = "/cockpit/threads"
+	RouteSettings            = "/settings"
+	RouteWizardDetect        = "/wizard/detect"
+	RouteWizardComplete      = "/wizard/complete"
+	RouteEvents              = "/events"
+	RouteHealthz             = "/healthz"
 )
 
 // AllRoutes returns the canonical, ordered list of every HTTP path
@@ -50,8 +54,12 @@ func AllRoutes() []string {
 		RouteSessionMessages,
 		RouteSessionRestore,
 		RouteSessionSummary,
+		RouteSessionUsage,
+		RouteSessionBreakAdvice,
 		RouteSearch,
 		RouteCostSummary,
+		RouteUsage,
+		RouteCockpitThreads,
 		RouteSettings,
 		RouteWizardDetect,
 		RouteWizardComplete,
@@ -108,6 +116,124 @@ type SummaryResponse struct {
 }
 
 // ---------------------------------------------------------------------------
+// /sessions/{id}/usage  — token-savings per-session indicator
+// ---------------------------------------------------------------------------
+
+// SessionUsageResponse is GET /sessions/{id}/usage. It backs the
+// "context fill + cost-per-turn" indicator on the session detail page.
+//
+// All Pct5h fields are percentages of the user's 5-hour rate limit, NOT
+// percentages of the context window. They are -1 when the server cannot
+// calibrate (no recent /usage data, or zero observed utilization). The UI
+// renders -1 as "—" rather than a misleading number.
+//
+// Why these specific fields:
+//   - ContextFillPct drives the visual fill bar (green/yellow/red).
+//   - NextTurnPct5h tells the user the cost of doing nothing (the headline
+//     anti-feature: every additional turn re-sends this whole context).
+//   - CompactedNextTurnPct5h / RestartedNextTurnPct5h are the deltas they
+//     gain by acting — what makes the CTA concrete.
+type SessionUsageResponse struct {
+	SessionID string `json:"session_id"`
+	// Model is the most-recent assistant model used in this session.
+	// Empty when the session has no assistant turns yet.
+	Model string `json:"model"`
+
+	// Context-window state.
+
+	// ContextWindow is the model's maximum context size in tokens
+	// (e.g. 200000 for sonnet-4.5, 1000000 for opus-4.7 long-context).
+	// Zero when the model is unknown.
+	ContextWindow int64 `json:"context_window"`
+	// ContextUsed is the approximate token count the next turn would
+	// re-send as input. Derived from the most recent assistant message's
+	// reported tokens_in, which is the closest empirical signal to "what
+	// did the CLI actually pack into the context for that turn".
+	ContextUsed int64 `json:"context_used"`
+	// ContextFillPct = ContextUsed / ContextWindow * 100. Can exceed 100
+	// for sessions that overflowed and were silently truncated.
+	ContextFillPct float64 `json:"context_fill_pct"`
+
+	// 5h-limit projections — the cost language the user actually cares about.
+	// All percentages of the user's 5h rolling rate-limit cap.
+
+	// NextTurnPct5h is the projected % of the 5h limit the next turn
+	// will burn at the current context size.
+	NextTurnPct5h float64 `json:"next_turn_pct_5h"`
+	// CompactedNextTurnPct5h is the projected per-turn cost AFTER a
+	// /compact, assuming compaction reduces context by CompactRatio.
+	CompactedNextTurnPct5h float64 `json:"compacted_next_turn_pct_5h"`
+	// RestartedNextTurnPct5h is the projected per-turn cost in a fresh
+	// session with empty context. Effectively the system-prompt floor.
+	RestartedNextTurnPct5h float64 `json:"restarted_next_turn_pct_5h"`
+
+	// Savings deltas, exposed so the UI doesn't recompute them.
+	// CompactSavingsPct5h = NextTurnPct5h - CompactedNextTurnPct5h.
+	CompactSavingsPct5h float64 `json:"compact_savings_pct_5h"`
+	// RestartSavingsPct5h = NextTurnPct5h - RestartedNextTurnPct5h.
+	RestartSavingsPct5h float64 `json:"restart_savings_pct_5h"`
+
+	// CompactRatio is the assumed post-compact size as a fraction of
+	// current context (e.g. 0.15 = "compaction cuts to 15%"). Sourced
+	// from observed Claude Code /compact behavior. Exposed so the UI
+	// can show its math when asked.
+	CompactRatio float64 `json:"compact_ratio"`
+
+	// CalibratedFromOAuth is true when the percentages were derived from
+	// vendor-canonical /usage data; false when the server fell back to a
+	// hard-coded calibration. Lets the UI label "estimate" vs "live".
+	CalibratedFromOAuth bool `json:"calibrated_from_oauth"`
+}
+
+// ---------------------------------------------------------------------------
+// /sessions/{id}/break-advice — AI-powered session-break recommender
+// ---------------------------------------------------------------------------
+
+// BreakAdviceVerdict enumerates the small set of recommendations the
+// advisor returns. Strings (not int) so they round-trip cleanly through
+// JSON without needing a parser side-table.
+type BreakAdviceVerdict string
+
+const (
+	// BreakAdviceStartFresh — a recent topic ended; user should start a
+	// new session for the next thing they want to work on.
+	BreakAdviceStartFresh BreakAdviceVerdict = "start_fresh"
+	// BreakAdviceCompact — user is mid-task; compacting is the right
+	// move because it preserves continuity but kills the context bloat.
+	BreakAdviceCompact BreakAdviceVerdict = "compact"
+	// BreakAdviceContinue — too early to break; just keep going.
+	BreakAdviceContinue BreakAdviceVerdict = "continue"
+	// BreakAdviceUnavailable — no AI provider configured, so we can't
+	// advise. UI should hide the button or show a "configure AI" prompt.
+	BreakAdviceUnavailable BreakAdviceVerdict = "unavailable"
+)
+
+// BreakAdviceResponse is GET /sessions/{id}/break-advice. Backed by a
+// single Haiku-class call against the last ~10 messages, cached
+// in-memory for 10 minutes per session so re-clicks are free.
+type BreakAdviceResponse struct {
+	SessionID string             `json:"session_id"`
+	Verdict   BreakAdviceVerdict `json:"verdict"`
+	// Reason is a one-sentence human-readable explanation of the verdict.
+	// Always populated, even for "unavailable" (in which case it explains
+	// why advice can't be given).
+	Reason string `json:"reason"`
+	// SuggestedTopic is a short label for the new session if Verdict is
+	// "start_fresh" (e.g. "refactor cost engine"). Empty otherwise.
+	SuggestedTopic string `json:"suggested_topic,omitempty"`
+	// Provider is the AI provider that generated the advice
+	// (e.g. "anthropic", "gemini"). Empty when Verdict is "unavailable".
+	Provider string `json:"provider,omitempty"`
+	// Model is the model identifier used. Empty when "unavailable".
+	Model string `json:"model,omitempty"`
+	// CachedAt is the epoch-ms at which this advice was generated. The UI
+	// uses this to show "advised X ago"; ALSO lets the UI invalidate its
+	// own cache when the server returns a stale entry past the user's
+	// preferred staleness window.
+	CachedAt int64 `json:"cached_at"`
+}
+
+// ---------------------------------------------------------------------------
 // /search
 // ---------------------------------------------------------------------------
 
@@ -161,6 +287,77 @@ type CostSummaryResponse struct {
 	Until   int64        `json:"until"`     // epoch-ms (0 = unbounded)
 	Buckets []CostBucket `json:"buckets"`
 	Total   CostBucket   `json:"total"`     // aggregate across all buckets
+}
+
+// ---------------------------------------------------------------------------
+// /usage
+// ---------------------------------------------------------------------------
+
+// UsageWindow is one rolling-window aggregate (5h, 7d, or 7d-Sonnet) for a
+// single CLI. Limits are deliberately NOT computed server-side — vendor
+// caps are not published, change without notice, and depend on the user's
+// plan tier. The frontend converts tokens → percentage using its own
+// (user-editable) tier table.
+type UsageWindow struct {
+	WindowSeconds int64 `json:"window_seconds"` // size of the rolling window
+	Tokens        int64 `json:"tokens"`         // sum tokens_in + tokens_out within the window
+	TokensIn      int64 `json:"tokens_in"`
+	TokensOut     int64 `json:"tokens_out"`
+	Messages      int64 `json:"messages"`
+	// FirstMsgTs is the epoch-ms timestamp of the oldest message currently
+	// inside this window. Zero when the window is empty. The frontend
+	// derives the "resets in" countdown as FirstMsgTs + WindowSeconds*1000.
+	FirstMsgTs int64 `json:"first_msg_ts"`
+}
+
+// UsageCLI groups all rolling-window aggregates for a single CLI. Sonnet7d
+// is omitted (zero value) for non-Claude CLIs.
+//
+// OAuth, when populated, carries the vendor-canonical utilization numbers
+// returned by Anthropic's /api/oauth/usage endpoint — pre-bound to the
+// user's actual plan tier. The frontend MUST prefer these over the
+// token-based estimates above when present, since the local sums only
+// approximate what the rate limiter actually meters.
+type UsageCLI struct {
+	Window5h       UsageWindow `json:"window_5h"`
+	Window7d       UsageWindow `json:"window_7d"`
+	Window7dSonnet UsageWindow `json:"window_7d_sonnet"`
+	// OAuth is nil when no OAuth token is available, when the call to
+	// Anthropic failed, or for CLIs without an equivalent endpoint
+	// (Codex). Always nil for non-Claude CLIs in v1.
+	OAuth *OAuthUsage `json:"oauth,omitempty"`
+}
+
+// OAuthWindow is one vendor-reported rolling-window utilization slice.
+type OAuthWindow struct {
+	// UtilizationPct is the percentage of the plan-tier cap consumed in
+	// this window, as Anthropic computes it. Range [0, 100+] (the API
+	// can return >100 when the cap was breached).
+	UtilizationPct float64 `json:"utilization_pct"`
+	// ResetsAt is the epoch-ms at which the window rolls over. Zero when
+	// the API omits the field.
+	ResetsAt int64 `json:"resets_at"`
+}
+
+// OAuthUsage mirrors the relevant subset of Anthropic's /api/oauth/usage
+// payload. Each window is nullable (pointer) because the API itself
+// returns null for windows that don't apply to the user's plan.
+type OAuthUsage struct {
+	FiveHour       *OAuthWindow `json:"five_hour,omitempty"`
+	SevenDay       *OAuthWindow `json:"seven_day,omitempty"`
+	SevenDaySonnet *OAuthWindow `json:"seven_day_sonnet,omitempty"`
+	// SubscriptionType is the user's plan label as Claude Code stored it
+	// (e.g. "pro", "max"). Echoed for display only — the percentages
+	// already account for it.
+	SubscriptionType string `json:"subscription_type,omitempty"`
+}
+
+// UsageResponse is GET /usage. Computed at request time from the messages
+// table; cheap (~ms) so polling at 60s is safe.
+type UsageResponse struct {
+	Now    int64    `json:"now"`     // epoch-ms server clock at calc time
+	Claude UsageCLI `json:"claude"`
+	Codex  UsageCLI `json:"codex"`
 }
 
 // ---------------------------------------------------------------------------
@@ -231,6 +428,39 @@ type WizardRecommendation struct {
 	Task     string    `json:"task"`     // "summary" | "title" | "embed"
 	Selected TaskModel `json:"selected"`
 	Reason   string    `json:"reason"`
+}
+
+// ---------------------------------------------------------------------------
+// /healthz
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// /cockpit/threads
+// ---------------------------------------------------------------------------
+
+// CockpitThread is one tile on the cockpit page. It is a sub-thread of a
+// session disambiguated by (git_branch, cwd) so two parallel
+// `claude --resume <id>` invocations from different worktrees show as
+// separate tiles instead of merging.
+//
+// Older messages (pre-migration) have empty git_branch / cwd; those rows
+// collapse to a single bucket per session, matching pre-migration UX.
+type CockpitThread struct {
+	SessionID   string `json:"session_id"`
+	CLI         string `json:"cli"`
+	ProjectPath string `json:"project_path"`
+	GitBranch   string `json:"git_branch"`
+	Cwd         string `json:"cwd"`
+	Model       string `json:"model"`
+	LastMsgAt   int64  `json:"last_msg_at"`
+	MsgCount    int64  `json:"msg_count"`
+	TokensIn    int64  `json:"tokens_in"`
+	TokensOut   int64  `json:"tokens_out"`
+}
+
+// CockpitThreadsResponse is GET /cockpit/threads.
+type CockpitThreadsResponse struct {
+	Threads []CockpitThread `json:"threads"`
 }
 
 // ---------------------------------------------------------------------------

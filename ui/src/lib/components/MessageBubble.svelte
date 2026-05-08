@@ -71,9 +71,9 @@
     {/if}
   </div>
 
-  {#if message.cost_usd > 0}
+  {#if message.tokens_in > 0 || message.tokens_out > 0}
     <footer class="px-1 text-xs text-gray-600">
-      {message.tokens_in}↑ {message.tokens_out}↓ · ${message.cost_usd.toFixed(4)}
+      {message.tokens_in}↑ {message.tokens_out}↓
     </footer>
   {/if}
 </article>

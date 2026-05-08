@@ -1,12 +1,11 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { projectsStore, refreshProjects } from '$lib/projects.svelte.js';
-  import { kfmt, costFmt, relAgo } from '$lib/format.js';
+  import { kfmt, relAgo } from '$lib/format.js';
   import CliBadge from '$lib/ui/CliBadge.svelte';
-  import StatusBadge from '$lib/ui/StatusBadge.svelte';
   import { onMount } from 'svelte';
 
-  let sortBy = $state<'recent' | 'name' | 'msgs' | 'cost' | 'sessions'>('recent');
+  let sortBy = $state<'recent' | 'name' | 'msgs' | 'tokens' | 'sessions'>('recent');
   let cliFilter = $state<'all' | 'claude' | 'codex'>('all');
   let nameFilter = $state('');
 
@@ -25,7 +24,7 @@
       recent: (a, b) => a.lastMsAgo - b.lastMsAgo,
       name: (a, b) => a.name.localeCompare(b.name),
       msgs: (a, b) => b.msgs - a.msgs,
-      cost: (a, b) => b.cost - a.cost,
+      tokens: (a, b) => b.tokensOut - a.tokensOut,
       sessions: (a, b) => b.sessions - a.sessions,
     };
     return [...p].sort(sorters[sortBy]);
@@ -82,7 +81,7 @@
         <option value="recent">Recent</option>
         <option value="name">Name</option>
         <option value="msgs">Messages</option>
-        <option value="cost">Cost</option>
+        <option value="tokens">Tokens</option>
         <option value="sessions">Sessions</option>
       </select>
     </div>
@@ -108,7 +107,6 @@
             <th class="num">Sessions</th>
             <th class="num">Messages</th>
             <th class="num">↓ Tokens</th>
-            <th class="num">Cost</th>
             <th>Last active</th>
             <th></th>
           </tr>
@@ -129,9 +127,6 @@
               <td class="num">{p.sessions}</td>
               <td class="num">{p.msgs}</td>
               <td class="num">{kfmt(p.tokensOut)}</td>
-              <td class="num" style="color: {p.cost > 0 ? 'var(--ad-active)' : 'var(--ad-faint)'};">
-                {costFmt(p.cost, p.priced)}
-              </td>
               <td class="ad-mono" style="font-size: 11px; color: var(--ad-muted);">
                 {relAgo(p.lastMsAgo)}
               </td>
@@ -140,7 +135,7 @@
           {/each}
           {#if sorted.length === 0}
             <tr>
-              <td colspan="10" style="text-align: center; padding: 24px; color: var(--ad-muted);">
+              <td colspan="9" style="text-align: center; padding: 24px; color: var(--ad-muted);">
                 No projects found.
               </td>
             </tr>

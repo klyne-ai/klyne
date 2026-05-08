@@ -136,7 +136,25 @@ func (h *SessionsHandler) Messages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	msgs, err := store.ListMessagesBySession(r.Context(), h.db, id, limit, before)
+	order := r.URL.Query().Get("order") // "" / "asc" → ASC, "desc" → DESC
+
+	// Optional (branch, cwd) filter — used by the cockpit when one
+	// session has parallel sub-threads from different worktrees.
+	// query.Has() requires Go 1.17+; chi gives us net/url's parsed form.
+	// Distinguish "filter by empty string" from "no filter" using the
+	// param's presence in the raw query.
+	q := r.URL.Query()
+	filter := store.MessageFilter{}
+	if q.Has("branch") {
+		filter.Branch = q.Get("branch")
+		filter.BranchSet = true
+	}
+	if q.Has("cwd") {
+		filter.Cwd = q.Get("cwd")
+		filter.CwdSet = true
+	}
+
+	msgs, err := store.ListMessagesBySessionFiltered(r.Context(), h.db, id, limit, before, order, filter)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
@@ -193,6 +211,34 @@ func (h *SessionsHandler) Summary(w http.ResponseWriter, r *http.Request) {
 		Model:     summary.Model,
 		Ts:        summary.TS,
 	})
+}
+
+// Delete handles DELETE /sessions/{id}.
+//
+// Removes the session row, all its messages (FK cascade), all FTS5 entries
+// (cascade-driven trigger), and any thread/summary children. Returns 204 on
+// success, 404 if no row matched, 500 on unexpected error.
+//
+// Note: this only deletes from the agentdeck DB. The on-disk JSONL files at
+// ~/.claude/projects/* and ~/.codex/sessions/* are NOT touched — the connector
+// will NOT re-ingest them on next start because warm-up uses the dedup-by-ID
+// path on InsertMessage. To prevent re-ingestion on a *fresh* DB rebuild, the
+// user should delete the source JSONL file too (out of scope here).
+func (h *SessionsHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		http.Error(w, "missing session id", http.StatusBadRequest)
+		return
+	}
+	if err := store.DeleteSession(r.Context(), h.db, id); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			http.Error(w, "session not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // --- helpers shared across all handlers in this package ---

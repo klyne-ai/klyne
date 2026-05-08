@@ -50,6 +50,7 @@ type rawLine struct {
 	SessionID  string          `json:"sessionId"`
 	Timestamp  string          `json:"timestamp"`
 	CWD        string          `json:"cwd"`
+	GitBranch  string          `json:"gitBranch"`
 	Version    string          `json:"version"`
 	Subtype    string          `json:"subtype"`
 	// Message is present on type=user and type=assistant lines.
@@ -119,12 +120,17 @@ func Parse(line []byte, path string) (*connectors.Message, error) {
 	projectPath := raw.CWD
 
 	msg := &connectors.Message{
-		ID:         raw.UUID,
-		SessionID:  raw.SessionID,
-		CLI:        connectors.CLIClaude,
+		ID:          raw.UUID,
+		SessionID:   raw.SessionID,
+		CLI:         connectors.CLIClaude,
 		ProjectPath: projectPath,
-		Ts:         ts,
-		ParentUUID: normalizeParentUUID(raw.ParentUUID),
+		Ts:          ts,
+		ParentUUID:  normalizeParentUUID(raw.ParentUUID),
+		// gitBranch + cwd let the cockpit page tell parallel
+		// `claude --resume <id>` invocations apart when they share
+		// a sessionId but run from different worktrees / dirs.
+		GitBranch: raw.GitBranch,
+		Cwd:       raw.CWD,
 	}
 
 	switch raw.Type {

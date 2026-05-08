@@ -141,7 +141,12 @@ export const projectsStore = $state<{
 });
 
 export async function refreshProjects(): Promise<void> {
-  projectsStore.loading = true;
+  // Only show the loading skeleton on the very first fetch — subsequent
+  // refreshes (driven by SSE) should keep stale data visible to avoid the
+  // "list flickers empty when a new message arrives" UX bug.
+  if (projectsStore.items.length === 0) {
+    projectsStore.loading = true;
+  }
   projectsStore.error = null;
   try {
     projectsStore.items = await loadProjects();

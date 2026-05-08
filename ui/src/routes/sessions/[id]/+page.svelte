@@ -2,12 +2,14 @@
   import { onMount, onDestroy } from 'svelte';
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
-  import { fetchSession, fetchMessages, fetchRestore } from '$lib/api.js';
+  import { fetchSession, fetchMessages, fetchRestore, deleteSession } from '$lib/api.js';
+  import { removeSession } from '$lib/stores.svelte.js';
   import { subscribe } from '$lib/sse.js';
-  import { kfmt, costFmt, relAgo } from '$lib/format.js';
+  import { kfmt, relAgo } from '$lib/format.js';
   import type { Session, Message, RestoreResponse, ToolCall, ToolResult } from '$lib/types.js';
   import CliBadge from '$lib/ui/CliBadge.svelte';
   import StatusBadge from '$lib/ui/StatusBadge.svelte';
+  import TokenSavings from '$lib/components/TokenSavings.svelte';
 
   const sessionId = $derived($page.params.id ?? '');
 
@@ -17,6 +19,25 @@
   let showRestore = $state(false);
   let loadError = $state<string | null>(null);
   let copyFeedback = $state(false);
+  let deleting = $state(false);
+
+  async function handleDelete(): Promise<void> {
+    if (!session) return;
+    const ok = window.confirm(
+      `Delete this session permanently?\n\nProject: ${session.project_path}\nMessages: ${session.msg_count}\n↓ Tokens: ${kfmt(session.tokens_out)}\n\nThis only removes it from agentdeck — the source JSONL on disk is untouched. Cannot be undone.`
+    );
+    if (!ok) return;
+    deleting = true;
+    try {
+      await deleteSession(session.id);
+      removeSession(session.id);
+      const dest = projectName ? `/projects/${encodeURIComponent(projectName)}` : '/projects';
+      void goto(dest);
+    } catch (err) {
+      loadError = err instanceof Error ? err.message : 'delete failed';
+      deleting = false;
+    }
+  }
 
   // Issue 4: page-level toggle for tool/system messages, default OFF
   let showTools = $state(false);
@@ -67,6 +88,14 @@
     showTools ? messages : messages.filter((m) => !isHiddenByDefault(m))
   );
 
+  function newestPageInDisplayOrder(page: Message[]): Message[] {
+    return [...page].reverse();
+  }
+
+  function sortMessagesForDisplay(page: Message[]): Message[] {
+    return [...page].sort((a, b) => (a.ts - b.ts) || a.id.localeCompare(b.id));
+  }
+
   // Helper to safely parse JSON for tool inputs
   function safeParseJson(raw: string): string {
     try {
@@ -89,10 +118,10 @@
     try {
       const [sr, mr] = await Promise.all([
         fetchSession(id),
-        fetchMessages(id, { limit: 100 }),
+        fetchMessages(id, { limit: 100, order: 'desc' }),
       ]);
       session = sr.session;
-      messages = mr.messages;
+      messages = newestPageInDisplayOrder(mr.messages);
     } catch (e) {
       loadError = e instanceof Error ? e.message : 'Failed to load session';
     }
@@ -100,12 +129,13 @@
 
   async function fetchNewMessages(id: string): Promise<void> {
     try {
-      const res = await fetchMessages(id, { limit: 50 });
-      const newMsgs = res.messages.filter(
+      const res = await fetchMessages(id, { limit: 50, order: 'desc' });
+      const latest = newestPageInDisplayOrder(res.messages);
+      const newMsgs = latest.filter(
         (m) => !messages.some((existing) => existing.id === m.id)
       );
       if (newMsgs.length > 0) {
-        messages = [...messages, ...newMsgs];
+        messages = sortMessagesForDisplay([...messages, ...newMsgs]);
       }
     } catch {
       // non-fatal
@@ -123,8 +153,20 @@
     showRestore = true;
   }
 
-  async function copyId(): Promise<void> {
-    await navigator.clipboard.writeText(sessionId).catch(() => {});
+  /** Build a paste-and-go resume command. Just copying the session id
+   *  is a footgun — Claude Code resolves --resume against $PWD, so
+   *  pasting the bare id from a fresh shell yields "No conversation
+   *  found". The full command cd's to the originating project_path
+   *  first so the resume succeeds wherever the user pastes it. */
+  function resumeCommand(): string {
+    if (!session) return `claude --resume ${sessionId}`;
+    const cli = session.cli === 'codex' ? 'codex' : 'claude';
+    const safePath = session.project_path.replace(/'/g, `'\\''`);
+    return `cd '${safePath}' && ${cli} --resume ${session.id}`;
+  }
+
+  async function copyResumeCmd(): Promise<void> {
+    await navigator.clipboard.writeText(resumeCommand()).catch(() => {});
     copyFeedback = true;
     setTimeout(() => { copyFeedback = false; }, 1200);
   }
@@ -176,14 +218,25 @@
         <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
           <h1 style="font-size: 20px; font-weight: 600; margin: 0;">session</h1>
           <span class="ad-mono ad-muted" style="font-size: 14px; overflow: hidden; text-overflow: ellipsis;">{session.id}</span>
-          <button class="ad-btn ad-btn--ghost ad-btn--sm" onclick={copyId} title="Copy ID">
-            {copyFeedback ? 'copied!' : 'copy'}
+          <button
+            class="ad-btn ad-btn--ghost ad-btn--sm"
+            onclick={copyResumeCmd}
+            title={session ? `Copy: ${resumeCommand()}` : 'Copy resume command'}
+          >
+            {copyFeedback ? 'copied!' : '⎘ resume cmd'}
           </button>
+          <button
+            class="ad-btn ad-btn--ghost ad-btn--sm"
+            onclick={handleDelete}
+            disabled={deleting}
+            title="Delete this session permanently"
+            style="color: var(--ad-error, #f87171); margin-left: auto;"
+          >{deleting ? 'deleting…' : 'delete'}</button>
         </div>
         <div style="display: flex; gap: 12px; font-size: 12px; color: var(--ad-muted); flex-wrap: wrap; align-items: center;">
           <CliBadge cli={session.cli} />
           <span class="ad-badge ad-badge--ghost ad-mono" style="font-size: 11px;">{session.model}</span>
-          <StatusBadge status={session.status} />
+          <StatusBadge status={session.status === 'compacted' ? 'compacted' : (Date.now() - session.last_msg_at < 60_000 ? 'active' : 'idle')} />
           <span>started {relAgo(Date.now() - session.started_at)}</span>
           <span>·</span>
           <span>last msg {relAgo(Date.now() - session.last_msg_at)}</span>
@@ -196,7 +249,7 @@
     {@const cachedWrite = session.cached_write_tokens ?? 0}
     {@const freshIn = Math.max(0, session.tokens_in - cachedRead - cachedWrite)}
     {@const cachedPct = session.tokens_in > 0 ? Math.round(((cachedRead + cachedWrite) / session.tokens_in) * 100) : 0}
-    <div class="ad-card" style="display: grid; grid-template-columns: repeat(4, 1fr); padding: 0; margin-bottom: 16px;">
+    <div class="ad-card" style="display: grid; grid-template-columns: repeat(3, 1fr); padding: 0; margin-bottom: 16px;">
       <div style="padding: 12px 16px; border-right: 1px solid var(--ad-border-soft);">
         <div style="font-size: 11px; color: var(--ad-faint); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 4px;">Messages</div>
         <div class="ad-mono ad-tnum" style="font-size: 16px; font-weight: 600;">{session.msg_count}</div>
@@ -213,15 +266,16 @@
           </div>
         {/if}
       </div>
-      <div style="padding: 12px 16px; border-right: 1px solid var(--ad-border-soft);">
+      <div style="padding: 12px 16px;">
         <div style="font-size: 11px; color: var(--ad-faint); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 4px;">↓ tokens out</div>
         <div class="ad-mono ad-tnum" style="font-size: 16px; font-weight: 600;">{kfmt(session.tokens_out)}</div>
       </div>
-      <div style="padding: 12px 16px;">
-        <div style="font-size: 11px; color: var(--ad-faint); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 4px;">Cost</div>
-        <div class="ad-mono ad-tnum" style="font-size: 16px; font-weight: 600; color: {session.cost_usd > 0 ? 'var(--ad-active)' : 'var(--ad-fg)'};">{costFmt(session.cost_usd, session.cost_usd > 0)}</div>
-      </div>
     </div>
+
+    <!-- Token-savings indicator: passive context-fill bar + active
+         compact-now CTA + AI break advisor. Hidden via internal logic
+         when uncalibrated or under thresholds. -->
+    <TokenSavings sessionId={session.id} cli={session.cli} projectPath={session.project_path} />
 
     <!-- Compact banner -->
     {#if isCompacted}

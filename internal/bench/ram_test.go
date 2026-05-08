@@ -126,7 +126,7 @@ func TestActiveRAM(t *testing.T) {
 	}
 
 	// Search to activate the FTS5 virtual table pages.
-	_, err = store.Search(ctx, db, "hello world", 20)
+	_, err = store.Search(ctx, db, "hello world", 20, store.SearchSortRelevance)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}

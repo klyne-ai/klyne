@@ -115,6 +115,10 @@ func (w *watcher) emitNew(path string) {
 	}
 
 	scanner := bufio.NewScanner(f)
+	// Codex turn_context payloads include full instructions blocks that can
+	// run into hundreds of KB. The default 64KB scanner buffer silently
+	// returns ErrTooLong on the first oversized line — see W4/W5 bug fix.
+	scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
 	for scanner.Scan() {
 		lineBytes := scanner.Bytes()
 		if len(lineBytes) == 0 {
@@ -134,7 +138,12 @@ func (w *watcher) emitNew(path string) {
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		log.Printf("codex: scan error in %s: %v", path, err)
+		log.Printf("codex: scan error in %s: %v (line larger than 16MB will be skipped)", path, err)
+		// Recover: trust the on-disk size so we don't permanently re-read
+		// a partial buffered position.
+		if info, statErr := f.Stat(); statErr == nil {
+			ts.offset = info.Size()
+		}
 	}
 }
 

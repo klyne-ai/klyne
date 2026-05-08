@@ -147,6 +147,20 @@ type App struct {
 	// should NOT call runner.Stop unless Start ran — runner.Stop blocks
 	// on its internal done channel which is only closed by Start.
 	runnerStarted bool
+
+	// Demo, when true, marks this App as running in `agentdeck start
+	// --demo` mode. Start prints the demo banner before binding the HTTP
+	// listener, runs DemoSeedFixtures from DemoFixturesDir, and the
+	// caller is expected to have already disabled live connectors via
+	// cfg (so the watcher goroutine list is empty).
+	//
+	// Demo mode is intentionally explicit: there is no "auto-fall-back"
+	// when the user has no Claude/Codex history. See start.go.
+	Demo bool
+
+	// DemoFixturesDir is the absolute path to the directory of *.jsonl
+	// files seeded into the demo DB on Start. Ignored unless Demo is true.
+	DemoFixturesDir string
 }
 
 // BuildOnly assembles the App without starting servers, watchers, or the AI
@@ -197,15 +211,28 @@ func BuildOnly(cfg *config.Config) (*App, error) {
 		return nil, fmt.Errorf("app: build ai runner: %w", err)
 	}
 
-	// 6. Default mounters — W7 handlers + W8 events.
+	// AI factory for the break-advice handler. We pick a Title-class
+	// (cheapest) model so the per-call cost is trivial — the prompt is
+	// short and the expected reply is a one-line JSON. Build it lazily
+	// inside the closure so we honour any provider state at request
+	// time rather than baking in a stale snapshot.
+	aiFactory := buildBreakAdviceFactory(cfg, logger)
+
+	// 6. Default mounters — W7 handlers + W8 events + W15 wizard/restore.
 	mounters := []api.RouterMounter{
 		handlers.NewMounter(handlers.Deps{
-			DB:     db,
-			Cfg:    cfg,
-			Cost:   costEngine,
-			Logger: logger,
+			DB:        db,
+			Cfg:       cfg,
+			Cost:      costEngine,
+			Logger:    logger,
+			AIFactory: aiFactory,
 		}),
 		&handlers.EventsMounter{Hub: hub},
+		handlers.NewWizardMounter(handlers.WizardMounterDeps{
+			DB:     db,
+			Cfg:    cfg,
+			Logger: logger,
+		}),
 	}
 
 	app := &App{
@@ -285,6 +312,29 @@ func (a *App) Start(ctx context.Context) error {
 	// Spawn an internal context so Stop can cancel watchers and runner.
 	ctx, a.cancel = context.WithCancel(ctx)
 	defer a.cancel()
+
+	// Demo banner — printed before the listener binds so first-run users
+	// see the "this is demo data" cue before the HTTP server announces
+	// its port. We use the standard logger plus a plain fmt.Fprintln
+	// to stdout so the banner survives redirection through structured
+	// log sinks (slog formatters strip the "***" decoration).
+	if a.Demo {
+		dbPath := expandHomeOrDefault(a.cfg.Paths.DB, config.DBPath())
+		banner := fmt.Sprintf("*** agentdeck demo mode — using fixtures from %s, DB at %s ***",
+			a.DemoFixturesDir, dbPath)
+		fmt.Fprintln(os.Stdout, banner)
+		a.logger.Info("demo mode active",
+			slog.String("fixtures", a.DemoFixturesDir),
+			slog.String("db", dbPath))
+
+		// Seed BEFORE the HTTP server starts accepting requests so the
+		// first /sessions GET returns populated data. Errors are
+		// non-fatal — the user can still poke at an empty DB.
+		if _, err := seedFromFixtures(ctx, a.db, a.DemoFixturesDir, a.logger); err != nil {
+			a.logger.Warn("demo: seeding completed with errors",
+				slog.Any("error", err))
+		}
+	}
 
 	// 1. Listen on the configured address (or :0 in tests).
 	addr := a.cfg.Server.Addr
@@ -518,15 +568,22 @@ func (a *App) processRawEvent(ctx context.Context, ev connectors.RawEvent, byNam
 		return
 	}
 
-	// Compute cost via the engine if the parser did not populate it.
-	if msg.CostUSD == 0 && (msg.TokensIn > 0 || msg.TokensOut > 0) && msg.Model != "" {
-		msg.CostUSD = a.cost.Cost(
-			msg.TokensIn,
-			msg.TokensOut,
-			msg.CachedReadTokens,
-			msg.CachedWriteTokens,
-			msg.Model,
-		)
+	// Cost is intentionally NOT computed here. Flat-subscription users don't
+	// care about provider compute-cost estimates — surfacing them was
+	// distracting and the per-message lookup ran on the hot ingestion path.
+	// The schema columns + DTO fields are kept for backward compatibility
+	// (always 0 going forward) so we don't need a destructive migration.
+	msg.CostUSD = 0
+
+	// Drop events for sessions the user has deleted from the UI. The
+	// connector still warm-replays the source JSONL on every start; without
+	// this check, deleting a session would resurrect it on next boot.
+	if deleted, err := store.IsSessionDeleted(ctx, a.db, msg.SessionID); err != nil {
+		a.logger.Warn("tombstone lookup failed; processing anyway",
+			slog.String("session_id", msg.SessionID),
+			slog.Any("error", err))
+	} else if deleted {
+		return
 	}
 
 	// Ensure the session exists. UpsertSession is idempotent and cheap.
@@ -572,6 +629,13 @@ func (a *App) processRawEvent(ctx context.Context, ev connectors.RawEvent, byNam
 // Default handler routing: chi dispatches matched routes first; the
 // NotFound handler catches anything that did not match a registered
 // route, which we delegate to the SPA fallback static handler.
+//
+// SPA-shell shortcut: several SPA routes share their path with API GET
+// handlers (`/sessions/{id}`, `/search`, `/settings`). On a top-level
+// browser navigation (Sec-Fetch-Dest: document) we want the HTML shell,
+// not the JSON. The outer wrapper below intercepts those requests and
+// delegates to the static handler before chi gets a chance to match the
+// API route.
 func (a *App) buildRouter() (http.Handler, error) {
 	router := api.NewRouter(api.Deps{
 		Logger:   a.logger,
@@ -593,7 +657,56 @@ func (a *App) buildRouter() (http.Handler, error) {
 		cr.NotFound(uiHandler.ServeHTTP)
 	}
 
-	return router, nil
+	return spaShellOverride(router, uiHandler), nil
+}
+
+// spaShellOverride returns a handler that intercepts top-level browser
+// navigations (Sec-Fetch-Dest: document) bound for SPA routes that share
+// a path with an API endpoint, and serves the SPA shell instead. All
+// other requests — `fetch()` calls, EventSource subscriptions, asset
+// loads — fall through to the chi router unchanged.
+//
+// Without this, reloading `/sessions/abc123` would return the API's JSON
+// envelope (because chi matches `GET /sessions/{id}` before falling back
+// to the static handler) instead of the SvelteKit shell.
+func spaShellOverride(api http.Handler, spa http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isSPADocumentNav(r) {
+			spa.ServeHTTP(w, r)
+			return
+		}
+		api.ServeHTTP(w, r)
+	})
+}
+
+// isSPADocumentNav reports whether the request looks like a top-level
+// browser navigation that should resolve to the SPA shell rather than
+// any API endpoint that happens to match the same path.
+//
+// Detection rules:
+//   - Method must be GET (POST/PUT/DELETE are always API).
+//   - Sec-Fetch-Dest must be "document" (sent by all modern browsers on
+//     address-bar navigations and reloads, NOT sent by fetch() / XHR /
+//     EventSource).
+//   - Asset paths (/_app/, /favicon.*) and machine-only endpoints
+//     (/healthz, /events) are excluded so they keep their original
+//     content even when typed into the URL bar — useful for debugging.
+func isSPADocumentNav(r *http.Request) bool {
+	if r.Method != http.MethodGet {
+		return false
+	}
+	if r.Header.Get("Sec-Fetch-Dest") != "document" {
+		return false
+	}
+	p := r.URL.Path
+	switch {
+	case strings.HasPrefix(p, "/_app/"),
+		strings.HasPrefix(p, "/favicon"),
+		p == "/healthz",
+		strings.HasPrefix(p, "/events"):
+		return false
+	}
+	return true
 }
 
 // ---------------------------------------------------------------------------
@@ -661,6 +774,59 @@ func buildRunner(cfg *config.Config, db *store.DB, hub *api.Hub, logger *slog.Lo
 		Model:    choice.Model,
 		Logger:   logger,
 	}), nil
+}
+
+// buildBreakAdviceFactory returns a handlers.AIProviderFactory used by
+// the /sessions/{id}/break-advice endpoint. It picks a Title-class
+// (smallest/cheapest) model from whatever providers are currently
+// available; when none is, it returns a factory that reports
+// "unavailable" so the handler can short-circuit without touching the
+// network.
+//
+// The returned factory caches its decision after the first successful
+// call — provider availability rarely changes during a daemon's
+// lifetime, and re-running detection on every click would burn cycles
+// for no benefit. A factory that initially failed (no provider) keeps
+// re-detecting on each call so the user can flip on advice mid-session
+// by exporting an API key.
+func buildBreakAdviceFactory(cfg *config.Config, logger *slog.Logger) handlers.AIProviderFactory {
+	override := ""
+	if cfg != nil && cfg.AI.TitleModel != "" &&
+		cfg.AI.TitleModel != config.AIModelAuto &&
+		cfg.AI.TitleModel != config.AIModelOff {
+		override = cfg.AI.TitleModel
+	}
+
+	var (
+		mu     sync.Mutex
+		cached ai.Provider
+		model  string
+	)
+
+	return func() (ai.Provider, string, bool) {
+		mu.Lock()
+		defer mu.Unlock()
+		if cached != nil {
+			return cached, model, true
+		}
+
+		detectCtx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+		defer cancel()
+		available := providers.DetectAvailable(detectCtx)
+
+		choice, err := ai.Pick(ai.TaskTitle, available, override)
+		if err != nil {
+			logger.Debug("ai: no provider for break-advice", slog.Any("error", err))
+			return nil, "", false
+		}
+		prov := buildProvider(choice.Provider)
+		if prov == nil {
+			return nil, "", false
+		}
+		cached = prov
+		model = choice.Model
+		return cached, model, true
+	}
 }
 
 // buildProvider wires concrete provider constructors. Returns nil for

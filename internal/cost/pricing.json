@@ -8,6 +8,12 @@
       "cache_read_per_mtok": 0.3,
       "cache_write_per_mtok": 3.75
     },
+    "claude-sonnet-4-6": {
+      "prompt_per_mtok": 3.0,
+      "completion_per_mtok": 15.0,
+      "cache_read_per_mtok": 0.3,
+      "cache_write_per_mtok": 3.75
+    },
     "claude-haiku-4": {
       "prompt_per_mtok": 0.8,
       "completion_per_mtok": 4.0,

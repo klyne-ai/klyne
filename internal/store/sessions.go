@@ -6,10 +6,14 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"time"
 
 	"github.com/mohitpatell/agentdeck/internal/connectors"
 )
+
+func nowMillis() int64 { return time.Now().UnixMilli() }
 
 // SessionFilter scopes a ListSessions query.
 //
@@ -141,6 +145,67 @@ WHERE id = ?`
 		return nil, fmt.Errorf("store: get session %q: %w", id, err)
 	}
 	return s, nil
+}
+
+// DeleteSession removes a session row and all dependent data, then writes a
+// tombstone so connector warm-up cannot resurrect it on the next daemon start.
+//
+// Cleanup chain:
+//   - DELETE FROM sessions cascades to messages / thread_members /
+//     session_summaries via FK ON DELETE CASCADE (foreign_keys=ON in db.go).
+//   - Each cascaded message DELETE fires the FTS5 `messages_ad` trigger which
+//     removes the matching FTS row.
+//   - INSERT OR REPLACE into deleted_sessions stamps the tombstone so the
+//     writer skips this id during the next warm-up replay.
+//
+// Returns sql.ErrNoRows (wrapped) when no row matched.
+func DeleteSession(ctx context.Context, db *DB, id string) error {
+	tx, err := db.Write().BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("store: delete session %q begin: %w", id, err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	res, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("store: delete session %q: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("store: delete session %q rows-affected: %w", id, err)
+	}
+	if n == 0 {
+		return fmt.Errorf("store: delete session %q: %w", id, sql.ErrNoRows)
+	}
+
+	if _, err := tx.ExecContext(ctx,
+		`INSERT OR REPLACE INTO deleted_sessions (id, deleted_at) VALUES (?, ?)`,
+		id, nowMillis(),
+	); err != nil {
+		return fmt.Errorf("store: delete session %q tombstone: %w", id, err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("store: delete session %q commit: %w", id, err)
+	}
+	return nil
+}
+
+// IsSessionDeleted returns true when the given id has a tombstone row. Used
+// by the writer to drop warm-up replay events for sessions the user has
+// already deleted.
+func IsSessionDeleted(ctx context.Context, db *DB, id string) (bool, error) {
+	var one int
+	err := db.Read().QueryRowContext(ctx,
+		`SELECT 1 FROM deleted_sessions WHERE id = ? LIMIT 1`, id,
+	).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("store: is-deleted %q: %w", id, err)
+	}
+	return true, nil
 }
 
 // --- internal scan helpers ---------------------------------------------------

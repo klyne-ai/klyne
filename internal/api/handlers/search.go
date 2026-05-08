@@ -23,6 +23,7 @@ func NewSearchHandler(db *store.DB) *SearchHandler {
 // Query params:
 //   - q     string  full-text query (required, min 1 char)
 //   - limit int     max results (default 20, max 200)
+//   - sort  string  "recent" (default) | "relevance"
 func (h *SearchHandler) Search(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("q")
 	if q == "" {
@@ -36,8 +37,13 @@ func (h *SearchHandler) Search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	sort := store.SearchSortRecent
+	if r.URL.Query().Get("sort") == string(store.SearchSortRelevance) {
+		sort = store.SearchSortRelevance
+	}
+
 	start := time.Now()
-	hits, err := store.Search(r.Context(), h.db, q, limit)
+	hits, err := store.Search(r.Context(), h.db, q, limit, sort)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
@@ -52,14 +58,10 @@ func (h *SearchHandler) Search(w http.ResponseWriter, r *http.Request) {
 
 	for _, h := range hits {
 		resp.Hits = append(resp.Hits, api.SearchHit{
-			MessageID: h.MessageID,
-			SessionID: h.SessionID,
-			// store.SearchHit does not carry CLI / ProjectPath — those fields
-			// are flagged below in the ambiguity report. We leave them empty
-			// for now (zero value); the join can be added in a future migration
-			// once the contract-change PR is accepted.
-			CLI:         "",
-			ProjectPath: "",
+			MessageID:   h.MessageID,
+			SessionID:   h.SessionID,
+			CLI:         h.CLI,
+			ProjectPath: h.ProjectPath,
 			Role:        h.Role,
 			Snippet:     h.Snippet,
 			Score:       h.Rank,
