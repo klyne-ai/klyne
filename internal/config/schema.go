@@ -19,6 +19,9 @@ type Config struct {
 	Paths      PathsConfig      `toml:"paths"      json:"paths"`
 	Connectors ConnectorsConfig `toml:"connectors" json:"connectors"`
 	AI         AIConfig         `toml:"ai"         json:"ai"`
+	// Plan is the [plan] table — drives the 5-hour-window advisory.
+	// Empty Tier disables the trigger.
+	Plan PlanConfig `toml:"plan" json:"plan"`
 }
 
 // ServerConfig is the [server] table.
