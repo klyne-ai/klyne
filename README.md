@@ -29,9 +29,26 @@ Anthropic's 5-hour rate-limit window doesn't end when you hit a hard limit — i
 
 When you hit the rate-limit and need to bootstrap a fresh session, you typically ask the AI: *"summarise what we just did so I can paste it into a new chat."* That paragraph reads fine, but it varies turn-to-turn, glosses over the file paths and command stems the new session actually needs, and burns input tokens on something the AI already knows.
 
-**klyne's `generate_handoff` reads the JSONL transcript and emits a structured Markdown prompt with fixed sections** — same input always produces the same output, every section a structured pull from the actual session events. Project path, files touched (with reuse counts), commands run, known failures, recent exchanges verbatim.
+**klyne's `generate_handoff` reads the JSONL transcript and emits a structured Markdown prompt with fixed sections** — same input always produces the same output, every section a structured pull from the actual session events. Project path, files touched (with reuse counts), commands run, known failures, recent exchanges verbatim. Pass `scope=current-topic` to carry forward only files relevant to the user's most recent direction.
 
 > **Proof:** [`docs/proof/02-handoff-equivalence/`](docs/proof/02-handoff-equivalence/) — synthetic webhook-retry session paused mid-task. Three assertions: every structural section is present and populated; rendering twice produces byte-identical output; files touched 3 times are marked `(×3)` so the new session knows which file is central. **Side-by-side with vanilla Claude's likely output is rendered in the claim doc.**
+
+### 3. klyne pushes the verdict — you don't have to ask.
+
+Pre-v0.5, you had to type `/klyne:health` to see whether your session was drifting. Now klyne installs a Claude Code `UserPromptSubmit` hook that checks four deterministic triggers on every prompt and injects a single one-line advisory inline when one fires.
+
+The triggers, OR'd:
+
+- **Stale-context** — more than half of the file bytes you've loaded are no longer relevant to your current direction (Jaccard between each file's anchor and your last five user messages). The advisory names the still-relevant subset so you know what to carry forward.
+- **Acceleration** — your per-turn uncached input has roughly doubled over the last 3 turns vs the preceding 5. Direction-only — never "you'll exhaust in N turns."
+- **Hard ceiling** — context fill ≥ 75%.
+- **5-hour window** — across every Claude + Codex session in your home dir, you've used ≥ 50% (warn) or ≥ 75% (urgent) of your configured plan's effective-token cap.
+
+Each trigger fires *once* per state transition, then stays silent until it clears. Lifetime cap of advisories per session is bounded at 4, so this is "interactive but not annoying."
+
+Zero AI calls in the path. The advisory line is ~60–100 tokens, fixed-cost — same model as CLAUDE.md.
+
+> **Proof:** [`docs/proof/03-advisor/`](docs/proof/03-advisor/) — four assertions covering each trigger plus the fire-once-per-transition contract. Run `make proof` and watch them pass.
 
 ---
 
@@ -95,9 +112,15 @@ The MCP server is independent of the daemon. It reads JSONL directly so it works
 git clone https://github.com/klyne-ai/klyne && cd klyne
 make build
 
-# Register the MCP server in Claude Code and/or Codex configs.
-# Idempotent: safe to re-run on every binary upgrade.
+# Register the MCP server AND the proactive-advisor hook in Claude Code
+# (and the MCP server in Codex). Idempotent: safe to re-run on every
+# binary upgrade.
 ./bin/klyne mcp install
+
+# Optional: enable the 5-hour-window advisor by selecting your plan tier.
+# Without this, the other three triggers still work — only the
+# 5-hour-window check stays silent.
+./bin/klyne config set plan max-5x   # or pro / max-20x / team / custom
 
 # Start the daemon + open the web UI
 ./bin/klyne
@@ -123,7 +146,7 @@ It also removes any legacy `agentdeck` entry from those configs (klyne was renam
 | `list_sessions` | Enumerates Claude + Codex sessions in this project | Disambiguate between parallel terminals or `--resume` invocations |
 | `get_context_health` | Classifies a session as `healthy` / `drifting` / `risky` / `rescue_now` plus a bloat scorecard | Before compacting or continuing a long task |
 | `search_messages` | Full-text search across every indexed session | "Where did we discuss X two weeks ago?" — requires daemon running |
-| `generate_handoff` | Deterministic Markdown handoff prompt for fresh sessions | When you've hit your rate-limit and need to start over |
+| `generate_handoff` | Deterministic Markdown handoff prompt for fresh sessions; optional `scope=current-topic` carries forward only relevant files | When you've hit your rate-limit and need to start over |
 | `get_pre_compact_context` | Recovers messages preceding the last `/compact` (Claude) or `replacement_history` (Codex) | When the compact summary lost important details |
 
 ### Slash prompts (user-triggered via `/` menu in Claude Code)
@@ -192,6 +215,8 @@ Optional AI features (summary, title generation, etc.) require your own provider
 - [Reproducible proof index](docs/proof/) — every claim, with a fixture and a Go test
 - [Compact-recovery proof](docs/proof/01-compact-recovery/claim.md) — side-by-side vs vanilla Claude
 - [Handoff-equivalence proof](docs/proof/02-handoff-equivalence/claim.md) — verbatim handoff output
+- [Proactive advisor proof](docs/proof/03-advisor/claim.md) — four triggers + transition rule
+- [Proactive session advisor design](docs/features/proactive-session-advisor.md) — v1 spec for the UserPromptSubmit hook
 - [MCP ship log](docs/MCP-SHIP-LOG.md) — every slice that landed, in order
 - [Context rescue strategy](docs/marketing/context-rescue-strategy.md)
 - [Comparison and gaps](docs/marketing/comparison-and-gaps.md)
@@ -203,11 +228,12 @@ Optional AI features (summary, title generation, etc.) require your own provider
 
 1. ~~Codex MCP parity~~ — ✅ shipped (slice 4)
 2. ~~Cross-session full-text search~~ — ✅ shipped (slice 5)
-3. ~~Reproducible proof artifacts~~ — ✅ shipped (this slice)
-4. **`suggest_session_name`** — generate a meaningful name from JSONL for Claude Code's "rename" UI (queued)
-5. **Labelled context-health eval suite** — move classifier thresholds from heuristics to data
-6. **Release binaries** + Homebrew tap + one-command installer
-7. Optional [code-review-graph](https://github.com/tirth8205/code-review-graph) enrichment when `.code-review-graph/` exists in the repo
+3. ~~Reproducible proof artifacts~~ — ✅ shipped (slice 6)
+4. ~~Proactive session advisor (UserPromptSubmit hook + scoped handoff)~~ — ✅ shipped (slice 7)
+5. **`suggest_session_name`** — generate a meaningful name from JSONL for Claude Code's "rename" UI (queued)
+6. **Labelled context-health eval suite** — move classifier + advisor thresholds from heuristics to data; unlocks predictive "exhaust in N turns" projection in v2
+7. **Release binaries** + Homebrew tap + one-command installer
+8. Optional [code-review-graph](https://github.com/tirth8205/code-review-graph) enrichment when `.code-review-graph/` exists in the repo
 
 ---
 

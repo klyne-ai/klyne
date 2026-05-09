@@ -1,8 +1,90 @@
 # klyne MCP — Ship Log
 
-**Build date:** 2026-05-09 (slice 6: reproducible proof + README rewrite + bug fixes)
+**Build date:** 2026-05-09 (slice 7: proactive session advisor)
 **Branch:** `init` (klyne-ai/klyne)
 **Server version advertised over MCP:** `klyne v0.4.0`
+
+## Slice 7 — Proactive session advisor
+
+The first slice that makes klyne *push* its verdict instead of waiting
+to be asked. After installation, `klyne advise` runs as Claude Code's
+`UserPromptSubmit` hook on every prompt; when one of four
+deterministic triggers crosses its threshold, klyne injects a single
+one-line advisory into the AI's context — no AI calls, no heuristics
+that could misfire, no token cost beyond the ~60-100-token line itself.
+
+**Triggers (OR'd, transition rule applies to all four):**
+
+  - **Stale-context** — per-file relevance score (Jaccard between
+    each file's anchor of nearby user messages and the user's last
+    five user-message bag-of-words). Fires when `stale_bytes /
+    total_bytes > 0.5` AND total loaded ≥ 8 KB. The advisory names
+    the relevant subset so the user knows which files to keep.
+  - **Acceleration** — uncached input delta per assistant turn:
+    fires when last-3-turn mean exceeds 2× the preceding-5-turn
+    mean AND latest delta ≥ 5K. Direction-only — no "exhaust in N
+    turns" projection in v1.
+  - **Hard ceiling** — fill ≥ 75% (reuses existing classifier).
+  - **5-hour window** — sum of (`TokensIn - CachedReadTokens`)
+    across every Claude + Codex session under the user's home dir
+    in the last five hours, divided by user-configured plan cap.
+    Fires at 50% and 75% thresholds. Skipped silently when the
+    user has not configured a plan tier.
+
+**Auto-install** — `klyne mcp install` now also wires the
+UserPromptSubmit hook into `~/.claude/settings.json`. Idempotent:
+re-runs detect a stale binary path and rewrite the entry without
+touching unrelated hooks.
+
+**Scoped handoff** — `generate_handoff` accepts an optional
+`scope=current-topic` argument. The scoped variant filters the
+"Files touched" section to non-stale files only and bumps the
+recent-exchanges window from 6 to 10 so the new session inherits
+the freshly-shifted direction.
+
+**New CLI surface:**
+
+  - `klyne advise` — hook entrypoint. Reads stdin (Claude Code's
+    UserPromptSubmit JSON payload), resolves the active session via
+    cwd, runs the four triggers, emits a single-line JSON hook
+    output or stays silent.
+  - `klyne config set plan {pro|max-5x|max-20x|team|custom}` —
+    drives the 5-hour-window denominator. Also `klyne config get
+    plan` and `klyne config show`.
+
+**Honest caveats surfaced in product:**
+
+  - The 5-hour cap is user-configured, not API-derived. Anthropic
+    does not expose remaining-window budget, so we measure
+    consumption directly and divide by the configured tier
+    (defaults calibrated against publicly reported community
+    numbers).
+  - The acceleration advisory says "trending toward your cap" —
+    never "you'll hit it in N turns." A specific projection waits
+    for v2 with an eval suite behind it.
+
+**Proof under `docs/proof/03-advisor/`** — four assertions:
+stale-context fires on topic shift and names the relevant subset;
+acceleration fires on doubling and points at the scoped handoff;
+five-hour-urgent fires at 75% with the consumption number; the
+transition rule fires exactly once, clears when the condition
+goes away, and re-fires on re-trip.
+
+**File changes:**
+
+  - `internal/contexthealth/relevance.go` — per-file Jaccard scoring
+  - `internal/contexthealth/acceleration.go` — uncached-delta detector
+  - `internal/contexthealth/five_hour_window.go` — cross-session aggregator
+  - `internal/contexthealth/transition.go` — fire-once state cache
+  - `internal/contexthealth/advisor.go` — priority-ordered renderer
+  - `internal/config/plan.go` — plan tier enum + cap lookup
+  - `internal/mcpserver/hook_install.go` — UserPromptSubmit hook installer
+  - `internal/mcpserver/handoff.go` — `scope=current-topic` rendering
+  - `cmd/klyne/advise.go` — hook subprocess
+  - `cmd/klyne/config.go` — config subcommand
+  - `docs/features/proactive-session-advisor.md` — design spec
+  - `docs/proof/03-advisor/` — reproducible proof
+
 
 ## Slice 6 — Reproducible proof + README rewrite + integration bug fixes
 
