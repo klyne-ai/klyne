@@ -6,7 +6,10 @@ klyne is a local-first session rescue layer for Claude Code and Codex power user
 
 No cloud. No proxy. No telemetry. Read-only by design.
 
-![The Context Loss Problem](docs/assets/readme/context-loss-problem.png)
+<video src="docs/assets/readme/The_Deterministic_Handoff__Escaping_the_Token_Trap_with_Klyne.mp4" controls muted playsinline width="100%">
+  Your browser does not support the video tag. Watch it here:
+  <a href="docs/assets/readme/The_Deterministic_Handoff__Escaping_the_Token_Trap_with_Klyne.mp4">The Deterministic Handoff — Escaping the Token Trap with Klyne</a>.
+</video>
 
 ---
 
@@ -127,11 +130,11 @@ It also removes any legacy `agentdeck` entry from those configs (klyne was renam
 
 | Slash command | What it runs |
 |---|---|
-| `/mcp__klyne__health` | Live `get_context_health` |
-| `/mcp__klyne__sessions` | Live `list_sessions` |
-| `/mcp__klyne__search` | Live `search_messages` (takes a `query` argument) |
-| `/mcp__klyne__handoff` | Live `generate_handoff` |
-| `/mcp__klyne__precompact` | Live `get_pre_compact_context` |
+| `/klyne:health` | Live `get_context_health` |
+| `/klyne:sessions` | Live `list_sessions` |
+| `/klyne:search` | Live `search_messages` (takes a `query` argument) |
+| `/klyne:handoff` | Live `generate_handoff` |
+| `/klyne:precompact` | Live `get_pre_compact_context` |
 
 The prompts run server-side and inject the result as user-message content — no AI roundtrip needed for the fetch.
 
