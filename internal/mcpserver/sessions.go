@@ -189,7 +189,7 @@ func claudeListSessionsForCWD(cwd string) ([]SessionCandidate, error) {
 // transcript path, derived from the storage root the path lives under.
 // Returns "" for paths outside any known CLI's storage tree (e.g. test
 // fixtures the user manually placed in /tmp). Used by LoadSnapshot
-// and findSessionByID to dispatch to the right parser.
+// and FindSessionByID to dispatch to the right parser.
 func CLIForPath(path string) connectors.CLI {
 	if path == "" {
 		return ""

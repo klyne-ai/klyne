@@ -129,7 +129,38 @@ func runMcpInstall(cmd *cobra.Command, platformFlag string) error {
 		fmt.Fprintf(cmd.OutOrStdout(), "%s: %s — %s\n",
 			report.Platform, report.Action, report.Path)
 	}
+
+	// Always attempt to install the advisor hook into Claude
+	// Code's settings.json so the proactive session advisor works
+	// out of the box. Codex CLI does not yet expose an equivalent
+	// hook surface; the web cockpit advisory is the v1 fallback
+	// for Codex-only users.
+	if shouldInstallAdvisorHook(targets) {
+		report, err := mcpserver.InstallAdvisorHook(exe)
+		if err != nil {
+			return fmt.Errorf("install advisor hook: %w", err)
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "advisor: %s — %s\n",
+			report.Action, report.Path)
+		fmt.Fprintln(cmd.OutOrStdout(),
+			"klyne: advisor active — you'll see inline warnings in Claude Code when sessions drift, accelerate, or approach your 5-hour cap.")
+		fmt.Fprintln(cmd.OutOrStdout(),
+			"To enable the 5-hour-window advisor, run: klyne config set plan <pro|max-5x|max-20x|team>")
+	}
 	return nil
+}
+
+// shouldInstallAdvisorHook reports whether the install should also
+// register the advisor hook. The hook lives inside Claude Code's
+// settings.json, so we only install when Claude is one of the
+// install targets.
+func shouldInstallAdvisorHook(targets []mcpserver.Platform) bool {
+	for _, p := range targets {
+		if p == mcpserver.PlatformClaude {
+			return true
+		}
+	}
+	return false
 }
 
 // resolveInstallTargets turns the --platform flag into the concrete

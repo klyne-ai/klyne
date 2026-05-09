@@ -50,7 +50,7 @@ func HandleGenerateHandoff(_ context.Context, _ *mcp.CallToolRequest, in Handoff
 	if err != nil {
 		return nil, HandoffOutput{}, fmt.Errorf("load snapshot: %w", err)
 	}
-	md := renderHandoff(snap)
+	md := renderHandoff(snap, parseHandoffScope(in.Scope))
 
 	out := HandoffOutput{
 		SessionID:   snap.SessionID,
