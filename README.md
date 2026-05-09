@@ -6,10 +6,7 @@ klyne is a local-first session rescue layer for Claude Code and Codex power user
 
 No cloud. No proxy. No telemetry. Read-only by design.
 
-<video src="docs/assets/readme/The_Deterministic_Handoff__Escaping_the_Token_Trap_with_Klyne.mp4" controls muted playsinline width="100%">
-  Your browser does not support the video tag. Watch it here:
-  <a href="docs/assets/readme/The_Deterministic_Handoff__Escaping_the_Token_Trap_with_Klyne.mp4">The Deterministic Handoff — Escaping the Token Trap with Klyne</a>.
-</video>
+[![Watch the explainer: The Deterministic Handoff — Escaping the Token Trap with Klyne](https://img.youtube.com/vi/2NglEGlq3Ns/maxresdefault.jpg)](https://youtu.be/2NglEGlq3Ns)
 
 ---
 
