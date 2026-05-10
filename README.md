@@ -13,9 +13,9 @@ No cloud. No proxy. No telemetry. Read-only by design.
 
 ---
 
-## The two problems klyne solves
+## What klyne solves
 
-These are the two pains every Claude Code / Codex power user hits weekly. **Each claim below is backed by a reproducible Go test** under [`docs/proof/`](docs/proof/) — run `make proof` and watch them pass against real fixtures.
+These are the pains every Claude Code / Codex power user hits weekly. **Each claim below is backed by a reproducible Go test** under [`docs/proof/`](docs/proof/) (or by a live CLI you can run against your own transcripts) — run `make proof` and watch them pass against real fixtures.
 
 ### 1. After `/compact`, your AI has lost context. klyne recovers it.
 
@@ -49,6 +49,16 @@ Each trigger fires *once* per state transition, then stays silent until it clear
 Zero AI calls in the path. The advisory line is ~60–100 tokens, fixed-cost — same model as CLAUDE.md.
 
 > **Proof:** [`docs/proof/03-advisor/`](docs/proof/03-advisor/) — four assertions covering each trigger plus the fire-once-per-transition contract. Run `make proof` and watch them pass.
+
+### 4. You can see how this session has grown — every turn, cached vs uncached, on demand.
+
+Most of klyne's tools fire on a trigger. The fourth surface is the one you reach for explicitly: `klyne tokens` (terminal) or `/klyne:tokens` (chat) renders a per-turn timeline of the active session — sparkline, time axis, and a Markdown table whose columns are `time`, `input tokens`, `% of context window`, `cached`, `uncached`. Every row makes the cache split explicit so `input == cached + uncached`, and the headline trajectory shows where the session started, peaked, and is now.
+
+By default the view spans the **entire session**, even if it has been idle for hours. Pass `--window=30m` / `--window=5h` / `--window=2h30m` for a fixed-lookback view (e.g. focused on the last rate-limit burn).
+
+Works for both Claude Code and Codex sessions. Codex's standalone `event_msg.token_count` records are projected onto the nearest-preceding assistant message at snapshot time so the timeline shape is identical across CLIs.
+
+> **Verify on your own machine:** run `klyne tokens` from inside any project that has at least one Claude or Codex session. The full output is documented (with verbatim Claude+Codex examples against real sessions) in [`docs/cli-review-2026-05-10.md`](docs/cli-review-2026-05-10.md).
 
 ---
 
@@ -148,7 +158,7 @@ It also removes any legacy `agentdeck` entry from those configs (klyne was renam
 | `search_messages` | Full-text search across every indexed session | "Where did we discuss X two weeks ago?" — requires daemon running |
 | `generate_handoff` | Deterministic Markdown handoff prompt for fresh sessions; optional `scope=current-topic` carries forward only relevant files | When you've hit your rate-limit and need to start over |
 | `get_pre_compact_context` | Recovers messages preceding the last `/compact` (Claude) or `replacement_history` (Codex) | When the compact summary lost important details |
-| `get_token_timeline` | Per-assistant-turn token usage over the last 5 hours (effective / cached / output) | "How much have I burned this session?" — surfaces a sparkline + table inline |
+| `get_token_timeline` | Per-turn token usage for one session — sparkline + table with `time / input / % of context / cached / uncached` columns. Spans the entire session by default; pass `window=30m` / `window=5h` / `window=2h30m` to narrow. | "How much of my context window have I burned, and how did it grow?" |
 
 ### Slash prompts (user-triggered via `/` menu in Claude Code)
 
@@ -159,7 +169,7 @@ It also removes any legacy `agentdeck` entry from those configs (klyne was renam
 | `/klyne:search` | Live `search_messages` (takes a `query` argument) |
 | `/klyne:handoff` | Live `generate_handoff` |
 | `/klyne:precompact` | Live `get_pre_compact_context` |
-| `/klyne:tokens` | Live `get_token_timeline` — ASCII sparkline + recent-turns table for the active session |
+| `/klyne:tokens` | Live `get_token_timeline` — ASCII sparkline + per-turn table for the active session, full lifetime by default |
 
 The prompts run server-side and inject the result as user-message content — no AI roundtrip needed for the fetch.
 
@@ -193,8 +203,8 @@ For Codex sessions, `pre_tokens` and `trigger` (manual/auto) fields are not expo
 | `klyne audit-sessions [--limit N]` | Compare klyne's stored metrics against raw JSONL ground truth across N most-recent sessions. The trust foundation. |
 | `klyne mcp install` | Register the MCP server in Claude Code + Codex configs AND install the `UserPromptSubmit` advisor hook. Idempotent. |
 | `klyne advise` | Hook entrypoint. You don't run this directly; Claude Code's hook runs it. |
-| `klyne config show / get / set` | Read or update `~/.klyne/config.toml`. Drives plan tier (5-hour cap denominator) and advisor on/off toggle. |
-| `klyne tokens [--session=ID] [--window=DURATION]` | Per-turn token timeline for one session: ASCII sparkline + table + freshness anchor. Default window 5h; pass `--window=30m` / `--window=24h` etc. Same output as `/klyne:tokens` in chat. |
+| `klyne config show / get / set <key>` | Read or update `~/.klyne/config.toml`. Two keys today: `plan` (`pro` / `max-5x` / `max-20x` / `team` / `custom --cap=N` — drives the 5-hour-window advisor's denominator) and `advisor` (`on` / `off` — kill switch for the UserPromptSubmit hook). |
+| `klyne tokens [--session=ID] [--window=DURATION]` | Per-turn token timeline for one session: sparkline, per-row `cached` / `uncached` columns, freshness anchor. **Spans the entire session by default**; pass `--window=30m` / `--window=5h` / `--window=2h30m` for a focused-lookback view. Same output as `/klyne:tokens` in chat. |
 
 A 2026-05-10 review of every command's behaviour against a real Claude session and a real Codex session, with verdicts on what's useful and what isn't, lives at [docs/cli-review-2026-05-10.md](docs/cli-review-2026-05-10.md).
 
@@ -227,12 +237,15 @@ Optional AI features (summary, title generation, etc.) require your own provider
 
 ## Quick start
 
-1. **Build:** `make build` (binary lands at `./bin/klyne`)
-2. **Install MCP:** `./bin/klyne mcp install`
-3. **Restart Claude Code** so it picks up the new MCP server + slash prompts
-4. **Run the daemon:** `./bin/klyne` (opens `http://127.0.0.1:7878` in your browser)
-5. **In a long session, ask Claude:** *"Use klyne to check whether this session should continue, compact, or restart."*
-6. **Verify trust:** `./bin/klyne audit-sessions --limit 20` (compares klyne's stored metrics against raw JSONL)
+1. **Build:** `make build` (binary lands at `./bin/klyne` with the real git version baked in)
+2. **Install MCP + advisor hook:** `./bin/klyne mcp install`. Idempotent — it registers the MCP server in Claude Code (`~/.claude.json`) and Codex (`~/.codex/config.toml`), AND wires the `UserPromptSubmit` advisor hook into `~/.claude/settings.json`.
+3. **(Optional) Pick your plan tier** so the 5-hour-window advisor has a denominator: `./bin/klyne config set plan max-5x` (or `pro` / `max-20x` / `team` / `custom --cap=<tokens>`). The other three advisor triggers work without this.
+4. **Restart Claude Code** so it picks up the new MCP server, slash prompts, and the advisor hook. (Existing MCP subprocesses keep their old binary in memory — you must restart for upgrades to take effect.)
+5. **Run the daemon:** `./bin/klyne` (opens `http://127.0.0.1:7878` in your browser).
+6. **Verify trust:** `./bin/klyne audit-sessions --limit 20` (compares klyne's stored metrics against raw JSONL — Claude DB + JSONL accuracy + Codex JSONL ground truth).
+7. **See your session's token usage at any time:** `./bin/klyne tokens` from inside any project, or `/klyne:tokens` inside a Claude Code chat. Default view is the entire session; `--window=Xh` narrows it.
+
+To silence the advisor for a noisy session (e.g. when you're developing klyne itself or otherwise know what you're doing), run `./bin/klyne config set advisor off`. Re-enable with `... advisor on`. The hook entry stays installed either way; the gate lives in `klyne advise` itself, so toggling is instant.
 
 ---
 
@@ -257,10 +270,12 @@ Optional AI features (summary, title generation, etc.) require your own provider
 2. ~~Cross-session full-text search~~ — ✅ shipped (slice 5)
 3. ~~Reproducible proof artifacts~~ — ✅ shipped (slice 6)
 4. ~~Proactive session advisor (UserPromptSubmit hook + scoped handoff)~~ — ✅ shipped (slice 7)
-5. **`suggest_session_name`** — generate a meaningful name from JSONL for Claude Code's "rename" UI (queued)
-6. **Labelled context-health eval suite** — move classifier + advisor thresholds from heuristics to data; unlocks predictive "exhaust in N turns" projection in v2
-7. **Release binaries** + Homebrew tap + one-command installer
-8. Optional [code-review-graph](https://github.com/tirth8205/code-review-graph) enrichment when `.code-review-graph/` exists in the repo
+5. ~~Token-usage timeline (`klyne tokens` CLI + `/klyne:tokens` slash) with cached/uncached split, full-session default view, and Codex parity~~ — ✅ shipped (slice 8). Also: real version string via `-ldflags`, advisor on/off toggle, Codex parser warning suppression.
+6. **`suggest_session_name`** — generate a meaningful name from JSONL for Claude Code's "rename" UI (queued)
+7. **Web cockpit line graph** — port the `klyne tokens` data shape to a Svelte chart on the session-detail page so non-CLI users see the same trajectory.
+8. **Labelled context-health eval suite** — move classifier + advisor thresholds from heuristics to data; unlocks predictive "exhaust in N turns" projection in v2.
+9. **Release binaries** + Homebrew tap + one-command installer.
+10. Optional [code-review-graph](https://github.com/tirth8205/code-review-graph) enrichment when `.code-review-graph/` exists in the repo.
 
 ---
 
