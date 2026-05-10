@@ -86,6 +86,15 @@ When Claude Code runs /compact, the original turns are replaced by a summary the
 For Codex sessions, the recovery uses the embedded payload.replacement_history that Codex writes inside its compacted event. Trigger and pre_tokens are not exposed for Codex (it does not record either).`,
 	}, HandleGetPreCompactContext)
 
+	mcp.AddTool(srv, &mcp.Tool{
+		Name: "get_token_timeline",
+		Description: `Return the per-assistant-turn token usage for the active session over the last 5 hours (or window_hours if provided).
+
+Returns one row per qualifying assistant turn with timestamp, effective input (TokensIn - CachedReadTokens), total input, cached read/write, and output tokens — ready to power either an inline ASCII sparkline (slash prompt /klyne:tokens) or a real line chart in the web cockpit.
+
+When the user has configured a plan tier (klyne config set plan <tier>), the response also reports total uncached input as a percentage of that plan's 5-hour cap. Same disambiguation behaviour as get_context_health.`,
+	}, HandleGetTokenTimeline)
+
 	// Live MCP prompts. Each prompt parallels one of the tools above
 	// and surfaces in Claude Code's slash menu as
 	// /mcp__klyne__<name>. Handlers run server-side and return
@@ -138,6 +147,16 @@ For Codex sessions, the recovery uses the embedded payload.replacement_history t
 			{Name: "cwd", Description: "Override the working directory used to resolve the session."},
 		},
 	}, PromptPreCompactHandler)
+
+	srv.AddPrompt(&mcp.Prompt{
+		Name:        "tokens",
+		Title:       "Token usage timeline",
+		Description: "Show the per-assistant-turn token usage for the active session as an ASCII sparkline plus a recent-turns table. Defaults to the last 5 hours.",
+		Arguments: []*mcp.PromptArgument{
+			{Name: "cwd", Description: "Override the working directory used to resolve the session."},
+			{Name: "window_hours", Description: "Lookback in hours (default 5; max 24)."},
+		},
+	}, PromptTokenTimelineHandler)
 
 	return srv
 }

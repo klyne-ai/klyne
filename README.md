@@ -148,6 +148,7 @@ It also removes any legacy `agentdeck` entry from those configs (klyne was renam
 | `search_messages` | Full-text search across every indexed session | "Where did we discuss X two weeks ago?" — requires daemon running |
 | `generate_handoff` | Deterministic Markdown handoff prompt for fresh sessions; optional `scope=current-topic` carries forward only relevant files | When you've hit your rate-limit and need to start over |
 | `get_pre_compact_context` | Recovers messages preceding the last `/compact` (Claude) or `replacement_history` (Codex) | When the compact summary lost important details |
+| `get_token_timeline` | Per-assistant-turn token usage over the last 5 hours (effective / cached / output) | "How much have I burned this session?" — surfaces a sparkline + table inline |
 
 ### Slash prompts (user-triggered via `/` menu in Claude Code)
 
@@ -158,6 +159,7 @@ It also removes any legacy `agentdeck` entry from those configs (klyne was renam
 | `/klyne:search` | Live `search_messages` (takes a `query` argument) |
 | `/klyne:handoff` | Live `generate_handoff` |
 | `/klyne:precompact` | Live `get_pre_compact_context` |
+| `/klyne:tokens` | Live `get_token_timeline` — ASCII sparkline + recent-turns table for the active session |
 
 The prompts run server-side and inject the result as user-message content — no AI roundtrip needed for the fetch.
 

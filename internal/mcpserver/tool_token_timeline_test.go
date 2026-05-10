@@ -1,0 +1,153 @@
+package mcpserver
+
+import (
+	"context"
+	"fmt"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/klyne-ai/klyne/internal/contexthealth"
+)
+
+// timelineLine renders one Claude Code assistant JSONL line at ts
+// with the given input/cached-read counts. Mirrors the shape used
+// by existing tests so the parser path is exercised end-to-end.
+func timelineLine(sessionID string, ts time.Time, inputTokens, cacheRead int64) string {
+	return fmt.Sprintf(
+		`{"type":"assistant","uuid":"u-%d","sessionId":%q,"timestamp":%q,"cwd":"/tmp/proj","message":{"role":"assistant","content":[{"type":"text","text":"reply"}],"id":"msg-%d","model":"claude-sonnet-4.5","usage":{"input_tokens":%d,"output_tokens":1,"cache_read_input_tokens":%d,"cache_creation_input_tokens":0}}}`,
+		ts.UnixMilli(), sessionID, ts.UTC().Format(time.RFC3339Nano), ts.UnixMilli(), inputTokens, cacheRead,
+	)
+}
+
+func TestHandleGetTokenTimeline_HappyPath(t *testing.T) {
+	home := withFakeHome(t)
+	cwd := "/tmp/timeline-ok"
+	dir := filepath.Join(home, ".claude", "projects", EncodeCWD(cwd))
+
+	now := time.Now()
+	writeJSONL(t, dir, "tl.jsonl",
+		timelineLine("sess-tl", now.Add(-30*time.Minute), 5_000, 1_000),
+		timelineLine("sess-tl", now.Add(-20*time.Minute), 9_000, 1_000),
+		timelineLine("sess-tl", now.Add(-10*time.Minute), 25_000, 1_000),
+	)
+
+	_, out, err := HandleGetTokenTimeline(context.Background(), nil, TokenTimelineInput{CWD: cwd})
+	if err != nil {
+		t.Fatalf("HandleGetTokenTimeline: %v", err)
+	}
+	if out.Ambiguous {
+		t.Fatalf("unexpected ambiguous result")
+	}
+	if out.SessionID != "sess-tl" {
+		t.Fatalf("SessionID=%q, want sess-tl", out.SessionID)
+	}
+	if len(out.Points) != 3 {
+		t.Fatalf("Points=%d, want 3", len(out.Points))
+	}
+	// Effective per turn: input (since cache_creation=0).
+	wantPeak := int64(25_000)
+	if out.PeakEffective != wantPeak {
+		t.Fatalf("PeakEffective=%d, want %d", out.PeakEffective, wantPeak)
+	}
+	wantTotal := int64(5_000 + 9_000 + 25_000)
+	if out.TotalEffective != wantTotal {
+		t.Fatalf("TotalEffective=%d, want %d", out.TotalEffective, wantTotal)
+	}
+}
+
+func TestFormatTokenTimelineAsMarkdown_RendersSparklineAndTable(t *testing.T) {
+	now := time.Now().UnixMilli()
+	out := TokenTimelineOutput{
+		SessionID:     "sess-fmt",
+		WindowStartMs: now - int64(5*time.Hour/time.Millisecond),
+		WindowEndMs:   now,
+		Points: []contexthealth.TimelinePoint{
+			{TsMs: now - 30*60_000, EffectiveInput: 5_000, TotalInput: 6_000, CachedReadTokens: 1_000, OutputTokens: 200},
+			{TsMs: now - 20*60_000, EffectiveInput: 9_000, TotalInput: 10_000, CachedReadTokens: 1_000, OutputTokens: 250},
+			{TsMs: now - 10*60_000, EffectiveInput: 25_000, TotalInput: 26_000, CachedReadTokens: 1_000, OutputTokens: 300},
+		},
+		TotalEffective: 39_000,
+		PeakEffective:  25_000,
+		CapEffective:   100_000,
+		PctUsed:        39,
+		PlanTier:       "max-5x",
+	}
+	md := formatTokenTimelineAsMarkdown(out)
+	// Sparkline block exists.
+	if !strings.Contains(md, "```") {
+		t.Fatalf("expected fenced block for sparkline\n%s", md)
+	}
+	// Table header present.
+	if !strings.Contains(md, "uncached in") {
+		t.Fatalf("expected 'uncached in' in table header\n%s", md)
+	}
+	// Summary line includes percentage.
+	if !strings.Contains(md, "39%") {
+		t.Fatalf("expected '39%%' in summary\n%s", md)
+	}
+	if !strings.Contains(md, "max-5x") {
+		t.Fatalf("expected plan tier in summary\n%s", md)
+	}
+	// Peak token count rendered.
+	if !strings.Contains(md, "25K") {
+		t.Fatalf("expected '25K' for peak in sparkline footer\n%s", md)
+	}
+}
+
+func TestFormatTokenTimelineAsMarkdown_NoPlanTierHidesPercentage(t *testing.T) {
+	now := time.Now().UnixMilli()
+	out := TokenTimelineOutput{
+		SessionID:     "sess-noplan",
+		WindowStartMs: now - 60_000,
+		WindowEndMs:   now,
+		Points: []contexthealth.TimelinePoint{
+			{TsMs: now - 30_000, EffectiveInput: 5_000, TotalInput: 5_000},
+		},
+		TotalEffective: 5_000,
+		PeakEffective:  5_000,
+	}
+	md := formatTokenTimelineAsMarkdown(out)
+	if strings.Contains(md, "%") && !strings.Contains(md, "klyne config set plan") {
+		t.Fatalf("unset plan should not surface a percentage; got\n%s", md)
+	}
+	if !strings.Contains(md, "klyne config set plan") {
+		t.Fatalf("expected the plan-tier nudge in the summary\n%s", md)
+	}
+}
+
+func TestRenderSparkline_AllZeroIsBlank(t *testing.T) {
+	got := renderSparkline([]int64{0, 0, 0, 0})
+	if got != "    " {
+		t.Fatalf("got %q, want all-spaces", got)
+	}
+}
+
+func TestRenderSparkline_RisingShape(t *testing.T) {
+	got := renderSparkline([]int64{1, 2, 3, 8})
+	// Must end with the highest block.
+	runes := []rune(got)
+	if runes[len(runes)-1] != '█' {
+		t.Fatalf("expected last rune to be full block; got %q", got)
+	}
+}
+
+func TestBucketValues_DownsamplesWhenLonger(t *testing.T) {
+	in := []int64{1, 1, 1, 1, 9, 9, 9, 9}
+	out := bucketValues(in, 2)
+	if len(out) != 2 {
+		t.Fatalf("len=%d, want 2", len(out))
+	}
+	if out[0] != 1 || out[1] != 9 {
+		t.Fatalf("out=%v, want [1 9]", out)
+	}
+}
+
+func TestBucketValues_UnchangedWhenShorter(t *testing.T) {
+	in := []int64{1, 2, 3}
+	out := bucketValues(in, 10)
+	if len(out) != 3 || out[0] != 1 || out[2] != 3 {
+		t.Fatalf("out=%v, want unchanged", out)
+	}
+}

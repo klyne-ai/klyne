@@ -182,6 +182,33 @@ func formatSearchAsMarkdown(out SearchOutput) string {
 	return b.String()
 }
 
+// PromptTokenTimelineHandler implements /mcp__klyne__tokens.
+// Live: invokes get_token_timeline and renders the ASCII sparkline
+// + recent-turns table inline so the user can eyeball the trend
+// without leaving Claude Code's chat.
+func PromptTokenTimelineHandler(ctx context.Context, req *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+	cwd, err := promptCWD(req)
+	if err != nil {
+		return nil, err
+	}
+	in := TokenTimelineInput{CWD: cwd}
+	if req != nil && req.Params != nil {
+		if v := strings.TrimSpace(req.Params.Arguments["window_hours"]); v != "" {
+			if n, err := strconv.Atoi(v); err == nil {
+				in.WindowHours = n
+			}
+		}
+	}
+	_, out, err := HandleGetTokenTimeline(ctx, nil, in)
+	if err != nil {
+		return nil, err
+	}
+	return userPromptResult(
+		"Token usage timeline for the active session",
+		formatTokenTimelineAsMarkdown(out),
+	), nil
+}
+
 // PromptPreCompactHandler implements /mcp__klyne__precompact.
 // Live: recovers messages preceding the last /compact event (Claude)
 // or replacement_history (Codex). When no compact has happened, the
