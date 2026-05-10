@@ -208,9 +208,13 @@ func PromptTokenTimelineHandler(ctx context.Context, req *mcp.GetPromptRequest) 
 	if err != nil {
 		return nil, err
 	}
+	// Slash-prompt surface uses the COMPACT one-line form. Pasting
+	// a multi-row table into chat costs the user input tokens the
+	// AI then has to parse and summarise anyway. The full table
+	// is available in the terminal via `klyne tokens`.
 	return userPromptResult(
-		"Token usage timeline for the active session",
-		formatTokenTimelineAsMarkdown(out),
+		"Token usage summary for the active session",
+		FormatTokenTimelineCompact(out),
 	), nil
 }
 

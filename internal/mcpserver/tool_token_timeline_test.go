@@ -251,6 +251,64 @@ func TestFormatTokenTimeline_LongSessionShowsGrowthInTable(t *testing.T) {
 	}
 }
 
+func TestFormatTokenTimelineCompact_OneLine(t *testing.T) {
+	now := time.Now().UnixMilli()
+	out := TokenTimelineOutput{
+		SessionID:     "abcd1234-0000-0000-0000-000000000000",
+		Model:         "claude-opus-4-7",
+		ContextWindow: 1_000_000,
+		WindowStartMs: now - int64(5*time.Hour/time.Millisecond),
+		WindowEndMs:   now,
+		Points: []contexthealth.TimelinePoint{
+			{TsMs: now - 60_000, TotalInput: 53_600, EffectiveInput: 33_900},
+			{TsMs: now, TotalInput: 470_400, EffectiveInput: 359},
+		},
+		FirstInput:   53_600,
+		LatestInput:  470_400,
+		PeakInput:    470_400,
+		PctOfContext: 47,
+	}
+	got := FormatTokenTimelineCompact(out)
+	if strings.Count(got, "\n") != 0 {
+		t.Fatalf("compact output must be a single line; got\n%s", got)
+	}
+	mustHave := []string{"abcd1234", "470.4K", "1M", "47%", "53.6K", "as of"}
+	for _, frag := range mustHave {
+		if !strings.Contains(got, frag) {
+			t.Fatalf("compact output missing %q\n%s", frag, got)
+		}
+	}
+	// Compact form must NOT include the table or sparkline noise.
+	for _, banned := range []string{"|", "▁", "▂", "uncached", "10×"} {
+		if strings.Contains(got, banned) {
+			t.Fatalf("compact output should not contain %q\n%s", banned, got)
+		}
+	}
+}
+
+func TestFormatTokenTimelineCompact_NoSession(t *testing.T) {
+	got := FormatTokenTimelineCompact(TokenTimelineOutput{})
+	if !strings.Contains(got, "no Claude Code session") {
+		t.Fatalf("expected no-session message; got %q", got)
+	}
+	if strings.Count(got, "\n") != 0 {
+		t.Fatalf("must stay single line; got\n%s", got)
+	}
+}
+
+func TestFormatTokenTimelineCompact_Ambiguous(t *testing.T) {
+	got := FormatTokenTimelineCompact(TokenTimelineOutput{
+		Ambiguous:  true,
+		Candidates: []CandidateRow{{}, {}, {}},
+	})
+	if !strings.Contains(got, "3 candidate sessions") {
+		t.Fatalf("expected ambiguity message with count; got %q", got)
+	}
+	if strings.Count(got, "\n") != 0 {
+		t.Fatalf("must stay single line; got\n%s", got)
+	}
+}
+
 func TestFormatAge(t *testing.T) {
 	cases := []struct {
 		ms   int64

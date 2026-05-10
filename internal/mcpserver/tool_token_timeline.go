@@ -165,10 +165,60 @@ func HandleGetTokenTimeline(ctx context.Context, _ *mcp.CallToolRequest, in Toke
 }
 
 // FormatTokenTimelineAsMarkdown is the exported alias used by the
-// `klyne tokens` CLI subcommand. The slash prompt handler still
-// calls the unexported formatTokenTimelineAsMarkdown.
+// `klyne tokens` CLI subcommand for the full table-rendered view.
+// Returns the verbose Markdown form: headline, sparkline, per-turn
+// table, footnote.
 func FormatTokenTimelineAsMarkdown(out TokenTimelineOutput) string {
 	return formatTokenTimelineAsMarkdown(out)
+}
+
+// FormatTokenTimelineCompact returns a single-line summary suitable
+// for the slash-prompt surface. Pasting a multi-row table into the
+// chat would burn input tokens for content the user can read more
+// cleanly via the CLI; one line is enough for the AI to respond
+// to and gives the user a glance-able status.
+//
+// Format: "klyne tokens [abcd1234]: 470K / 1M (47%) · grew 53K → 470K
+// over 504 turns · as of 13:23 IST"
+//
+// Falls back to a similarly-shaped line when ContextWindow is
+// unknown, ambiguous results, or the session is empty.
+func FormatTokenTimelineCompact(out TokenTimelineOutput) string {
+	if out.Ambiguous {
+		return fmt.Sprintf("klyne tokens: %d candidate sessions in this cwd. Re-run with --session=<id>.",
+			len(out.Candidates))
+	}
+	if len(out.Points) == 0 {
+		if out.SessionID == "" {
+			return "klyne tokens: no Claude Code session found for this working directory."
+		}
+		return fmt.Sprintf("klyne tokens [%s]: no assistant turns within the last %s.",
+			short(out.SessionID), formatWindow(out.WindowStartMs, out.WindowEndMs))
+	}
+
+	loc := time.Local
+	tzName, _ := time.Now().In(loc).Zone()
+	if tzName == "" {
+		tzName = "local"
+	}
+	latestPt := out.Points[len(out.Points)-1]
+	latestWhen := time.UnixMilli(latestPt.TsMs).In(loc).Format("15:04")
+
+	var prefix string
+	if out.ContextWindow > 0 {
+		prefix = fmt.Sprintf("%s / %s (%s)",
+			humanTokens(out.LatestInput),
+			humanTokens(out.ContextWindow),
+			formatPct(out.PctOfContext))
+	} else {
+		prefix = humanTokens(out.LatestInput)
+	}
+
+	growth := fmt.Sprintf("grew %s → %s over %d turns",
+		humanTokens(out.FirstInput), humanTokens(out.LatestInput), len(out.Points))
+
+	return fmt.Sprintf("klyne tokens [%s]: %s · %s · as of %s %s.",
+		short(out.SessionID), prefix, growth, latestWhen, tzName)
 }
 
 // formatTokenTimelineAsMarkdown renders the timeline for the slash
