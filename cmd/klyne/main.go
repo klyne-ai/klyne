@@ -13,9 +13,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// version is hardcoded for the W0 bootstrap. W17 (release) wires this
-// to a build-time -ldflags value.
-const version = "v0.0.0-bootstrap"
+// version defaults to the W0 bootstrap string and is overridden at build
+// time via `-ldflags "-X main.version=..."` (see Makefile build target).
+// Plain `go build` keeps the bootstrap default; `make build` injects the
+// real `git describe` output.
+var version = "v0.0.0-bootstrap"
 
 func main() {
 	if err := newRootCmd().Execute(); err != nil {

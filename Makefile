@@ -4,8 +4,14 @@
 # leaving CGO on with the macOS 26 + Go 1.21 internal linker can produce
 # binaries dyld rejects ("missing LC_UUID load command"). Bump to Go 1.23+
 # and drop this flag once the toolchain catches up to the spec.
+#
+# VERSION is injected via -ldflags so `klyne doctor` / `klyne --version`
+# reports the commit the binary was built from. Plain `go build` (without
+# this Makefile) keeps the v0.0.0-bootstrap default in cmd/klyne/main.go.
+VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+
 build: build-ui
-	GOTOOLCHAIN=local CGO_ENABLED=0 go build -o bin/klyne ./cmd/klyne
+	GOTOOLCHAIN=local CGO_ENABLED=0 go build -ldflags "-X main.version=$(VERSION)" -o bin/klyne ./cmd/klyne
 
 # Build the SvelteKit UI if ui/package.json exists.
 # The UI build output is embedded via embed.FS (ui/build/).
