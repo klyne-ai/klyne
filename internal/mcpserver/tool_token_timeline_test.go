@@ -151,3 +151,103 @@ func TestBucketValues_UnchangedWhenShorter(t *testing.T) {
 		t.Fatalf("out=%v, want unchanged", out)
 	}
 }
+
+func TestResolveWindowMs(t *testing.T) {
+	const (
+		oneMin  = int64(60_000)
+		oneHour = int64(60 * 60_000)
+		thirty  = int64(30 * 60_000)
+		def5h   = int64(5 * oneHour)
+		max24h  = int64(24 * oneHour)
+	)
+	cases := []struct {
+		name   string
+		win    string
+		hours  int
+		wantMs int64
+	}{
+		{"default", "", 0, def5h},
+		{"hours field", "", 2, 2 * oneHour},
+		{"duration string 30m", "30m", 0, thirty},
+		{"duration string 1h30m", "1h30m", 0, oneHour + thirty},
+		{"duration string preferred over hours", "30m", 99, thirty},
+		{"clamp to 24h", "100h", 0, max24h},
+		{"clamp to 1m", "1s", 0, oneMin},
+		{"invalid string falls back to hours", "weird", 3, 3 * oneHour},
+		{"invalid string and no hours falls back to default", "weird", 0, def5h},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := resolveWindowMs(tc.win, tc.hours); got != tc.wantMs {
+				t.Fatalf("got %d, want %d", got, tc.wantMs)
+			}
+		})
+	}
+}
+
+func TestRenderTimeAxis_AlignsToColumns(t *testing.T) {
+	end := time.Now().UnixMilli()
+	start := end - int64(30*time.Minute/time.Millisecond)
+	got := renderTimeAxis(start, end, 40)
+	if len(got) != 40 {
+		t.Fatalf("len=%d, want 40 (got %q)", len(got), got)
+	}
+	if !strings.HasPrefix(got, "30m ago") {
+		t.Fatalf("expected '30m ago' prefix, got %q", got)
+	}
+	if !strings.HasSuffix(got, "now") {
+		t.Fatalf("expected 'now' suffix, got %q", got)
+	}
+}
+
+func TestDurationLabel(t *testing.T) {
+	cases := []struct {
+		d    time.Duration
+		want string
+	}{
+		{30 * time.Minute, "30m"},
+		{2 * time.Hour, "2h"},
+		{2*time.Hour + 30*time.Minute, "2h30m"},
+		{0, "0s"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.want, func(t *testing.T) {
+			if got := durationLabel(tc.d); got != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestHandleGetTokenTimeline_HonorsWindowDuration(t *testing.T) {
+	home := withFakeHome(t)
+	cwd := "/tmp/timeline-window"
+	dir := filepath.Join(home, ".claude", "projects", EncodeCWD(cwd))
+
+	now := time.Now()
+	writeJSONL(t, dir, "tlw.jsonl",
+		// Outside a 30-minute window — older than 30m.
+		timelineLine("sess-tlw", now.Add(-90*time.Minute), 5_000, 0),
+		// Inside a 30-minute window.
+		timelineLine("sess-tlw", now.Add(-15*time.Minute), 9_000, 0),
+		timelineLine("sess-tlw", now.Add(-5*time.Minute), 25_000, 0),
+	)
+
+	// Default 5h window: includes all three.
+	_, full, err := HandleGetTokenTimeline(context.Background(), nil, TokenTimelineInput{CWD: cwd})
+	if err != nil {
+		t.Fatalf("default: %v", err)
+	}
+	if len(full.Points) != 3 {
+		t.Fatalf("default window points=%d, want 3", len(full.Points))
+	}
+
+	// 30-minute window: drops the oldest.
+	_, scoped, err := HandleGetTokenTimeline(context.Background(), nil, TokenTimelineInput{CWD: cwd, Window: "30m"})
+	if err != nil {
+		t.Fatalf("30m: %v", err)
+	}
+	if len(scoped.Points) != 2 {
+		t.Fatalf("30m window points=%d, want 2 (got %+v)", len(scoped.Points), scoped.Points)
+	}
+}

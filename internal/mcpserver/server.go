@@ -151,10 +151,11 @@ When the user has configured a plan tier (klyne config set plan <tier>), the res
 	srv.AddPrompt(&mcp.Prompt{
 		Name:        "tokens",
 		Title:       "Token usage timeline",
-		Description: "Show the per-assistant-turn token usage for the active session as an ASCII sparkline plus a recent-turns table. Defaults to the last 5 hours.",
+		Description: "Show the per-assistant-turn token usage for the active session as an ASCII sparkline plus a recent-turns table. Defaults to the last 5 hours; pass window=30m for a 30-minute view.",
 		Arguments: []*mcp.PromptArgument{
 			{Name: "cwd", Description: "Override the working directory used to resolve the session."},
-			{Name: "window_hours", Description: "Lookback in hours (default 5; max 24)."},
+			{Name: "window", Description: "Lookback as a Go duration string (e.g. \"30m\", \"5h\", \"2h30m\"). Min 1m, max 24h."},
+			{Name: "window_hours", Description: "Convenience integer hours (default 5; max 24); ignored when window is set."},
 		},
 	}, PromptTokenTimelineHandler)
 

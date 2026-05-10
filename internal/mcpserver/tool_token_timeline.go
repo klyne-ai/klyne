@@ -31,10 +31,14 @@ import (
 type TokenTimelineInput struct {
 	SessionID string `json:"session_id,omitempty" jsonschema:"explicit Claude Code session id; defaults to latest session in current working directory"`
 	CWD       string `json:"cwd,omitempty" jsonschema:"override the working directory used to resolve the latest session"`
-	// WindowHours optionally overrides the default 5-hour lookback.
-	// Values <= 0 fall back to the default. Capped at 24h to keep
-	// the rendered table sensible.
-	WindowHours int `json:"window_hours,omitempty" jsonschema:"lookback in hours (default 5; max 24)"`
+	// Window is a Go duration string for the lookback ("30m", "1h",
+	// "2h30m", "5h"). Takes precedence over WindowHours when set.
+	// Min 1m, max 24h; values outside the range are clamped.
+	Window string `json:"window,omitempty" jsonschema:"lookback as a Go duration string (e.g. \"30m\", \"5h\", \"2h30m\"); default 5h, min 1m, max 24h"`
+	// WindowHours is the integer-hours convenience field kept so
+	// callers that prefer "give me the last N hours" don't need to
+	// build a duration string. Ignored when Window is set.
+	WindowHours int `json:"window_hours,omitempty" jsonschema:"convenience integer hours (default 5; max 24); ignored when window is set"`
 }
 
 // TokenTimelineOutput mirrors contexthealth.TokenTimeline plus the
@@ -102,14 +106,7 @@ func HandleGetTokenTimeline(ctx context.Context, _ *mcp.CallToolRequest, in Toke
 		tier = string(cfg.Plan.Tier)
 	}
 
-	windowHours := in.WindowHours
-	if windowHours <= 0 {
-		windowHours = 5
-	}
-	if windowHours > 24 {
-		windowHours = 24
-	}
-	windowMs := int64(windowHours) * int64(time.Hour/time.Millisecond)
+	windowMs := resolveWindowMs(in.Window, in.WindowHours)
 	now := time.Now().UnixMilli()
 
 	tl := contexthealth.ComputeTimeline(snap.Messages, now, windowMs, cap)
@@ -163,12 +160,17 @@ func formatTokenTimelineAsMarkdown(out TokenTimelineOutput) string {
 
 	// ASCII sparkline. Render the entire window down-sampled to
 	// `sparklineCols` columns so the chat width stays predictable.
+	// Adds a small time axis underneath ("Xh ago … now") so the
+	// reader can place the curve in time without scanning the
+	// table.
 	values := effectiveSeries(out.Points)
 	b.WriteString("```\n")
 	b.WriteString(renderSparkline(values))
 	b.WriteString("\n")
-	fmt.Fprintf(&b, "min ~%s · peak ~%s\n",
-		humanTokens(minInt64(values)), humanTokens(out.PeakEffective))
+	b.WriteString(renderTimeAxis(out.WindowStartMs, out.WindowEndMs, sparklineCols))
+	b.WriteString("\n")
+	fmt.Fprintf(&b, "total ~%s · peak ~%s · min ~%s\n",
+		humanTokens(out.TotalEffective), humanTokens(out.PeakEffective), humanTokens(minInt64(values)))
 	b.WriteString("```\n\n")
 
 	// Recent-turns table (last 10 or fewer).
@@ -284,6 +286,41 @@ func bucketValues(values []int64, cols int) []int64 {
 	return out
 }
 
+// renderTimeAxis prints "Xh ago" / "Xm ago" left-aligned under
+// the sparkline's first column and "now" right-aligned under its
+// last column. Width matches sparklineCols so the labels line up
+// visually with the chart above.
+func renderTimeAxis(startMs, endMs int64, cols int) string {
+	d := time.Duration(endMs-startMs) * time.Millisecond
+	left := durationLabel(d) + " ago"
+	right := "now"
+	if cols < len(left)+len(right)+1 {
+		// Sparkline is too narrow for both labels — drop the right
+		// edge rather than truncating the left.
+		return left
+	}
+	pad := cols - len(left) - len(right)
+	return left + strings.Repeat(" ", pad) + right
+}
+
+// durationLabel renders a time.Duration as "30m" / "2h" / "5h" —
+// minute resolution under an hour, hour resolution otherwise.
+// Mirrors what users typed in if they passed a window argument.
+func durationLabel(d time.Duration) string {
+	if d <= 0 {
+		return "0s"
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	}
+	if d%time.Hour == 0 {
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	}
+	h := int(d / time.Hour)
+	m := int((d % time.Hour) / time.Minute)
+	return fmt.Sprintf("%dh%dm", h, m)
+}
+
 // minInt64 returns the smallest value in xs, or 0 for empty.
 func minInt64(xs []int64) int64 {
 	if len(xs) == 0 {
@@ -330,5 +367,39 @@ func formatWindow(startMs, endMs int64) string {
 	if d <= 0 {
 		return "0s"
 	}
+	// Sub-hour windows are most useful at minute resolution; longer
+	// ones clamp to minutes too so "5h0m" reads cleanly.
 	return d.Truncate(time.Minute).String()
+}
+
+// resolveWindowMs decides the lookback duration in milliseconds.
+// Resolution order: explicit Go duration string → integer hours
+// convenience field → 5h default. Values outside [1m, 24h] are
+// clamped — sub-minute windows produce empty timelines on real
+// sessions and silently surprise the user; >24h windows would
+// pull in too many sessions for the slash output to stay readable.
+func resolveWindowMs(window string, hours int) int64 {
+	const (
+		minWindow = time.Minute
+		maxWindow = 24 * time.Hour
+		defWindow = 5 * time.Hour
+	)
+	clamp := func(d time.Duration) time.Duration {
+		if d < minWindow {
+			return minWindow
+		}
+		if d > maxWindow {
+			return maxWindow
+		}
+		return d
+	}
+	if window != "" {
+		if d, err := time.ParseDuration(strings.TrimSpace(window)); err == nil && d > 0 {
+			return int64(clamp(d) / time.Millisecond)
+		}
+	}
+	if hours > 0 {
+		return int64(clamp(time.Duration(hours)*time.Hour) / time.Millisecond)
+	}
+	return int64(defWindow / time.Millisecond)
 }

@@ -193,6 +193,11 @@ func PromptTokenTimelineHandler(ctx context.Context, req *mcp.GetPromptRequest) 
 	}
 	in := TokenTimelineInput{CWD: cwd}
 	if req != nil && req.Params != nil {
+		// Prefer the explicit duration string ("30m", "2h"); fall
+		// back to the integer-hours convenience field.
+		if v := strings.TrimSpace(req.Params.Arguments["window"]); v != "" {
+			in.Window = v
+		}
 		if v := strings.TrimSpace(req.Params.Arguments["window_hours"]); v != "" {
 			if n, err := strconv.Atoi(v); err == nil {
 				in.WindowHours = n
