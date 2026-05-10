@@ -101,6 +101,20 @@ func loadClaudeSnapshot(path string) (*SessionSnapshot, error) {
 // Codex connector instance (per-file state stays isolated from the
 // global daemon). ContextFillPct uses audit.LatestCodexTokens, which
 // returns Codex's already-cache-inclusive input_tokens.
+//
+// Codex's JSONL stores per-turn token usage in standalone event_msg
+// `token_count` lines, separate from the assistant `response_item.message`
+// lines that report what the model said. The streaming parser emits the
+// token data as a synthetic system-role message (so the daemon's
+// session-counter accumulator stays correct) — but the timeline aggregator
+// only looks at assistant turns with TokensIn > 0. This snapshot loader
+// runs a post-pass that projects each system-role token_count delta onto
+// the chronologically-nearest preceding assistant message, so the
+// timeline sees per-turn token usage on the same axis it does for Claude.
+//
+// The post-pass does NOT remove the system-role messages — leaving them
+// in place keeps the classifier's hidden-message-ratio signal honest and
+// preserves the audit's view of the file.
 func loadCodexSnapshot(path string) (*SessionSnapshot, error) {
 	f, err := os.Open(path) //nolint:gosec
 	if err != nil {
@@ -133,6 +147,7 @@ func loadCodexSnapshot(path string) (*SessionSnapshot, error) {
 		snap.Messages = append(snap.Messages, msg)
 	}
 	snap.MsgCount = len(snap.Messages)
+	projectCodexTokensOntoAssistants(snap.Messages)
 
 	tokens, err := audit.LatestCodexTokens(path)
 	if err == nil && tokens.Tokens > 0 {
@@ -143,4 +158,67 @@ func loadCodexSnapshot(path string) (*SessionSnapshot, error) {
 		}
 	}
 	return snap, nil
+}
+
+// projectCodexTokensOntoAssistants walks msgs (in chronological order)
+// and copies per-turn token data from each token_count system-role
+// message onto the immediately-preceding assistant message — making
+// Codex assistant turns look the same shape (TokensIn > 0, etc.) as
+// Claude assistant turns to the timeline aggregator.
+//
+// Mutates msgs in place. Each system-role message is consumed at most
+// once (it never re-decorates a more-recent assistant message). When
+// there is no preceding assistant message yet, the system-role token
+// row is left as-is — the timeline already filters non-assistant rows
+// out, and a leading token_count without a paired assistant turn
+// carries no useful information for the per-turn view anyway.
+//
+// Why DELTA == per-turn: Codex's parser emits the system-role message
+// with TokensIn = total_token_usage[n].input_tokens -
+// total_token_usage[n-1].input_tokens, which is mathematically equal to
+// last_token_usage[n].input_tokens — i.e. the prefix the model received
+// for that single call. That is exactly the value the per-turn timeline
+// renderer expects (matches Claude's per-turn usage.input_tokens).
+func projectCodexTokensOntoAssistants(msgs []*connectors.Message) {
+	// Index of the most recent assistant message that has not yet been
+	// decorated with token data — once we attach a snapshot we advance
+	// this so the same assistant message can't accumulate multiple
+	// snapshots.
+	asstIdx := -1
+	for i, m := range msgs {
+		if m == nil {
+			continue
+		}
+		switch m.Role {
+		case connectors.RoleAssistant:
+			// New assistant turn — becomes the next projection target.
+			asstIdx = i
+		case connectors.RoleSystem:
+			// System-role messages with TokensIn > 0 are exactly the
+			// codex parser's token_count emissions (Codex never produces
+			// "real" system messages otherwise).
+			if asstIdx < 0 {
+				continue
+			}
+			if m.TokensIn <= 0 && m.TokensOut <= 0 && m.CachedReadTokens <= 0 {
+				continue
+			}
+			target := msgs[asstIdx]
+			// Avoid double-attribution: only project when the assistant
+			// message is still token-less.
+			if target.TokensIn > 0 || target.TokensOut > 0 || target.CachedReadTokens > 0 {
+				continue
+			}
+			target.TokensIn = m.TokensIn
+			target.TokensOut = m.TokensOut
+			target.CachedReadTokens = m.CachedReadTokens
+			target.CachedWriteTokens = m.CachedWriteTokens
+			if target.Model == "" && m.Model != "" {
+				target.Model = m.Model
+			}
+			// Mark consumed so a later token_count doesn't re-decorate
+			// the same assistant message.
+			asstIdx = -1
+		}
+	}
 }

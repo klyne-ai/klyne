@@ -479,3 +479,202 @@ func TestHandleGetTokenTimeline_HonorsWindowDuration(t *testing.T) {
 		t.Fatalf("30m window points=%d, want 2 (got %+v)", len(scoped.Points), scoped.Points)
 	}
 }
+
+// codexAssistantLine renders a single Codex `response_item` assistant
+// message at ts. Mirrors the wire shape of real Codex JSONL.
+func codexAssistantLine(ts time.Time, text string) string {
+	return fmt.Sprintf(
+		`{"timestamp":%q,"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":%q}]}}`,
+		ts.UTC().Format(time.RFC3339Nano), text,
+	)
+}
+
+// codexTokenCountLine renders a single Codex `event_msg/token_count`
+// line carrying both `last_token_usage` (per-call) and `total_token_usage`
+// (cumulative). totalIn/totalCached/totalOut are session-cumulative; the
+// per-call delta is computed by the parser.
+func codexTokenCountLine(ts time.Time, lastIn, lastCached, lastOut, totalIn, totalCached, totalOut int64) string {
+	return fmt.Sprintf(
+		`{"timestamp":%q,"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":%d,"cached_input_tokens":%d,"output_tokens":%d,"reasoning_output_tokens":0,"total_tokens":%d},"total_token_usage":{"input_tokens":%d,"cached_input_tokens":%d,"output_tokens":%d,"reasoning_output_tokens":0,"total_tokens":%d},"model_context_window":272000}}}`,
+		ts.UTC().Format(time.RFC3339Nano),
+		lastIn, lastCached, lastOut, lastIn+lastOut,
+		totalIn, totalCached, totalOut, totalIn+totalOut,
+	)
+}
+
+// TestHandleGetTokenTimeline_CodexSession asserts that a Codex JSONL
+// containing assistant `response_item.message` lines paired with
+// `event_msg/token_count` events produces a non-empty timeline whose
+// Points carry the per-turn input/cached/output numbers projected from
+// each token_count onto the preceding assistant message.
+//
+// This is the regression test for the 2026-05-10 CLI review finding
+// that `klyne tokens --session=<codex-id>` returned "no assistant turns"
+// because Codex's per-turn token data lives in standalone token_count
+// events, not on the assistant message itself.
+func TestHandleGetTokenTimeline_CodexSession(t *testing.T) {
+	// Cannot t.Parallel: uses HOME via withFakeHome.
+	home := withFakeHome(t)
+	cwd := "/tmp/codex-tokens"
+	sessionID := "codex-tt-001"
+
+	// Build a synthetic rollout file under ~/.codex/sessions/YYYY/MM/DD.
+	now := time.Now()
+	yyyy := now.Format("2006")
+	mm := now.Format("01")
+	dd := now.Format("02")
+	dir := filepath.Join(home, ".codex", "sessions", yyyy, mm, dd)
+
+	// Three assistant turns, each followed by a token_count whose
+	// last_token_usage reports the per-call usage.
+	t1 := now.Add(-30 * time.Minute)
+	t2 := now.Add(-20 * time.Minute)
+	t3 := now.Add(-10 * time.Minute)
+
+	lines := []string{
+		// session_meta carries the id + cwd; required so the parser emits.
+		fmt.Sprintf(`{"timestamp":%q,"type":"session_meta","payload":{"id":%q,"cwd":%q,"model_provider":"openai"}}`,
+			t1.Add(-1*time.Second).UTC().Format(time.RFC3339Nano), sessionID, cwd),
+		// Initial heartbeat with info=null (real Codex shape; must be tolerated).
+		fmt.Sprintf(`{"timestamp":%q,"type":"event_msg","payload":{"type":"token_count","info":null}}`,
+			t1.Add(-500*time.Millisecond).UTC().Format(time.RFC3339Nano)),
+		// turn_context names the model.
+		fmt.Sprintf(`{"timestamp":%q,"type":"turn_context","payload":{"model":"gpt-5","cwd":%q}}`,
+			t1.Add(-100*time.Millisecond).UTC().Format(time.RFC3339Nano), cwd),
+
+		// Turn 1: assistant message → token_count with per-call usage.
+		codexAssistantLine(t1, "First turn answer."),
+		// last (per-call) = total (cumulative): 21990 in / 3456 cached / 199 out.
+		codexTokenCountLine(t1.Add(500*time.Millisecond),
+			21990, 3456, 199,
+			21990, 3456, 199),
+
+		// Turn 2: assistant message → token_count.
+		codexAssistantLine(t2, "Second turn answer."),
+		// last per-call: 22520 in / 21376 cached / 315 out
+		// total cumulative: 44510 / 24832 / 514
+		codexTokenCountLine(t2.Add(500*time.Millisecond),
+			22520, 21376, 315,
+			44510, 24832, 514),
+
+		// Turn 3: assistant message → token_count.
+		codexAssistantLine(t3, "Third turn answer."),
+		// last per-call: 25169 in / 21888 cached / 825 out
+		// total cumulative: 69679 / 46720 / 1339
+		codexTokenCountLine(t3.Add(500*time.Millisecond),
+			25169, 21888, 825,
+			69679, 46720, 1339),
+	}
+
+	rolloutName := "rollout-" + sessionID + ".jsonl"
+	writeJSONL(t, dir, rolloutName, lines...)
+
+	// Resolve via explicit session_id since the cwd-based resolver only
+	// indexes Claude project paths.
+	_, out, err := HandleGetTokenTimeline(context.Background(), nil,
+		TokenTimelineInput{SessionID: sessionID})
+	if err != nil {
+		t.Fatalf("HandleGetTokenTimeline: %v", err)
+	}
+	if out.Ambiguous {
+		t.Fatalf("unexpected ambiguous result: %+v", out)
+	}
+	if out.SessionID != sessionID {
+		t.Fatalf("SessionID = %q, want %q", out.SessionID, sessionID)
+	}
+	// The headline regression: Points must be non-empty for Codex sessions.
+	if len(out.Points) == 0 {
+		t.Fatalf("expected non-empty Points for Codex session; got 0 (the original bug)")
+	}
+	// All three assistant turns must appear (chronological order).
+	if len(out.Points) != 3 {
+		t.Fatalf("Points = %d, want 3 (one per assistant turn); got %+v", len(out.Points), out.Points)
+	}
+	// Per-turn TokensIn must match each turn's last_token_usage.input_tokens.
+	wantInPerTurn := []int64{21990, 22520, 25169}
+	wantCachedPerTurn := []int64{3456, 21376, 21888}
+	for i, p := range out.Points {
+		if p.TotalInput != wantInPerTurn[i] {
+			t.Errorf("Points[%d].TotalInput = %d; want %d", i, p.TotalInput, wantInPerTurn[i])
+		}
+		if p.CachedReadTokens != wantCachedPerTurn[i] {
+			t.Errorf("Points[%d].CachedReadTokens = %d; want %d", i, p.CachedReadTokens, wantCachedPerTurn[i])
+		}
+		// EffectiveInput is TotalInput - CachedReadTokens — the rate-limit
+		// burn axis (uncached portion); must be the math the renderer
+		// shows in the "uncached" column.
+		wantEff := wantInPerTurn[i] - wantCachedPerTurn[i]
+		if p.EffectiveInput != wantEff {
+			t.Errorf("Points[%d].EffectiveInput = %d; want %d", i, p.EffectiveInput, wantEff)
+		}
+	}
+	// Headline rollups should be the latest turn's prefix.
+	if out.LatestInput != 25169 {
+		t.Errorf("LatestInput = %d; want 25169", out.LatestInput)
+	}
+	if out.PeakInput != 25169 {
+		t.Errorf("PeakInput = %d; want 25169 (largest single-turn prefix)", out.PeakInput)
+	}
+}
+
+// TestHandleGetTokenTimeline_CodexSilencesUnknownTypes asserts that
+// Codex transcripts containing the newer `custom_tool_call` /
+// `custom_tool_call_output` response_item types and array-shaped
+// function_call_output payloads parse without spamming stderr. The
+// regression: every walk of these transcripts (klyne tokens, klyne
+// audit-sessions, klyne advise) was logging once per occurrence per
+// file.
+//
+// We don't capture stderr directly here — the gate is that the parser
+// must produce a non-empty timeline (i.e. didn't blow up parsing the
+// custom shapes) and the warnOnce gate prevents floods. The
+// unknown-type-decode behaviour is exercised at the parser-test level
+// in the codex package; this test is a smoke check that integration
+// works end-to-end.
+func TestHandleGetTokenTimeline_CodexToleratesCustomToolShapes(t *testing.T) {
+	home := withFakeHome(t)
+	cwd := "/tmp/codex-tools"
+	sessionID := "codex-custom-001"
+
+	now := time.Now()
+	yyyy := now.Format("2006")
+	mm := now.Format("01")
+	dd := now.Format("02")
+	dir := filepath.Join(home, ".codex", "sessions", yyyy, mm, dd)
+
+	t1 := now.Add(-15 * time.Minute)
+
+	lines := []string{
+		fmt.Sprintf(`{"timestamp":%q,"type":"session_meta","payload":{"id":%q,"cwd":%q,"model_provider":"openai"}}`,
+			t1.Add(-1*time.Second).UTC().Format(time.RFC3339Nano), sessionID, cwd),
+		fmt.Sprintf(`{"timestamp":%q,"type":"turn_context","payload":{"model":"gpt-5","cwd":%q}}`,
+			t1.Add(-500*time.Millisecond).UTC().Format(time.RFC3339Nano), cwd),
+		// Newer Codex shapes — must not error or noisily log.
+		fmt.Sprintf(`{"timestamp":%q,"type":"response_item","payload":{"type":"custom_tool_call","status":"completed","call_id":"call_abc","name":"apply_patch","input":"*** Begin Patch\n*** End Patch"}}`,
+			t1.Add(-300*time.Millisecond).UTC().Format(time.RFC3339Nano)),
+		// custom_tool_call_output with a JSON-string output (legacy shape).
+		fmt.Sprintf(`{"timestamp":%q,"type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"call_abc","output":"{\"output\":\"Success\"}"}}`,
+			t1.Add(-200*time.Millisecond).UTC().Format(time.RFC3339Nano)),
+		// function_call_output with an ARRAY output (newer Codex flavour
+		// returning an image attachment) — tolerate the dual shape.
+		fmt.Sprintf(`{"timestamp":%q,"type":"response_item","payload":{"type":"function_call_output","call_id":"call_def","output":[{"type":"input_image","image_url":"data:image/png;base64,AAAA"}]}}`,
+			t1.Add(-100*time.Millisecond).UTC().Format(time.RFC3339Nano)),
+		// One assistant message + token_count so the timeline path has
+		// at least one point to show.
+		codexAssistantLine(t1, "Done."),
+		codexTokenCountLine(t1.Add(500*time.Millisecond),
+			1000, 200, 50,
+			1000, 200, 50),
+	}
+	rolloutName := "rollout-" + sessionID + ".jsonl"
+	writeJSONL(t, dir, rolloutName, lines...)
+
+	_, out, err := HandleGetTokenTimeline(context.Background(), nil,
+		TokenTimelineInput{SessionID: sessionID})
+	if err != nil {
+		t.Fatalf("HandleGetTokenTimeline: %v", err)
+	}
+	if len(out.Points) == 0 {
+		t.Fatalf("expected at least one timeline point even with custom_tool_call shapes; got 0")
+	}
+}
