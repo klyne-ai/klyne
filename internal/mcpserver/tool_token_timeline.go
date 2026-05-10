@@ -223,32 +223,35 @@ func formatTokenTimelineAsMarkdown(out TokenTimelineOutput) string {
 		humanTokens(out.FirstInput), humanTokens(out.PeakInput), humanTokens(out.LatestInput))
 	b.WriteString("```\n\n")
 
-	// Per-turn table. Three columns the user actually wants to
-	// scan: when, the prefix size at that turn, and what fraction
-	// of the model's context window that represents.
-	limit := 10
-	if len(out.Points) < limit {
-		limit = len(out.Points)
-	}
-	tail := out.Points[len(out.Points)-limit:]
+	// Per-turn table. The v1 implementation showed the last 10
+	// turns; on a long session whose last 10 turns happen within
+	// a couple of minutes, every row collapses to the same time
+	// and the same prefix size — the growth becomes invisible.
+	// Sampling EVENLY across the timeline shows the trajectory
+	// the user actually cares about.
+	const tableRows = 10
+	samples := evenlySamplePoints(out.Points, tableRows)
 	if out.ContextWindow > 0 {
-		b.WriteString("| time | input tokens | % of context |\n")
-		b.WriteString("|------|-------------:|-------------:|\n")
-		for _, p := range tail {
-			when := time.UnixMilli(p.TsMs).UTC().Format("15:04")
+		b.WriteString("| time     | input tokens | % of context | Δ vs start |\n")
+		b.WriteString("|----------|-------------:|-------------:|-----------:|\n")
+		for _, p := range samples {
+			when := time.UnixMilli(p.TsMs).UTC().Format("15:04:05")
 			pct := float64(p.TotalInput) / float64(out.ContextWindow) * 100
 			if pct > 100 {
 				pct = 100
 			}
-			fmt.Fprintf(&b, "| %s | %s | %s |\n",
-				when, humanTokens(p.TotalInput), formatPct(pct))
+			delta := p.TotalInput - out.FirstInput
+			fmt.Fprintf(&b, "| %s | %s | %s | %s |\n",
+				when, humanTokens(p.TotalInput), formatPct(pct), formatDelta(delta))
 		}
 	} else {
-		b.WriteString("| time | input tokens |\n")
-		b.WriteString("|------|-------------:|\n")
-		for _, p := range tail {
-			when := time.UnixMilli(p.TsMs).UTC().Format("15:04")
-			fmt.Fprintf(&b, "| %s | %s |\n", when, humanTokens(p.TotalInput))
+		b.WriteString("| time     | input tokens | Δ vs start |\n")
+		b.WriteString("|----------|-------------:|-----------:|\n")
+		for _, p := range samples {
+			when := time.UnixMilli(p.TsMs).UTC().Format("15:04:05")
+			delta := p.TotalInput - out.FirstInput
+			fmt.Fprintf(&b, "| %s | %s | %s |\n",
+				when, humanTokens(p.TotalInput), formatDelta(delta))
 		}
 	}
 	b.WriteString("\n")
@@ -298,6 +301,52 @@ func totalInputSeries(pts []contexthealth.TimelinePoint) []int64 {
 		out[i] = p.TotalInput
 	}
 	return out
+}
+
+// evenlySamplePoints returns at most n points from pts at evenly
+// spaced indices. Always includes the first and last point so the
+// reader sees both ends of the trajectory.
+//
+// On a 165-turn session sampled to 10 rows, this returns indices
+// 0, 18, 36, 54, 73, 91, 109, 127, 146, 164 — about one row per
+// 30 minutes for a 5-hour session, which lets the user see the
+// growth across the whole window instead of staring at the most
+// recent burst.
+func evenlySamplePoints(pts []contexthealth.TimelinePoint, n int) []contexthealth.TimelinePoint {
+	if n <= 0 || len(pts) == 0 {
+		return nil
+	}
+	if len(pts) <= n {
+		return pts
+	}
+	out := make([]contexthealth.TimelinePoint, 0, n)
+	last := -1
+	for i := 0; i < n; i++ {
+		idx := int(float64(i) * float64(len(pts)-1) / float64(n-1))
+		if idx == last {
+			// Defensive: when n approaches len(pts) we can land
+			// on the same index twice. Skip duplicates so the
+			// table doesn't show identical adjacent rows.
+			continue
+		}
+		out = append(out, pts[idx])
+		last = idx
+	}
+	return out
+}
+
+// formatDelta renders a per-turn growth delta vs the first turn
+// as "+125K" / "-3K" / "0". Positive deltas get a leading "+" so
+// the column reads at a glance.
+func formatDelta(delta int64) string {
+	switch {
+	case delta == 0:
+		return "0"
+	case delta > 0:
+		return "+" + humanTokens(delta)
+	default:
+		return "-" + humanTokens(-delta)
+	}
 }
 
 // formatPct renders 0..100 as "12%" / "0.5%" / "<1%". Sub-1% and

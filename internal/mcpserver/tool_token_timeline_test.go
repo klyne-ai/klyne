@@ -129,6 +129,104 @@ func TestFormatTokenTimelineAsMarkdown_NoContextWindowFallback(t *testing.T) {
 	}
 }
 
+func TestEvenlySamplePoints_LongSessionSpansFullWindow(t *testing.T) {
+	pts := make([]contexthealth.TimelinePoint, 165)
+	for i := range pts {
+		pts[i] = contexthealth.TimelinePoint{
+			TsMs:       int64(i) * 60_000, // one minute apart
+			TotalInput: int64(50_000 + i*1_000),
+		}
+	}
+	samples := evenlySamplePoints(pts, 10)
+	if len(samples) != 10 {
+		t.Fatalf("len=%d, want 10", len(samples))
+	}
+	// First and last points must always be included so the reader
+	// sees both ends of the trajectory.
+	if samples[0].TotalInput != pts[0].TotalInput {
+		t.Fatalf("first sample is not the first point")
+	}
+	if samples[len(samples)-1].TotalInput != pts[len(pts)-1].TotalInput {
+		t.Fatalf("last sample is not the last point")
+	}
+	// Times must be strictly increasing — we should NEVER see two
+	// rows with the same timestamp on a long session.
+	for i := 1; i < len(samples); i++ {
+		if samples[i].TsMs <= samples[i-1].TsMs {
+			t.Fatalf("samples[%d].TsMs (%d) <= samples[%d].TsMs (%d)",
+				i, samples[i].TsMs, i-1, samples[i-1].TsMs)
+		}
+	}
+	// Input growth must be visible — last sample > first sample.
+	if samples[len(samples)-1].TotalInput <= samples[0].TotalInput {
+		t.Fatalf("growth invisible: last %d <= first %d",
+			samples[len(samples)-1].TotalInput, samples[0].TotalInput)
+	}
+}
+
+func TestEvenlySamplePoints_ShortSessionReturnsAll(t *testing.T) {
+	pts := []contexthealth.TimelinePoint{
+		{TsMs: 1, TotalInput: 100},
+		{TsMs: 2, TotalInput: 200},
+		{TsMs: 3, TotalInput: 300},
+	}
+	got := evenlySamplePoints(pts, 10)
+	if len(got) != 3 {
+		t.Fatalf("got %d, want 3", len(got))
+	}
+}
+
+func TestFormatDelta(t *testing.T) {
+	cases := []struct {
+		in   int64
+		want string
+	}{
+		{0, "0"},
+		{125_000, "+125K"},
+		{-3_500, "-3.5K"},
+	}
+	for _, tc := range cases {
+		if got := formatDelta(tc.in); got != tc.want {
+			t.Fatalf("formatDelta(%d)=%q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestFormatTokenTimeline_LongSessionShowsGrowthInTable(t *testing.T) {
+	// Synthesise a 50-turn session whose prefix grows from 50K to
+	// 240K. The table must not collapse to all-same-time rows the
+	// way the v1 (last-10-only) output did.
+	pts := make([]contexthealth.TimelinePoint, 50)
+	for i := range pts {
+		pts[i] = contexthealth.TimelinePoint{
+			TsMs:       int64(i) * 6 * 60_000, // 6-minute spacing
+			TotalInput: int64(50_000 + i*4_000),
+		}
+	}
+	out := TokenTimelineOutput{
+		SessionID:     "sess-long",
+		Model:         "claude-opus-4-7",
+		ContextWindow: 1_000_000,
+		WindowStartMs: 0,
+		WindowEndMs:   pts[len(pts)-1].TsMs,
+		Points:        pts,
+		FirstInput:    pts[0].TotalInput,
+		PeakInput:     pts[len(pts)-1].TotalInput,
+		LatestInput:   pts[len(pts)-1].TotalInput,
+		PctOfContext:  float64(pts[len(pts)-1].TotalInput) / 1_000_000 * 100,
+	}
+	md := formatTokenTimelineAsMarkdown(out)
+	// Δ column must be present and the growth visible.
+	if !strings.Contains(md, "Δ vs start") {
+		t.Fatalf("table missing delta column\n%s", md)
+	}
+	// The first row's delta is 0; somewhere later we MUST see a
+	// non-zero positive delta proving the table renders growth.
+	if !strings.Contains(md, "+") {
+		t.Fatalf("table shows no positive deltas — growth is invisible\n%s", md)
+	}
+}
+
 func TestFormatPct(t *testing.T) {
 	cases := []struct {
 		in   float64
