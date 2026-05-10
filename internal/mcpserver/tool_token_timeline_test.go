@@ -57,63 +57,92 @@ func TestHandleGetTokenTimeline_HappyPath(t *testing.T) {
 	}
 }
 
-func TestFormatTokenTimelineAsMarkdown_RendersSparklineAndTable(t *testing.T) {
+func TestFormatTokenTimelineAsMarkdown_LeadsOnContextWindow(t *testing.T) {
 	now := time.Now().UnixMilli()
 	out := TokenTimelineOutput{
 		SessionID:     "sess-fmt",
+		Model:         "claude-sonnet-4-5",
+		ContextWindow: 1_000_000,
 		WindowStartMs: now - int64(5*time.Hour/time.Millisecond),
 		WindowEndMs:   now,
 		Points: []contexthealth.TimelinePoint{
-			{TsMs: now - 30*60_000, EffectiveInput: 5_000, TotalInput: 6_000, CachedReadTokens: 1_000, OutputTokens: 200},
-			{TsMs: now - 20*60_000, EffectiveInput: 9_000, TotalInput: 10_000, CachedReadTokens: 1_000, OutputTokens: 250},
-			{TsMs: now - 10*60_000, EffectiveInput: 25_000, TotalInput: 26_000, CachedReadTokens: 1_000, OutputTokens: 300},
+			{TsMs: now - 30*60_000, EffectiveInput: 5_000, TotalInput: 36_000, CachedReadTokens: 30_000, OutputTokens: 200},
+			{TsMs: now - 20*60_000, EffectiveInput: 9_000, TotalInput: 100_000, CachedReadTokens: 91_000, OutputTokens: 250},
+			{TsMs: now - 10*60_000, EffectiveInput: 25_000, TotalInput: 500_000, CachedReadTokens: 475_000, OutputTokens: 300},
 		},
-		TotalEffective: 39_000,
-		PeakEffective:  25_000,
-		CapEffective:   100_000,
-		PctUsed:        39,
-		PlanTier:       "max-5x",
+		FirstInput:   36_000,
+		PeakInput:    500_000,
+		LatestInput:  500_000,
+		PctOfContext: 50,
 	}
 	md := formatTokenTimelineAsMarkdown(out)
-	// Sparkline block exists.
-	if !strings.Contains(md, "```") {
-		t.Fatalf("expected fenced block for sparkline\n%s", md)
+
+	// Headline names the model and context window.
+	if !strings.Contains(md, "claude-sonnet-4-5") {
+		t.Fatalf("missing model in header\n%s", md)
 	}
-	// Table header present.
-	if !strings.Contains(md, "uncached in") {
-		t.Fatalf("expected 'uncached in' in table header\n%s", md)
+	if !strings.Contains(md, "1M context") {
+		t.Fatalf("missing context-window size in header\n%s", md)
 	}
-	// Summary line includes percentage.
-	if !strings.Contains(md, "39%") {
-		t.Fatalf("expected '39%%' in summary\n%s", md)
+	// Trajectory sentence is present (start → peak → now).
+	if !strings.Contains(md, "Started at 36K") {
+		t.Fatalf("missing trajectory start\n%s", md)
 	}
-	if !strings.Contains(md, "max-5x") {
-		t.Fatalf("expected plan tier in summary\n%s", md)
+	if !strings.Contains(md, "now at 500K") {
+		t.Fatalf("missing trajectory now\n%s", md)
 	}
-	// Peak token count rendered.
-	if !strings.Contains(md, "25K") {
-		t.Fatalf("expected '25K' for peak in sparkline footer\n%s", md)
+	// Per-turn table uses the new % of context column.
+	if !strings.Contains(md, "% of context") {
+		t.Fatalf("table missing 'percent of context' column\n%s", md)
+	}
+	// Bottom line names the % of context window.
+	if !strings.Contains(md, "50% of the 1M context window") {
+		t.Fatalf("bottom line missing '50%% of 1M context'\n%s", md)
+	}
+	// Crucially: NO mention of 5-hour cap or plan tier in this surface.
+	if strings.Contains(md, "5-hour") || strings.Contains(md, "plan") {
+		t.Fatalf("timeline output leaked rate-limit / plan content:\n%s", md)
 	}
 }
 
-func TestFormatTokenTimelineAsMarkdown_NoPlanTierHidesPercentage(t *testing.T) {
+func TestFormatTokenTimelineAsMarkdown_NoContextWindowFallback(t *testing.T) {
 	now := time.Now().UnixMilli()
 	out := TokenTimelineOutput{
-		SessionID:     "sess-noplan",
+		SessionID:     "sess-nomodel",
 		WindowStartMs: now - 60_000,
 		WindowEndMs:   now,
 		Points: []contexthealth.TimelinePoint{
 			{TsMs: now - 30_000, EffectiveInput: 5_000, TotalInput: 5_000},
 		},
-		TotalEffective: 5_000,
-		PeakEffective:  5_000,
+		FirstInput:  5_000,
+		PeakInput:   5_000,
+		LatestInput: 5_000,
 	}
 	md := formatTokenTimelineAsMarkdown(out)
-	if strings.Contains(md, "%") && !strings.Contains(md, "klyne config set plan") {
-		t.Fatalf("unset plan should not surface a percentage; got\n%s", md)
+	// No context-window data → bottom line drops the percentage.
+	if strings.Contains(md, "% of") {
+		t.Fatalf("unknown model should not name a percentage; got\n%s", md)
 	}
-	if !strings.Contains(md, "klyne config set plan") {
-		t.Fatalf("expected the plan-tier nudge in the summary\n%s", md)
+	// Trajectory still renders without percentages.
+	if !strings.Contains(md, "Started at 5K") {
+		t.Fatalf("trajectory missing\n%s", md)
+	}
+}
+
+func TestFormatPct(t *testing.T) {
+	cases := []struct {
+		in   float64
+		want string
+	}{
+		{0, "0%"},
+		{0.5, "<1%"},
+		{12, "12%"},
+		{99.4, "99%"},
+	}
+	for _, tc := range cases {
+		if got := formatPct(tc.in); got != tc.want {
+			t.Fatalf("formatPct(%v)=%q, want %q", tc.in, got, tc.want)
+		}
 	}
 }
 

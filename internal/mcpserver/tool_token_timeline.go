@@ -10,6 +10,7 @@ import (
 
 	"github.com/klyne-ai/klyne/internal/config"
 	"github.com/klyne-ai/klyne/internal/contexthealth"
+	"github.com/klyne-ai/klyne/internal/usage"
 )
 
 // tool_token_timeline.go — get_token_timeline MCP tool +
@@ -42,20 +43,33 @@ type TokenTimelineInput struct {
 }
 
 // TokenTimelineOutput mirrors contexthealth.TokenTimeline plus the
-// surface metadata an MCP caller needs.
+// surface metadata an MCP caller needs. The headline fields (LatestInput,
+// PeakInput, FirstInput, ContextWindow, PctOfContext) describe the
+// single-session prefix-size axis. The legacy fields (TotalEffective,
+// CapEffective, PctUsed, PlanTier) describe the 5-hour rate-limit
+// axis and are kept for the advisor's separate use.
 type TokenTimelineOutput struct {
-	SessionID      string                       `json:"session_id,omitempty" jsonschema:"resolved session id"`
-	Path           string                       `json:"path,omitempty" jsonschema:"absolute path of the analysed transcript"`
-	WindowStartMs  int64                        `json:"window_start_ms" jsonschema:"left edge of the displayed window (epoch ms)"`
-	WindowEndMs    int64                        `json:"window_end_ms" jsonschema:"right edge (epoch ms; typically now)"`
-	Points         []contexthealth.TimelinePoint `json:"points" jsonschema:"per-assistant-turn token rows in chronological order"`
-	TotalEffective int64                        `json:"total_effective" jsonschema:"sum of effective input across the window"`
-	PeakEffective  int64                        `json:"peak_effective" jsonschema:"max effective input on a single turn"`
-	CapEffective   int64                        `json:"cap_effective,omitempty" jsonschema:"5-hour cap from the user's plan tier; 0 when unset"`
-	PctUsed        float64                      `json:"pct_used,omitempty" jsonschema:"TotalEffective/CapEffective × 100, capped at 100; 0 when CapEffective is 0"`
-	PlanTier       string                       `json:"plan_tier,omitempty" jsonschema:"the user's configured plan tier; empty when unset"`
-	Ambiguous      bool                         `json:"ambiguous,omitempty" jsonschema:"true when multiple sessions in this cwd require explicit session_id disambiguation"`
-	Candidates     []CandidateRow               `json:"candidates,omitempty" jsonschema:"sessions to choose from when ambiguous"`
+	SessionID     string                        `json:"session_id,omitempty" jsonschema:"resolved session id"`
+	Path          string                        `json:"path,omitempty" jsonschema:"absolute path of the analysed transcript"`
+	Model         string                        `json:"model,omitempty" jsonschema:"model id on the most recent qualifying turn"`
+	ContextWindow int64                         `json:"context_window,omitempty" jsonschema:"model's context window in tokens; 0 when unknown"`
+	WindowStartMs int64                         `json:"window_start_ms" jsonschema:"left edge of the displayed window (epoch ms)"`
+	WindowEndMs   int64                         `json:"window_end_ms" jsonschema:"right edge (epoch ms; typically now)"`
+	Points        []contexthealth.TimelinePoint `json:"points" jsonschema:"per-assistant-turn token rows in chronological order"`
+	FirstInput    int64                         `json:"first_input,omitempty" jsonschema:"oldest qualifying turn's TokensIn — where this session started"`
+	LatestInput   int64                         `json:"latest_input,omitempty" jsonschema:"most recent qualifying turn's TokensIn — current prefix size"`
+	PeakInput     int64                         `json:"peak_input,omitempty" jsonschema:"largest single-turn TokensIn in the window"`
+	PctOfContext  float64                       `json:"pct_of_context,omitempty" jsonschema:"LatestInput/ContextWindow × 100, capped at 100"`
+	// Legacy / advisor fields — describe rate-limit consumption,
+	// not single-session context fill. Surfaced here for callers
+	// that want both axes; the /klyne:tokens renderer ignores them.
+	TotalEffective int64          `json:"total_effective" jsonschema:"sum of effective (uncached) input across the window"`
+	PeakEffective  int64          `json:"peak_effective" jsonschema:"max effective input on a single turn"`
+	CapEffective   int64          `json:"cap_effective,omitempty" jsonschema:"5-hour cap from the user's plan tier; 0 when unset"`
+	PctUsed        float64        `json:"pct_used,omitempty" jsonschema:"TotalEffective/CapEffective × 100, capped at 100; 0 when CapEffective is 0"`
+	PlanTier       string         `json:"plan_tier,omitempty" jsonschema:"the user's configured plan tier; empty when unset"`
+	Ambiguous      bool           `json:"ambiguous,omitempty" jsonschema:"true when multiple sessions in this cwd require explicit session_id disambiguation"`
+	Candidates     []CandidateRow `json:"candidates,omitempty" jsonschema:"sessions to choose from when ambiguous"`
 }
 
 // HandleGetTokenTimeline is the MCP entry point. Resolves the
@@ -113,34 +127,59 @@ func HandleGetTokenTimeline(ctx context.Context, _ *mcp.CallToolRequest, in Toke
 	if tl.SessionID == "" {
 		tl.SessionID = snap.SessionID
 	}
+	if tl.Model == "" {
+		tl.Model = snap.Model
+	}
+	tl.ContextWindow = usage.ContextWindowForModel(tl.Model)
 
 	out := TokenTimelineOutput{
 		SessionID:      tl.SessionID,
 		Path:           snap.Path,
+		Model:          tl.Model,
+		ContextWindow:  tl.ContextWindow,
 		WindowStartMs:  tl.WindowStartMs,
 		WindowEndMs:    tl.WindowEndMs,
 		Points:         tl.Points,
+		FirstInput:     tl.FirstInput,
+		LatestInput:    tl.LatestInput,
+		PeakInput:      tl.PeakInput,
+		PctOfContext:   tl.PctOfContext(),
 		TotalEffective: tl.TotalEffective,
 		PeakEffective:  tl.PeakEffective,
 		CapEffective:   tl.CapEffective,
 		PctUsed:        tl.PctUsed(),
 		PlanTier:       tier,
 	}
-	// The Content text is the AI-facing summary; keep it terse.
+	// The Content text is the AI-facing summary; keep it terse and
+	// led by the single-session axis the user actually asked for.
 	summary := fmt.Sprintf(
-		"Token timeline for `%s`: %d turns, ~%s effective, peak ~%s.",
-		short(out.SessionID), len(out.Points),
-		humanTokens(out.TotalEffective), humanTokens(out.PeakEffective),
+		"Session `%s`: prefix at ~%s (%s of %s context).",
+		short(out.SessionID),
+		humanTokens(out.LatestInput),
+		formatPct(out.PctOfContext),
+		humanTokens(out.ContextWindow),
 	)
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: summary}},
 	}, out, nil
 }
 
+// FormatTokenTimelineAsMarkdown is the exported alias used by the
+// `klyne tokens` CLI subcommand. The slash prompt handler still
+// calls the unexported formatTokenTimelineAsMarkdown.
+func FormatTokenTimelineAsMarkdown(out TokenTimelineOutput) string {
+	return formatTokenTimelineAsMarkdown(out)
+}
+
 // formatTokenTimelineAsMarkdown renders the timeline for the slash
-// prompt: ASCII sparkline + per-turn table + summary line. When
-// the user's plan tier is configured, the summary also reports the
-// percentage of the 5-hour cap consumed.
+// prompt and the CLI subcommand. Leads with the single-session
+// axis the user cares about: "how full is my prefix right now,
+// and how did it grow over time?"
+//
+// Deliberately does NOT mention the 5-hour rate-limit cap or the
+// plan tier — those are advisor concerns, surfaced separately by
+// `klyne advise`. Mixing the two axes (per-session prefix size vs
+// cross-session rate-limit consumption) confused the v1 output.
 func formatTokenTimelineAsMarkdown(out TokenTimelineOutput) string {
 	if out.Ambiguous {
 		return formatAmbiguousAsMarkdown("get_token_timeline", out.Candidates)
@@ -154,67 +193,125 @@ func formatTokenTimelineAsMarkdown(out TokenTimelineOutput) string {
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "# Token timeline — `%s`\n\n", short(out.SessionID))
-	fmt.Fprintf(&b, "Window: last %s · %d assistant turns.\n\n",
-		formatWindow(out.WindowStartMs, out.WindowEndMs), len(out.Points))
+	fmt.Fprintf(&b, "# Session token usage — `%s`\n\n", short(out.SessionID))
+	if out.Model != "" && out.ContextWindow > 0 {
+		fmt.Fprintf(&b, "Window: last %s · %d turns · model `%s` (%s context).\n\n",
+			formatWindow(out.WindowStartMs, out.WindowEndMs), len(out.Points),
+			out.Model, humanTokens(out.ContextWindow))
+	} else {
+		fmt.Fprintf(&b, "Window: last %s · %d turns.\n\n",
+			formatWindow(out.WindowStartMs, out.WindowEndMs), len(out.Points))
+	}
 
-	// ASCII sparkline. Render the entire window down-sampled to
-	// `sparklineCols` columns so the chat width stays predictable.
-	// Adds a small time axis underneath ("Xh ago … now") so the
-	// reader can place the curve in time without scanning the
-	// table.
-	values := effectiveSeries(out.Points)
+	// Trajectory sentence — the headline answer to "how is my
+	// session going?". Names absolute prefix sizes plus % of
+	// context window when known.
+	b.WriteString(renderTrajectorySentence(out))
+	b.WriteString("\n\n")
+
+	// ASCII sparkline of TotalInput (the prefix size at each turn).
+	// Per-turn TokensIn is what grows visibly to the user as a
+	// session continues, so this is the curve the user is asking
+	// to see.
+	values := totalInputSeries(out.Points)
 	b.WriteString("```\n")
 	b.WriteString(renderSparkline(values))
 	b.WriteString("\n")
 	b.WriteString(renderTimeAxis(out.WindowStartMs, out.WindowEndMs, sparklineCols))
 	b.WriteString("\n")
-	fmt.Fprintf(&b, "total ~%s · peak ~%s · min ~%s\n",
-		humanTokens(out.TotalEffective), humanTokens(out.PeakEffective), humanTokens(minInt64(values)))
+	fmt.Fprintf(&b, "first ~%s · peak ~%s · now ~%s\n",
+		humanTokens(out.FirstInput), humanTokens(out.PeakInput), humanTokens(out.LatestInput))
 	b.WriteString("```\n\n")
 
-	// Recent-turns table (last 10 or fewer).
+	// Per-turn table. Three columns the user actually wants to
+	// scan: when, the prefix size at that turn, and what fraction
+	// of the model's context window that represents.
 	limit := 10
 	if len(out.Points) < limit {
 		limit = len(out.Points)
 	}
 	tail := out.Points[len(out.Points)-limit:]
-	b.WriteString("| time | uncached in | cached read | cached write | output |\n")
-	b.WriteString("|------|------------:|------------:|-------------:|-------:|\n")
-	for _, p := range tail {
-		when := time.UnixMilli(p.TsMs).UTC().Format("15:04:05")
-		fmt.Fprintf(&b, "| %s | %s | %s | %s | %s |\n",
-			when,
-			humanTokens(p.EffectiveInput),
-			humanTokens(p.CachedReadTokens),
-			humanTokens(p.CachedWriteTokens),
-			humanTokens(p.OutputTokens),
-		)
+	if out.ContextWindow > 0 {
+		b.WriteString("| time | input tokens | % of context |\n")
+		b.WriteString("|------|-------------:|-------------:|\n")
+		for _, p := range tail {
+			when := time.UnixMilli(p.TsMs).UTC().Format("15:04")
+			pct := float64(p.TotalInput) / float64(out.ContextWindow) * 100
+			if pct > 100 {
+				pct = 100
+			}
+			fmt.Fprintf(&b, "| %s | %s | %s |\n",
+				when, humanTokens(p.TotalInput), formatPct(pct))
+		}
+	} else {
+		b.WriteString("| time | input tokens |\n")
+		b.WriteString("|------|-------------:|\n")
+		for _, p := range tail {
+			when := time.UnixMilli(p.TsMs).UTC().Format("15:04")
+			fmt.Fprintf(&b, "| %s | %s |\n", when, humanTokens(p.TotalInput))
+		}
 	}
 	b.WriteString("\n")
 
-	// Summary line. Honest framing when the plan is unset.
-	if out.CapEffective > 0 {
+	// Bottom line. Final amount + context-window percentage.
+	if out.ContextWindow > 0 {
 		fmt.Fprintf(&b,
-			"**Total uncached input this window: ~%s** (~%.0f%% of your %s plan, estimated).\n",
-			humanTokens(out.TotalEffective), out.PctUsed, out.PlanTier,
+			"**This session is currently at ~%s of input (%s of the %s context window).**\n",
+			humanTokens(out.LatestInput), formatPct(out.PctOfContext), humanTokens(out.ContextWindow),
 		)
 	} else {
 		fmt.Fprintf(&b,
-			"**Total uncached input this window: ~%s.** Run `klyne config set plan <tier>` to see the percentage of your 5-hour cap.\n",
-			humanTokens(out.TotalEffective),
+			"**This session is currently at ~%s of input.**\n",
+			humanTokens(out.LatestInput),
 		)
 	}
 	return b.String()
 }
 
-// effectiveSeries pulls the EffectiveInput slice out of the points.
-func effectiveSeries(pts []contexthealth.TimelinePoint) []int64 {
+// renderTrajectorySentence produces a one-line growth summary like
+// "Started at 36K (4%) → peaked at 540K (54%) → now at 500K (50%)."
+// Falls back to a context-window-free version when ContextWindow
+// is unknown.
+func renderTrajectorySentence(out TokenTimelineOutput) string {
+	if out.ContextWindow > 0 {
+		firstPct := float64(out.FirstInput) / float64(out.ContextWindow) * 100
+		peakPct := float64(out.PeakInput) / float64(out.ContextWindow) * 100
+		nowPct := out.PctOfContext
+		return fmt.Sprintf(
+			"Started at %s (%s of context) → peaked at %s (%s) → now at %s (%s).",
+			humanTokens(out.FirstInput), formatPct(firstPct),
+			humanTokens(out.PeakInput), formatPct(peakPct),
+			humanTokens(out.LatestInput), formatPct(nowPct),
+		)
+	}
+	return fmt.Sprintf(
+		"Started at %s → peaked at %s → now at %s.",
+		humanTokens(out.FirstInput), humanTokens(out.PeakInput), humanTokens(out.LatestInput),
+	)
+}
+
+// totalInputSeries returns the per-turn TokensIn series — the
+// sparkline values the renderer plots on the single-session axis.
+func totalInputSeries(pts []contexthealth.TimelinePoint) []int64 {
 	out := make([]int64, len(pts))
 	for i, p := range pts {
-		out[i] = p.EffectiveInput
+		out[i] = p.TotalInput
 	}
 	return out
+}
+
+// formatPct renders 0..100 as "12%" / "0.5%" / "<1%". Sub-1% and
+// 0 cases are surfaced honestly so the user does not see "0%" on
+// a session that has burned a few thousand tokens of a 1M window.
+func formatPct(pct float64) string {
+	switch {
+	case pct <= 0:
+		return "0%"
+	case pct < 1:
+		return "<1%"
+	default:
+		return fmt.Sprintf("%.0f%%", pct)
+	}
 }
 
 // sparklineCols is the maximum width of the rendered sparkline.
@@ -319,20 +416,6 @@ func durationLabel(d time.Duration) string {
 	h := int(d / time.Hour)
 	m := int((d % time.Hour) / time.Minute)
 	return fmt.Sprintf("%dh%dm", h, m)
-}
-
-// minInt64 returns the smallest value in xs, or 0 for empty.
-func minInt64(xs []int64) int64 {
-	if len(xs) == 0 {
-		return 0
-	}
-	m := xs[0]
-	for _, x := range xs[1:] {
-		if x < m {
-			m = x
-		}
-	}
-	return m
 }
 
 // humanTokens renders a token count like 220_000_000 as "220M" so

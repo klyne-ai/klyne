@@ -148,15 +148,17 @@ When the user has configured a plan tier (klyne config set plan <tier>), the res
 		},
 	}, PromptPreCompactHandler)
 
+	// /klyne:tokens — registered with NO arguments. Claude Code's
+	// slash UI waits for argument input when an MCP prompt declares
+	// optional args, which made the v1 surface fail to fire on
+	// bare press-enter. The handler still resolves cwd from the
+	// process env, so the no-arg form just works. Users who want a
+	// custom window override that via the underlying MCP tool
+	// (get_token_timeline) or the `klyne tokens` CLI subcommand.
 	srv.AddPrompt(&mcp.Prompt{
 		Name:        "tokens",
 		Title:       "Token usage timeline",
-		Description: "Show the per-assistant-turn token usage for the active session as an ASCII sparkline plus a recent-turns table. Defaults to the last 5 hours; pass window=30m for a 30-minute view.",
-		Arguments: []*mcp.PromptArgument{
-			{Name: "cwd", Description: "Override the working directory used to resolve the session."},
-			{Name: "window", Description: "Lookback as a Go duration string (e.g. \"30m\", \"5h\", \"2h30m\"). Min 1m, max 24h."},
-			{Name: "window_hours", Description: "Convenience integer hours (default 5; max 24); ignored when window is set."},
-		},
+		Description: "Show the per-turn token usage for the active session: cumulative input tokens, % of model context window, ASCII sparkline. Defaults to the last 5 hours.",
 	}, PromptTokenTimelineHandler)
 
 	return srv

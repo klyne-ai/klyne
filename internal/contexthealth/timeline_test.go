@@ -55,6 +55,39 @@ func TestComputeTimeline_FiltersOutsideWindow(t *testing.T) {
 	if tl.SessionID != "sess-tl" {
 		t.Fatalf("SessionID=%q, want sess-tl", tl.SessionID)
 	}
+	// Single-session axis: PeakInput tracks raw TokensIn,
+	// FirstInput is the oldest in-window value, LatestInput is
+	// the newest.
+	if tl.PeakInput != 9_000 {
+		t.Fatalf("PeakInput=%d, want 9000", tl.PeakInput)
+	}
+	if tl.FirstInput != 5_000 {
+		t.Fatalf("FirstInput=%d, want 5000", tl.FirstInput)
+	}
+	if tl.LatestInput != 9_000 {
+		t.Fatalf("LatestInput=%d, want 9000", tl.LatestInput)
+	}
+}
+
+func TestComputeTimeline_PctOfContext(t *testing.T) {
+	cases := []struct {
+		name              string
+		latest, ctxWindow int64
+		want              float64
+	}{
+		{"50%", 100_000, 200_000, 50},
+		{"clamped over 100", 300_000, 200_000, 100},
+		{"unknown ctx", 100_000, 0, 0},
+		{"empty session", 0, 200_000, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tl := TokenTimeline{LatestInput: tc.latest, ContextWindow: tc.ctxWindow}
+			if got := tl.PctOfContext(); got != tc.want {
+				t.Fatalf("got %v, want %v", got, tc.want)
+			}
+		})
+	}
 }
 
 func TestComputeTimeline_PctUsed(t *testing.T) {
