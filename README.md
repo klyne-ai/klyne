@@ -6,9 +6,9 @@ klyne is a local-first session rescue layer for Claude Code and Codex power user
 
 No cloud. No proxy. No telemetry. Read-only by design.
 
-[![Watch the klyne demo](docs/assets/readme/klyne-demo-poster.png)](docs/assets/readme/The_Deterministic_Handoff__Escaping_the_Token_Trap_with_Klyne.mp4)
+[![Watch the klyne demo](docs/assets/readme/klyne-demo-poster.png)](https://youtu.be/2NglEGlq3Ns)
 
-[Watch the 5-minute klyne demo](docs/assets/readme/The_Deterministic_Handoff__Escaping_the_Token_Trap_with_Klyne.mp4)
+[Watch the 5-minute klyne demo](https://youtu.be/2NglEGlq3Ns)
 
 ---
 
