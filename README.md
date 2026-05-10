@@ -174,12 +174,10 @@ The prompts run server-side and inject the result as user-message content — no
 | `search_messages`           | ✅          | ✅                       |
 | `generate_handoff`          | ✅          | ✅                       |
 | `get_pre_compact_context`   | ✅ via `compact_boundary` lines | ✅ via embedded `replacement_history` |
-| `get_token_timeline`        | ✅          | ⚠ no per-turn data ([known gap](docs/cli-review-2026-05-10.md#4-klyne-tokens-the-new-one)) |
+| `get_token_timeline`        | ✅          | ✅                       |
 | `klyne advise` (advisor hook) | ✅        | n/a (no UserPromptSubmit hook surface) |
 
 For Codex sessions, `pre_tokens` and `trigger` (manual/auto) fields are not exposed in the output — Codex's `compacted` envelope doesn't carry that metadata. The recovered messages themselves are returned identically.
-
-The token-timeline tool is currently asymmetric: Claude transcripts produce a full per-turn timeline; Codex transcripts return "no assistant turns" because the parser does not yet attach Codex's `event_msg.token_count` records to canonical messages. `klyne audit-sessions` does extract Codex token counts via a separate path, so cross-session aggregates work; only the per-turn timeline is affected. See [the 2026-05-10 CLI review](docs/cli-review-2026-05-10.md) for the full reproduction.
 
 ---
 

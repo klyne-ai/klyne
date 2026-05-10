@@ -21,10 +21,12 @@ a fresh session — one click away.
 >   one-line advisory injected when one of four deterministic triggers
 >   crosses its threshold. No AI calls. Toggle with
 >   `klyne config set advisor on|off`.
-> - The Codex side of `klyne tokens` is currently broken (returns "no
->   assistant turns") because the parser does not yet attach Codex's
->   `event_msg.token_count` records to canonical messages. Tracked as a
->   known gap in [docs/cli-review-2026-05-10.md](../cli-review-2026-05-10.md).
+> - Both Claude and Codex transcripts now produce a per-turn timeline.
+>   The Codex parser was extended (commit `a587bea`) to project
+>   `event_msg.token_count` records onto the nearest-preceding
+>   assistant message at snapshot-build time. See
+>   [docs/cli-review-2026-05-10.md](../cli-review-2026-05-10.md) for the
+>   pre-fix repro and the post-fix verification.
 
 ## what ships
 

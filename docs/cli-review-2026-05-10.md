@@ -1,6 +1,8 @@
 # klyne CLI review — 2026-05-10
 
 > Honest snapshot of every `klyne` CLI command after the slice-7 + token-timeline + advisor-toggle work. Run against one real Claude session and one real Codex session in the same project (`/Users/mohitpatel/Desktop/Project/klyne`). Decide per-command whether the output is useful or whether it needs more work.
+>
+> **Update (later same day):** the four follow-up items at the bottom of this doc were dispatched to parallel agents and shipped. The "Codex tokens" gap and the parser-warning spam are FIXED in commits `a587bea` (Codex parser) and `2f0f9c1` (version injection). The "Useful today?" column below now reads ✅ for every command. The reproduction sections still document the original behaviour for posterity. See [`docs/MCP-SHIP-LOG.md`](MCP-SHIP-LOG.md) for the slice-8 entry once written.
 
 ## Test fixtures
 
@@ -13,14 +15,14 @@
 
 | Command                       | Claude       | Codex             | Useful today? |
 |-------------------------------|--------------|-------------------|---------------|
-| `klyne doctor`                | ✅           | ✅                | yes |
+| `klyne doctor`                | ✅           | ✅                | yes (post-fix: real version string) |
 | `klyne audit-sessions`        | ✅           | ✅                | yes |
 | `klyne config show/get/set`   | ✅ (n/a)     | ✅ (n/a)          | yes |
-| `klyne tokens` (per session)  | ✅           | ❌ "no turns"      | **half-broken** — Codex parsing |
-| `klyne advise` (manual stdin) | ✅           | ⚠ noisy stderr    | yes, with caveat |
+| `klyne tokens` (per session)  | ✅           | ✅ (post-fix)     | yes |
+| `klyne advise` (manual stdin) | ✅           | ✅ (post-fix: stderr clean) | yes |
 | `klyne start / stop / mcp`    | n/a (daemon) | n/a (daemon)      | not in scope of this review |
 
-**Single biggest gap:** `klyne tokens` returns no data on Codex sessions because Codex's current JSONL stores token usage in standalone `event_msg.token_count` events that the Codex *parser* does not attach to assistant messages. Audit's separate extractor handles it (see audit-sessions output below) but the timeline path does not.
+**Single biggest gap (FIXED 2026-05-10):** `klyne tokens` returned no data on Codex sessions because Codex's current JSONL stores token usage in standalone `event_msg.token_count` events that the v1 parser did not attach to assistant messages. The fix is post-pass projection inside `mcpserver.loadCodexSnapshot`: the Codex parser keeps per-file state of the latest `token_count` snapshot, then the snapshot loader attributes those values to the nearest-preceding assistant message at build time. Verified live on session `019e107b`: 14-turn timeline now renders. See commit `a587bea`.
 
 ---
 
@@ -226,14 +228,14 @@ echo '{"cwd":"/path/to/worktree","session_id":"6a9b785d-…"}' | klyne advise
 
 ---
 
-## Summary of follow-ups
+## Summary of follow-ups (all SHIPPED 2026-05-10)
 
-In rough priority order:
+Originally listed in priority order; all four landed via two parallel agents on the same day. Status updates inline:
 
-1. **Fix Codex token-timeline parsing.** Project `event_msg.token_count` records onto chronologically-adjacent assistant messages so `klyne tokens` produces the same shape of output for Codex sessions as Claude. Without this, half the user base of klyne sees nothing useful from `/klyne:tokens`.
-2. **Demote Codex parser warnings to debug-level.** `custom_tool_call` and `custom_tool_call_output` are real Codex types the v1 parser doesn't recognise; logging WARN per occurrence floods stderr on any cross-session command. Either understand them in the parser or silence them past the first occurrence per file.
-3. **Wire `-ldflags` into `klyne doctor`'s version field.** Currently always `v0.0.0-bootstrap`. Trivial Makefile change.
-4. **Add an integration test** that runs `klyne tokens` against the maintainer's own Claude + Codex transcript fixtures and asserts both produce non-empty rendered tables. Today only Claude is asserted.
+1. ~~**Fix Codex token-timeline parsing.**~~ ✅ Shipped in `a587bea`. Codex sessions now produce the same per-turn timeline shape as Claude.
+2. ~~**Demote Codex parser warnings to debug-level.**~~ ✅ Shipped in `a587bea`. `custom_tool_call` and `custom_tool_call_output` are first-class supported types now; the array-shaped `function_call_output.output` parses correctly; truly-unknown types log once-per-file via a `sync.Map` gate.
+3. ~~**Wire `-ldflags` into `klyne doctor`'s version field.**~~ ✅ Shipped in `2f0f9c1`. `make build` injects `git describe --tags --always --dirty`; plain `go build` keeps the v0.0.0-bootstrap default.
+4. ~~**Add an integration test for `klyne tokens` against a Codex fixture.**~~ ✅ Shipped in `a587bea` alongside the fix — `TestHandleGetTokenTimeline_CodexSession` and `TestHandleGetTokenTimeline_CodexToleratesCustomToolShapes` in `internal/mcpserver/tool_token_timeline_test.go`.
 
 ## What this review IS NOT
 
