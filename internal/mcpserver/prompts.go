@@ -209,16 +209,19 @@ func PromptTokenTimelineHandler(ctx context.Context, req *mcp.GetPromptRequest) 
 		return nil, err
 	}
 	// Slash-prompt surface returns the FULL Markdown table — same
-	// output the `klyne tokens` CLI produces. An earlier slice of
-	// this code returned a one-line compact summary instead, on the
-	// theory that the AI would summarise the table anyway. In
-	// practice users explicitly want the structured data in the
-	// chat so they can read the actual per-turn breakdown rather
-	// than the AI's summary of it. FormatTokenTimelineCompact is
-	// kept exported for callers that DO want a single-line status.
+	// output the `klyne tokens` CLI produces. The directive prefix
+	// is critical: without it, the AI host sees structured data and
+	// summarises it ("Acknowledged — 267K / 1M (27%) …") instead of
+	// rendering the report. Empirical: with the prefix, hosts are
+	// far more likely to surface the sparkline and table verbatim.
+	const directive = "" +
+		"The user invoked `/klyne:tokens`. Render the report below VERBATIM, " +
+		"including the sparkline and every table row exactly as written. " +
+		"Do not summarise, do not paraphrase, do not omit columns. " +
+		"After the report you may add at most one short sentence of context.\n\n"
 	return userPromptResult(
 		"Token usage timeline for the active session",
-		formatTokenTimelineAsMarkdown(out),
+		directive+formatTokenTimelineAsMarkdown(out),
 	), nil
 }
 
