@@ -90,19 +90,32 @@ type TokenTimeline struct {
 	CapEffective int64 `json:"cap_effective"`
 }
 
-// ComputeTimeline walks msgs and returns a TokenTimeline restricted
-// to assistant turns whose Ts falls within [nowMs-windowMs, nowMs].
+// ComputeTimeline walks msgs and returns a TokenTimeline.
+//
+// When windowMs > 0, the result is restricted to assistant turns
+// whose Ts falls within [nowMs-windowMs, nowMs] — the rate-limit-
+// style window view.
+//
+// When windowMs <= 0, the result spans the entire session: every
+// qualifying assistant turn is included, regardless of how long
+// ago it happened. This is the right default for `/klyne:tokens`
+// because users frequently come back to a session hours after
+// pausing it; a 5h window would hide the bulk of their context
+// fill.
+//
 // cap is the user's configured 5-hour effective-token cap; pass 0
 // when unset so the renderer can hide the percentage column.
 //
-// Empty input or no assistant turns inside the window produces an
-// empty Points slice with the window bounds set.
+// Empty input or no qualifying turns produces an empty Points
+// slice with sensible window bounds (so the renderer can still
+// describe the timespan honestly).
 func ComputeTimeline(msgs []*connectors.Message, nowMs, windowMs, cap int64) TokenTimeline {
-	startMs := nowMs - windowMs
 	out := TokenTimeline{
-		WindowStartMs: startMs,
-		WindowEndMs:   nowMs,
-		CapEffective:  cap,
+		WindowEndMs:  nowMs,
+		CapEffective: cap,
+	}
+	if windowMs > 0 {
+		out.WindowStartMs = nowMs - windowMs
 	}
 	if len(msgs) == 0 {
 		return out
@@ -114,7 +127,7 @@ func ComputeTimeline(msgs []*connectors.Message, nowMs, windowMs, cap int64) Tok
 		if m.TokensIn <= 0 {
 			continue
 		}
-		if m.Ts < startMs || m.Ts > nowMs {
+		if windowMs > 0 && (m.Ts < out.WindowStartMs || m.Ts > nowMs) {
 			continue
 		}
 		eff := m.TokensIn - m.CachedReadTokens
@@ -146,6 +159,14 @@ func ComputeTimeline(msgs []*connectors.Message, nowMs, windowMs, cap int64) Tok
 	if len(out.Points) > 0 {
 		out.FirstInput = out.Points[0].TotalInput
 		out.LatestInput = out.Points[len(out.Points)-1].TotalInput
+		// Full-session view: WindowStartMs reflects the actual
+		// first turn's timestamp so the renderer's time-axis and
+		// header read honestly ("first turn HH:MM IST → now") — not
+		// "0 ago" which would be misleading when there's no fixed
+		// lookback applied.
+		if windowMs <= 0 {
+			out.WindowStartMs = out.Points[0].TsMs
+		}
 	}
 	return out
 }

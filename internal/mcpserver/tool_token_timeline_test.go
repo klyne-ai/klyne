@@ -8,8 +8,21 @@ import (
 	"testing"
 	"time"
 
+	"github.com/klyne-ai/klyne/internal/connectors"
 	"github.com/klyne-ai/klyne/internal/contexthealth"
 )
+
+// asstMsgTL is a minimal assistant Message constructor for the
+// timeline-related tests in this file.
+func asstMsgTL(idx int, tsMs, tokensIn int64) *connectors.Message {
+	return &connectors.Message{
+		ID:        fmt.Sprintf("a%d", idx),
+		SessionID: "sess-tl-test",
+		Role:      connectors.RoleAssistant,
+		Ts:        tsMs,
+		TokensIn:  tokensIn,
+	}
+}
 
 // timelineLine renders one Claude Code assistant JSONL line at ts
 // with the given input/cached-read counts. Mirrors the shape used
@@ -91,9 +104,18 @@ func TestFormatTokenTimelineAsMarkdown_LeadsOnContextWindow(t *testing.T) {
 	if !strings.Contains(md, "now at 500K") {
 		t.Fatalf("missing trajectory now\n%s", md)
 	}
-	// Per-turn table uses the new % of context column.
+	// Per-turn table uses the new % of context column AND breaks
+	// out cached vs uncached so input = cached + uncached is
+	// explicit.
 	if !strings.Contains(md, "% of context") {
 		t.Fatalf("table missing 'percent of context' column\n%s", md)
+	}
+	if !strings.Contains(md, "| cached |") {
+		t.Fatalf("table missing 'cached' column header\n%s", md)
+	}
+	// Δ-vs-start column is dropped (trajectory sentence has it).
+	if strings.Contains(md, "Δ vs start") {
+		t.Fatalf("Δ-vs-start column should be removed; got\n%s", md)
 	}
 	// Bottom line names the % of context window AND anchors to a
 	// timestamp ("as of HH:MM TZ (X ago)") so the reader knows
@@ -240,14 +262,57 @@ func TestFormatTokenTimeline_LongSessionShowsGrowthInTable(t *testing.T) {
 		PctOfContext:  float64(pts[len(pts)-1].TotalInput) / 1_000_000 * 100,
 	}
 	md := formatTokenTimelineAsMarkdown(out)
-	// Δ column must be present and the growth visible.
-	if !strings.Contains(md, "Δ vs start") {
-		t.Fatalf("table missing delta column\n%s", md)
+	// Cached + uncached columns must be present, and the
+	// trajectory sentence at the top must show growth.
+	if !strings.Contains(md, "cached") {
+		t.Fatalf("table missing cached column\n%s", md)
 	}
-	// The first row's delta is 0; somewhere later we MUST see a
-	// non-zero positive delta proving the table renders growth.
-	if !strings.Contains(md, "+") {
-		t.Fatalf("table shows no positive deltas — growth is invisible\n%s", md)
+	if !strings.Contains(md, "uncached") {
+		t.Fatalf("table missing uncached column\n%s", md)
+	}
+	// Trajectory must name distinct first/peak/now values so
+	// growth is visible without a Δ column.
+	if !strings.Contains(md, "Started at") || !strings.Contains(md, "peaked at") {
+		t.Fatalf("trajectory missing\n%s", md)
+	}
+}
+
+func TestComputeTimeline_NoWindowReturnsEntireSession(t *testing.T) {
+	now := int64(1_000_000_000)
+	msgs := []*connectors.Message{
+		asstMsgTL(0, now-10*60_000, 5_000),
+		asstMsgTL(1, now-5*60_000, 9_000),
+		asstMsgTL(2, now-1*60_000, 25_000),
+	}
+	tl := contexthealth.ComputeTimeline(msgs, now, 0, 100_000)
+	if len(tl.Points) != 3 {
+		t.Fatalf("len=%d, want 3 (full-session view should include all qualifying turns)", len(tl.Points))
+	}
+	// WindowStartMs must equal the first point's timestamp so the
+	// renderer's time-axis describes the actual span.
+	if tl.WindowStartMs != tl.Points[0].TsMs {
+		t.Fatalf("WindowStartMs=%d, want %d (first point Ts)", tl.WindowStartMs, tl.Points[0].TsMs)
+	}
+}
+
+func TestComputeTimeline_IdleSessionStillVisibleWithoutWindow(t *testing.T) {
+	// Session whose latest turn is 8 hours ago. With the legacy
+	// 5h-default behaviour, the timeline would have been empty;
+	// post-fix, it must include all turns.
+	now := int64(1_000_000_000)
+	eightHoursAgo := now - int64(8*time.Hour/time.Millisecond)
+	msgs := []*connectors.Message{
+		asstMsgTL(0, eightHoursAgo, 5_000),
+		asstMsgTL(1, eightHoursAgo+60_000, 9_000),
+	}
+	tl := contexthealth.ComputeTimeline(msgs, now, 0, 0)
+	if len(tl.Points) != 2 {
+		t.Fatalf("idle session lost data: len=%d, want 2", len(tl.Points))
+	}
+	// And the explicit-window path must still respect the cutoff.
+	tlWindowed := contexthealth.ComputeTimeline(msgs, now, int64(5*time.Hour/time.Millisecond), 0)
+	if len(tlWindowed.Points) != 0 {
+		t.Fatalf("explicit 5h window should drop 8h-old turns; got %d points", len(tlWindowed.Points))
 	}
 }
 
@@ -385,7 +450,6 @@ func TestResolveWindowMs(t *testing.T) {
 		oneMin  = int64(60_000)
 		oneHour = int64(60 * 60_000)
 		thirty  = int64(30 * 60_000)
-		def5h   = int64(5 * oneHour)
 		max24h  = int64(24 * oneHour)
 	)
 	cases := []struct {
@@ -394,7 +458,10 @@ func TestResolveWindowMs(t *testing.T) {
 		hours  int
 		wantMs int64
 	}{
-		{"default", "", 0, def5h},
+		// Default returns 0 — signalling "show entire session" to
+		// ComputeTimeline. The previous 5h default was unhelpful
+		// for idle sessions whose latest turn predates the window.
+		{"default (entire session)", "", 0, 0},
 		{"hours field", "", 2, 2 * oneHour},
 		{"duration string 30m", "30m", 0, thirty},
 		{"duration string 1h30m", "1h30m", 0, oneHour + thirty},
@@ -402,7 +469,7 @@ func TestResolveWindowMs(t *testing.T) {
 		{"clamp to 24h", "100h", 0, max24h},
 		{"clamp to 1m", "1s", 0, oneMin},
 		{"invalid string falls back to hours", "weird", 3, 3 * oneHour},
-		{"invalid string and no hours falls back to default", "weird", 0, def5h},
+		{"invalid string and no hours falls back to entire session", "weird", 0, 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

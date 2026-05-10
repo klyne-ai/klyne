@@ -252,15 +252,22 @@ func formatTokenTimelineAsMarkdown(out TokenTimelineOutput) string {
 		tzName = "local"
 	}
 
+	// Header phrasing depends on whether the caller asked for a
+	// fixed lookback ("last 5h") or the default full-session view.
+	// In the default case, name the actual span the data covers
+	// — "entire session" + a from→to range — so the user can see
+	// at a glance whether the timeline includes their idle time
+	// or just the recent activity.
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Session token usage — `%s`\n\n", short(out.SessionID))
+	windowDesc := windowDescription(out, loc, tzName)
 	if out.Model != "" && out.ContextWindow > 0 {
-		fmt.Fprintf(&b, "Window: last %s · %d turns · model `%s` (%s context) · times in %s.\n\n",
-			formatWindow(out.WindowStartMs, out.WindowEndMs), len(out.Points),
+		fmt.Fprintf(&b, "%s · %d turns · model `%s` (%s context) · times in %s.\n\n",
+			windowDesc, len(out.Points),
 			out.Model, humanTokens(out.ContextWindow), tzName)
 	} else {
-		fmt.Fprintf(&b, "Window: last %s · %d turns · times in %s.\n\n",
-			formatWindow(out.WindowStartMs, out.WindowEndMs), len(out.Points), tzName)
+		fmt.Fprintf(&b, "%s · %d turns · times in %s.\n\n",
+			windowDesc, len(out.Points), tzName)
 	}
 
 	// Trajectory sentence — the headline answer to "how is my
@@ -283,43 +290,46 @@ func formatTokenTimelineAsMarkdown(out TokenTimelineOutput) string {
 		humanTokens(out.FirstInput), humanTokens(out.PeakInput), humanTokens(out.LatestInput))
 	b.WriteString("```\n\n")
 
-	// Per-turn table. The v1 implementation showed the last 10
-	// turns; on a long session whose last 10 turns happen within
-	// a couple of minutes, every row collapses to the same time
-	// and the same prefix size — the growth becomes invisible.
-	// Sampling EVENLY across the timeline shows the trajectory
-	// the user actually cares about.
+	// Per-turn table. Samples 10 points evenly across the timeline
+	// so growth is visible even on a long session whose last 10
+	// turns happened within minutes of each other.
 	//
-	// "uncached" column = the portion of that turn's input that
-	// bills against the 5-hour rate-limit at full rate (cached
-	// prefix is ~10× discounted by the provider). The user
-	// requested visibility on this so the table makes the actual
-	// burn explicit alongside the prefix size.
+	// Columns make the cache breakdown explicit:
+	//   input tokens = prefix size at that turn (TokensIn).
+	//   % of context = how much of the model's window is consumed.
+	//   cached       = portion served from prompt cache at ~10×
+	//                  discount (CachedReadTokens).
+	//   uncached     = portion that bills against the 5-hour
+	//                  rate-limit at full rate (TokensIn -
+	//                  CachedReadTokens).
+	//
+	// input == cached + uncached for every row. Δ-vs-start is
+	// dropped — the trajectory sentence already names start /
+	// peak / latest, so duplicating it in the table costs width
+	// without adding signal.
 	const tableRows = 10
 	samples := evenlySamplePoints(out.Points, tableRows)
 	if out.ContextWindow > 0 {
-		b.WriteString("| time     | input tokens | % of context | Δ vs start | uncached |\n")
-		b.WriteString("|----------|-------------:|-------------:|-----------:|---------:|\n")
+		b.WriteString("| time     | input tokens | % of context | cached | uncached |\n")
+		b.WriteString("|----------|-------------:|-------------:|-------:|---------:|\n")
 		for _, p := range samples {
 			when := time.UnixMilli(p.TsMs).In(loc).Format("15:04:05")
 			pct := float64(p.TotalInput) / float64(out.ContextWindow) * 100
 			if pct > 100 {
 				pct = 100
 			}
-			delta := p.TotalInput - out.FirstInput
 			fmt.Fprintf(&b, "| %s | %s | %s | %s | %s |\n",
 				when, humanTokens(p.TotalInput), formatPct(pct),
-				formatDelta(delta), humanTokens(p.EffectiveInput))
+				humanTokens(p.CachedReadTokens), humanTokens(p.EffectiveInput))
 		}
 	} else {
-		b.WriteString("| time     | input tokens | Δ vs start | uncached |\n")
-		b.WriteString("|----------|-------------:|-----------:|---------:|\n")
+		b.WriteString("| time     | input tokens | cached | uncached |\n")
+		b.WriteString("|----------|-------------:|-------:|---------:|\n")
 		for _, p := range samples {
 			when := time.UnixMilli(p.TsMs).In(loc).Format("15:04:05")
-			delta := p.TotalInput - out.FirstInput
 			fmt.Fprintf(&b, "| %s | %s | %s | %s |\n",
 				when, humanTokens(p.TotalInput),
-				formatDelta(delta), humanTokens(p.EffectiveInput))
+				humanTokens(p.CachedReadTokens), humanTokens(p.EffectiveInput))
 		}
 	}
 	b.WriteString("\n")
@@ -430,6 +440,33 @@ func formatDelta(delta int64) string {
 	default:
 		return "-" + humanTokens(-delta)
 	}
+}
+
+// windowDescription renders the leading phrase of the timeline
+// header. When the caller passed an explicit window, name it
+// ("last 5h0m0s"). Otherwise describe the actual span the points
+// cover ("entire session, 18:29 → 23:14") so the user sees the
+// full timeline they asked for.
+func windowDescription(out TokenTimelineOutput, loc *time.Location, tzName string) string {
+	if len(out.Points) == 0 {
+		return fmt.Sprintf("Window: last %s", formatWindow(out.WindowStartMs, out.WindowEndMs))
+	}
+	span := out.WindowEndMs - out.WindowStartMs
+	// Heuristic: a "fixed window" view is one whose span lines up
+	// closely with what `formatWindow` renders. The full-session
+	// view's WindowStartMs equals the first point's TsMs, which
+	// almost certainly does not match a clean "5h" or "1h" round
+	// number — there is always a multi-second gap.
+	first := time.UnixMilli(out.Points[0].TsMs).In(loc)
+	last := time.UnixMilli(out.Points[len(out.Points)-1].TsMs).In(loc)
+	if out.WindowStartMs == first.UnixMilli() {
+		// Full-session view — we set WindowStartMs to the first
+		// point's timestamp.
+		return fmt.Sprintf("Window: entire session, %s → %s %s (span %s)",
+			first.Format("Mon 15:04"), last.Format("Mon 15:04"), tzName,
+			formatAge(span))
+	}
+	return fmt.Sprintf("Window: last %s", formatWindow(out.WindowStartMs, out.WindowEndMs))
 }
 
 // formatAge renders a duration as "30s" / "5m" / "1h" / "1h30m"
@@ -611,16 +648,19 @@ func formatWindow(startMs, endMs int64) string {
 }
 
 // resolveWindowMs decides the lookback duration in milliseconds.
-// Resolution order: explicit Go duration string → integer hours
-// convenience field → 5h default. Values outside [1m, 24h] are
-// clamped — sub-minute windows produce empty timelines on real
-// sessions and silently surprise the user; >24h windows would
-// pull in too many sessions for the slash output to stay readable.
+//
+// Returns 0 when neither a duration string nor an hours value is
+// set, signalling "show the entire session" to ComputeTimeline.
+// Idle sessions and long-paused sessions then surface their full
+// history instead of being truncated to the rate-limit window.
+//
+// Explicit values are clamped to [1m, 24h]: sub-minute windows
+// return near-empty timelines on real sessions; >24h windows
+// extend smoothly via the no-window path anyway.
 func resolveWindowMs(window string, hours int) int64 {
 	const (
 		minWindow = time.Minute
 		maxWindow = 24 * time.Hour
-		defWindow = 5 * time.Hour
 	)
 	clamp := func(d time.Duration) time.Duration {
 		if d < minWindow {
@@ -639,5 +679,5 @@ func resolveWindowMs(window string, hours int) int64 {
 	if hours > 0 {
 		return int64(clamp(time.Duration(hours)*time.Hour) / time.Millisecond)
 	}
-	return int64(defWindow / time.Millisecond)
+	return 0
 }
