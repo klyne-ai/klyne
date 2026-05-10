@@ -95,13 +95,37 @@ func TestFormatTokenTimelineAsMarkdown_LeadsOnContextWindow(t *testing.T) {
 	if !strings.Contains(md, "% of context") {
 		t.Fatalf("table missing 'percent of context' column\n%s", md)
 	}
-	// Bottom line names the % of context window.
+	// Bottom line names the % of context window AND anchors to a
+	// timestamp ("as of HH:MM TZ (X ago)") so the reader knows
+	// whether "now" means right now or hours ago.
 	if !strings.Contains(md, "50% of the 1M context window") {
 		t.Fatalf("bottom line missing '50%% of 1M context'\n%s", md)
 	}
-	// Crucially: NO mention of 5-hour cap or plan tier in this surface.
-	if strings.Contains(md, "5-hour") || strings.Contains(md, "plan") {
-		t.Fatalf("timeline output leaked rate-limit / plan content:\n%s", md)
+	if !strings.Contains(md, "As of ") {
+		t.Fatalf("bottom line missing 'As of <time>' anchor\n%s", md)
+	}
+	// Uncached column header AND footnote must be present so the
+	// user sees the rate-limit cost separately from prefix size.
+	if !strings.Contains(md, "uncached") {
+		t.Fatalf("table missing 'uncached' column\n%s", md)
+	}
+	if !strings.Contains(md, "10× discounted") {
+		t.Fatalf("missing footnote explaining the uncached column\n%s", md)
+	}
+	// Plan tier must not appear in this surface — that's an
+	// advisor concern, not a session-fill concern. The string
+	// "5-hour" IS allowed inside the footnote that explains the
+	// uncached column, but it must NOT appear in the headline /
+	// trajectory / per-row data.
+	if strings.Contains(md, "max-5x") || strings.Contains(md, "plan tier") {
+		t.Fatalf("timeline output leaked plan-tier content:\n%s", md)
+	}
+	headlineEnd := strings.Index(md, "_Uncached column")
+	if headlineEnd > 0 {
+		headline := md[:headlineEnd]
+		if strings.Contains(headline, "5-hour cap") || strings.Contains(headline, "plan") {
+			t.Fatalf("timeline headline (above the footnote) leaked rate-limit content:\n%s", headline)
+		}
 	}
 }
 
@@ -224,6 +248,25 @@ func TestFormatTokenTimeline_LongSessionShowsGrowthInTable(t *testing.T) {
 	// non-zero positive delta proving the table renders growth.
 	if !strings.Contains(md, "+") {
 		t.Fatalf("table shows no positive deltas — growth is invisible\n%s", md)
+	}
+}
+
+func TestFormatAge(t *testing.T) {
+	cases := []struct {
+		ms   int64
+		want string
+	}{
+		{0, "0s"},
+		{30_000, "30s"},
+		{5 * 60_000, "5m"},
+		{60 * 60_000, "1h"},
+		{90 * 60_000, "1h30m"},
+		{-5, "0s"},
+	}
+	for _, tc := range cases {
+		if got := formatAge(tc.ms); got != tc.want {
+			t.Fatalf("formatAge(%d)=%q, want %q", tc.ms, got, tc.want)
+		}
 	}
 }
 

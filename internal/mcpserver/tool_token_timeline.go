@@ -192,15 +192,25 @@ func formatTokenTimelineAsMarkdown(out TokenTimelineOutput) string {
 			short(out.SessionID), formatWindow(out.WindowStartMs, out.WindowEndMs))
 	}
 
+	// Resolve a single timezone for every time string in this
+	// render. Defaults to the process's local zone (the user's
+	// system timezone) so a user in Asia/Kolkata sees IST instead
+	// of having to mentally translate UTC.
+	loc := time.Local
+	tzName, _ := time.Now().In(loc).Zone()
+	if tzName == "" {
+		tzName = "local"
+	}
+
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Session token usage — `%s`\n\n", short(out.SessionID))
 	if out.Model != "" && out.ContextWindow > 0 {
-		fmt.Fprintf(&b, "Window: last %s · %d turns · model `%s` (%s context).\n\n",
+		fmt.Fprintf(&b, "Window: last %s · %d turns · model `%s` (%s context) · times in %s.\n\n",
 			formatWindow(out.WindowStartMs, out.WindowEndMs), len(out.Points),
-			out.Model, humanTokens(out.ContextWindow))
+			out.Model, humanTokens(out.ContextWindow), tzName)
 	} else {
-		fmt.Fprintf(&b, "Window: last %s · %d turns.\n\n",
-			formatWindow(out.WindowStartMs, out.WindowEndMs), len(out.Points))
+		fmt.Fprintf(&b, "Window: last %s · %d turns · times in %s.\n\n",
+			formatWindow(out.WindowStartMs, out.WindowEndMs), len(out.Points), tzName)
 	}
 
 	// Trajectory sentence — the headline answer to "how is my
@@ -229,44 +239,67 @@ func formatTokenTimelineAsMarkdown(out TokenTimelineOutput) string {
 	// and the same prefix size — the growth becomes invisible.
 	// Sampling EVENLY across the timeline shows the trajectory
 	// the user actually cares about.
+	//
+	// "uncached" column = the portion of that turn's input that
+	// bills against the 5-hour rate-limit at full rate (cached
+	// prefix is ~10× discounted by the provider). The user
+	// requested visibility on this so the table makes the actual
+	// burn explicit alongside the prefix size.
 	const tableRows = 10
 	samples := evenlySamplePoints(out.Points, tableRows)
 	if out.ContextWindow > 0 {
-		b.WriteString("| time     | input tokens | % of context | Δ vs start |\n")
-		b.WriteString("|----------|-------------:|-------------:|-----------:|\n")
+		b.WriteString("| time     | input tokens | % of context | Δ vs start | uncached |\n")
+		b.WriteString("|----------|-------------:|-------------:|-----------:|---------:|\n")
 		for _, p := range samples {
-			when := time.UnixMilli(p.TsMs).UTC().Format("15:04:05")
+			when := time.UnixMilli(p.TsMs).In(loc).Format("15:04:05")
 			pct := float64(p.TotalInput) / float64(out.ContextWindow) * 100
 			if pct > 100 {
 				pct = 100
 			}
 			delta := p.TotalInput - out.FirstInput
-			fmt.Fprintf(&b, "| %s | %s | %s | %s |\n",
-				when, humanTokens(p.TotalInput), formatPct(pct), formatDelta(delta))
+			fmt.Fprintf(&b, "| %s | %s | %s | %s | %s |\n",
+				when, humanTokens(p.TotalInput), formatPct(pct),
+				formatDelta(delta), humanTokens(p.EffectiveInput))
 		}
 	} else {
-		b.WriteString("| time     | input tokens | Δ vs start |\n")
-		b.WriteString("|----------|-------------:|-----------:|\n")
+		b.WriteString("| time     | input tokens | Δ vs start | uncached |\n")
+		b.WriteString("|----------|-------------:|-----------:|---------:|\n")
 		for _, p := range samples {
-			when := time.UnixMilli(p.TsMs).UTC().Format("15:04:05")
+			when := time.UnixMilli(p.TsMs).In(loc).Format("15:04:05")
 			delta := p.TotalInput - out.FirstInput
-			fmt.Fprintf(&b, "| %s | %s | %s |\n",
-				when, humanTokens(p.TotalInput), formatDelta(delta))
+			fmt.Fprintf(&b, "| %s | %s | %s | %s |\n",
+				when, humanTokens(p.TotalInput),
+				formatDelta(delta), humanTokens(p.EffectiveInput))
 		}
 	}
 	b.WriteString("\n")
 
-	// Bottom line. Final amount + context-window percentage.
-	if out.ContextWindow > 0 {
-		fmt.Fprintf(&b,
-			"**This session is currently at ~%s of input (%s of the %s context window).**\n",
-			humanTokens(out.LatestInput), formatPct(out.PctOfContext), humanTokens(out.ContextWindow),
-		)
-	} else {
-		fmt.Fprintf(&b,
-			"**This session is currently at ~%s of input.**\n",
-			humanTokens(out.LatestInput),
-		)
+	// Bottom line. Final amount + context-window percentage,
+	// anchored to the timestamp of the latest data point so the
+	// reader knows whether "now" means right now or two hours ago.
+	if len(out.Points) > 0 {
+		latestPt := out.Points[len(out.Points)-1]
+		latestWhen := time.UnixMilli(latestPt.TsMs).In(loc).Format("15:04 " + tzName)
+		ageStr := formatAge(out.WindowEndMs - latestPt.TsMs)
+		if out.ContextWindow > 0 {
+			fmt.Fprintf(&b,
+				"**As of %s (%s ago), this session is at ~%s of input — %s of the %s context window.**\n",
+				latestWhen, ageStr,
+				humanTokens(out.LatestInput), formatPct(out.PctOfContext), humanTokens(out.ContextWindow),
+			)
+		} else {
+			fmt.Fprintf(&b,
+				"**As of %s (%s ago), this session is at ~%s of input.**\n",
+				latestWhen, ageStr, humanTokens(out.LatestInput),
+			)
+		}
+		// Honest footnote so users understand the two columns
+		// answer different questions: prefix size (the "input
+		// tokens" / "% of context" columns) is what fills the
+		// model's context window, while uncached input is what
+		// bills against the 5-hour rate-limit at full rate
+		// (cached prefix re-reads are ~10× discounted).
+		b.WriteString("\n_Uncached column = portion of each turn that bills against the 5-hour rate-limit at full rate (cached prefix is ~10× discounted by the provider)._\n")
 	}
 	return b.String()
 }
@@ -347,6 +380,29 @@ func formatDelta(delta int64) string {
 	default:
 		return "-" + humanTokens(-delta)
 	}
+}
+
+// formatAge renders a duration as "30s" / "5m" / "1h" / "1h30m"
+// for use in the "as of HH:MM (X ago)" bottom-line annotation.
+// Negative or sub-second values render as "0s" so a freshly-
+// updated session reads naturally.
+func formatAge(ms int64) string {
+	if ms <= 0 {
+		return "0s"
+	}
+	d := time.Duration(ms) * time.Millisecond
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	}
+	if d%time.Hour == 0 {
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	}
+	h := int(d / time.Hour)
+	m := int((d % time.Hour) / time.Minute)
+	return fmt.Sprintf("%dh%dm", h, m)
 }
 
 // formatPct renders 0..100 as "12%" / "0.5%" / "<1%". Sub-1% and
