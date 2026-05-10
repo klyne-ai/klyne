@@ -167,12 +167,38 @@ The prompts run server-side and inject the result as user-message content — no
 
 ## Supported CLIs
 
-| CLI | Tools | Search | Pre-compact recovery |
-|---|---|---|---|
-| Claude Code | All 5 tools | ✅ | ✅ via `compact_boundary` lines |
-| Codex | All 5 tools | ✅ | ✅ via embedded `replacement_history` |
+| Surface                     | Claude Code | Codex                    |
+|-----------------------------|-------------|--------------------------|
+| `list_sessions`             | ✅          | ✅                       |
+| `get_context_health`        | ✅          | ✅                       |
+| `search_messages`           | ✅          | ✅                       |
+| `generate_handoff`          | ✅          | ✅                       |
+| `get_pre_compact_context`   | ✅ via `compact_boundary` lines | ✅ via embedded `replacement_history` |
+| `get_token_timeline`        | ✅          | ⚠ no per-turn data ([known gap](docs/cli-review-2026-05-10.md#4-klyne-tokens-the-new-one)) |
+| `klyne advise` (advisor hook) | ✅        | n/a (no UserPromptSubmit hook surface) |
 
 For Codex sessions, `pre_tokens` and `trigger` (manual/auto) fields are not exposed in the output — Codex's `compacted` envelope doesn't carry that metadata. The recovered messages themselves are returned identically.
+
+The token-timeline tool is currently asymmetric: Claude transcripts produce a full per-turn timeline; Codex transcripts return "no assistant turns" because the parser does not yet attach Codex's `event_msg.token_count` records to canonical messages. `klyne audit-sessions` does extract Codex token counts via a separate path, so cross-session aggregates work; only the per-turn timeline is affected. See [the 2026-05-10 CLI review](docs/cli-review-2026-05-10.md) for the full reproduction.
+
+---
+
+## CLI commands
+
+`klyne` ships with these top-level subcommands. The MCP surface (above) and these CLI commands share the same engine — you can run any read-only operation either from chat (slash menu) or from your terminal.
+
+| Command | What it does |
+|---|---|
+| `klyne` (no args) | Start the daemon (alias for `klyne start`). Opens `http://127.0.0.1:7878`. |
+| `klyne start` / `klyne stop` | Daemon lifecycle. |
+| `klyne doctor` | JSON diagnostic — paths, providers, schema version, DB size. |
+| `klyne audit-sessions [--limit N]` | Compare klyne's stored metrics against raw JSONL ground truth across N most-recent sessions. The trust foundation. |
+| `klyne mcp install` | Register the MCP server in Claude Code + Codex configs AND install the `UserPromptSubmit` advisor hook. Idempotent. |
+| `klyne advise` | Hook entrypoint. You don't run this directly; Claude Code's hook runs it. |
+| `klyne config show / get / set` | Read or update `~/.klyne/config.toml`. Drives plan tier (5-hour cap denominator) and advisor on/off toggle. |
+| `klyne tokens [--session=ID] [--window=DURATION]` | Per-turn token timeline for one session: ASCII sparkline + table + freshness anchor. Default window 5h; pass `--window=30m` / `--window=24h` etc. Same output as `/klyne:tokens` in chat. |
+
+A 2026-05-10 review of every command's behaviour against a real Claude session and a real Codex session, with verdicts on what's useful and what isn't, lives at [docs/cli-review-2026-05-10.md](docs/cli-review-2026-05-10.md).
 
 ---
 
@@ -219,6 +245,7 @@ Optional AI features (summary, title generation, etc.) require your own provider
 - [Handoff-equivalence proof](docs/proof/02-handoff-equivalence/claim.md) — verbatim handoff output
 - [Proactive advisor proof](docs/proof/03-advisor/claim.md) — four triggers + transition rule
 - [Proactive session advisor design](docs/features/proactive-session-advisor.md) — v1 spec for the UserPromptSubmit hook
+- [CLI review (2026-05-10)](docs/cli-review-2026-05-10.md) — every CLI command tested against real Claude + Codex sessions, with honest verdicts
 - [MCP ship log](docs/MCP-SHIP-LOG.md) — every slice that landed, in order
 - [Context rescue strategy](docs/marketing/context-rescue-strategy.md)
 - [Comparison and gaps](docs/marketing/comparison-and-gaps.md)
