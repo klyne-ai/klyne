@@ -56,7 +56,61 @@ func newConfigSetCmd() *cobra.Command {
 		Args:  cobra.MinimumNArgs(1),
 	}
 	c.AddCommand(newConfigSetPlanCmd())
+	c.AddCommand(newConfigSetAdvisorCmd())
 	return c
+}
+
+// newConfigSetAdvisorCmd registers `klyne config set advisor on|off`.
+// Toggles the UserPromptSubmit hook's kill switch without disturbing
+// any other configuration. Persisted to ~/.klyne/config.toml so the
+// next hook invocation honours it.
+func newConfigSetAdvisorCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "advisor <on|off>",
+		Short: "Enable or disable the proactive advisor hook",
+		Long: `Toggle the proactive advisor's UserPromptSubmit hook.
+
+When set to "off", klyne advise exits silently for every prompt.
+The hook entry stays installed in ~/.claude/settings.json — the
+gate lives in klyne itself, so re-enabling does not require
+re-running klyne mcp install.
+
+Useful when:
+  - Developing klyne (the relevance trigger fires on klyne's own
+    transcripts during dogfooding).
+  - Working in a tightly-scoped session where you do not need
+    proactive nudges.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			val := strings.ToLower(strings.TrimSpace(args[0]))
+			var disabled bool
+			switch val {
+			case "on", "enabled", "true", "yes":
+				disabled = false
+			case "off", "disabled", "false", "no":
+				disabled = true
+			default:
+				return fmt.Errorf("advisor must be one of: on, off (got %q)", args[0])
+			}
+			cfg, err := config.Load()
+			if err != nil {
+				return fmt.Errorf("load config: %w", err)
+			}
+			cfg.Advisor.Disabled = disabled
+			if err := config.Save(cfg); err != nil {
+				return fmt.Errorf("save config: %w", err)
+			}
+			if disabled {
+				fmt.Fprintln(cmd.OutOrStdout(),
+					"Advisor disabled. The UserPromptSubmit hook stays installed but will exit silently.")
+			} else {
+				fmt.Fprintln(cmd.OutOrStdout(),
+					"Advisor enabled. Inline warnings will fire when sessions drift, accelerate, or approach your 5-hour cap.")
+			}
+			return nil
+		},
+		SilenceUsage: true,
+	}
 }
 
 func newConfigSetPlanCmd() *cobra.Command {
@@ -124,6 +178,23 @@ func newConfigGetCmd() *cobra.Command {
 			cap := cfg.Plan.FiveHourCap()
 			fmt.Fprintf(cmd.OutOrStdout(), "plan: %s (estimated cap ~%s effective tokens / 5h)\n",
 				tier, humanTokens(cap))
+			return nil
+		},
+	})
+	c.AddCommand(&cobra.Command{
+		Use:   "advisor",
+		Short: "Print whether the proactive advisor hook is on or off",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			cfg, err := config.Load()
+			if err != nil {
+				return fmt.Errorf("load config: %w", err)
+			}
+			state := "on"
+			if cfg.Advisor.Disabled {
+				state = "off"
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "advisor: %s\n", state)
 			return nil
 		},
 	})

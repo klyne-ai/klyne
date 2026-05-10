@@ -160,6 +160,13 @@ func computeAdvisory(ctx context.Context, stdin io.Reader) (string, error) {
 		// than blocking the whole hook.
 		cfg = config.Defaults()
 	}
+	// User-level kill switch. When set, the hook produces no
+	// output for the rest of its lifetime — useful for sessions
+	// where the advisor's signal is noise (e.g. developing klyne
+	// itself).
+	if cfg.Advisor.Disabled {
+		return "", nil
+	}
 
 	statePath, err := contexthealth.DefaultStatePath()
 	if err != nil {

@@ -142,6 +142,43 @@ func TestComputeAdvisory_NoSessionInCWD(t *testing.T) {
 	}
 }
 
+func TestComputeAdvisory_DisabledViaConfigStaysSilent(t *testing.T) {
+	fix := newAdviseFixture(t)
+
+	// Build a session that would normally fire the acceleration
+	// trigger.
+	now := time.Now()
+	lines := []string{}
+	for i := 0; i < 5; i++ {
+		lines = append(lines, claudeAssistantLine("sessOff", now.Add(-time.Duration(8-i)*time.Minute), 5_000, 0))
+	}
+	lines = append(lines,
+		claudeAssistantLine("sessOff", now.Add(-3*time.Minute), 9_000, 0),
+		claudeAssistantLine("sessOff", now.Add(-2*time.Minute), 15_000, 0),
+		claudeAssistantLine("sessOff", now.Add(-1*time.Minute), 25_000, 0),
+	)
+	fix.claudeTranscriptForCWD("sessOff", lines)
+
+	// Write a config with the advisor explicitly disabled.
+	klyneDir := filepath.Join(fix.dir, ".klyne")
+	if err := os.MkdirAll(klyneDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	configBody := "[advisor]\ndisabled = true\n"
+	if err := os.WriteFile(filepath.Join(klyneDir, "config.toml"), []byte(configBody), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	out, err := computeAdvisory(context.Background(),
+		strings.NewReader(fmt.Sprintf(`{"cwd":%q}`, fix.cwd)))
+	if err != nil {
+		t.Fatalf("computeAdvisory: %v", err)
+	}
+	if out != "" {
+		t.Fatalf("expected silent advisor when disabled=true, got %q", out)
+	}
+}
+
 func TestComputeAdvisory_TransitionPreventsRefire(t *testing.T) {
 	fix := newAdviseFixture(t)
 
