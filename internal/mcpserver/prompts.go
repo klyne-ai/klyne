@@ -15,7 +15,9 @@ import (
 // ====================================
 // Tools are auto-invoked by the AI based on context. Prompts surface
 // in the user's `/` menu — Claude Code formats MCP prompts as
-// `/mcp__<server-name>__<prompt-name>`. These four prompts let the
+// `/<server>:<prompt-name>` (e.g. `/klyne:health`). Older Claude Code
+// builds used `/mcp__<server>__<prompt>`; that form has been retired
+// and is no longer accepted as input. These five prompts let the
 // user pull each tool's data on demand without waiting for the AI to
 // decide it's relevant.
 //
@@ -56,7 +58,7 @@ func userPromptResult(description, text string) *mcp.GetPromptResult {
 	}
 }
 
-// PromptHealthHandler implements the /mcp__klyne__health prompt.
+// PromptHealthHandler implements the /klyne:health prompt.
 // Live: invokes get_context_health and returns its verdict + bloat
 // scorecard as Markdown. Equivalent to the AI calling the tool but
 // triggered explicitly by the user via the slash menu.
@@ -75,7 +77,7 @@ func PromptHealthHandler(ctx context.Context, req *mcp.GetPromptRequest) (*mcp.G
 	), nil
 }
 
-// PromptSessionsHandler implements /mcp__klyne__sessions. Live:
+// PromptSessionsHandler implements /klyne:sessions. Live:
 // lists every Claude + Codex session in cwd's project so the user can
 // see what's discoverable and pick one for the next call.
 func PromptSessionsHandler(ctx context.Context, req *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
@@ -93,7 +95,7 @@ func PromptSessionsHandler(ctx context.Context, req *mcp.GetPromptRequest) (*mcp
 	), nil
 }
 
-// PromptHandoffHandler implements /mcp__klyne__handoff. Live:
+// PromptHandoffHandler implements /klyne:handoff. Live:
 // renders the deterministic handoff Markdown the user can paste into
 // a fresh session.
 func PromptHandoffHandler(ctx context.Context, req *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
@@ -111,7 +113,7 @@ func PromptHandoffHandler(ctx context.Context, req *mcp.GetPromptRequest) (*mcp.
 		// generic explanation when even that is empty.
 		text := strings.TrimSpace(out.Markdown)
 		if text == "" {
-			text = "No handoff available for this working directory. Run `/mcp__klyne__sessions` to see candidates."
+			text = "No handoff available for this working directory. Run `/klyne:sessions` to see candidates."
 		}
 		return userPromptResult("Handoff (no session resolved)", text), nil
 	}
@@ -121,7 +123,7 @@ func PromptHandoffHandler(ctx context.Context, req *mcp.GetPromptRequest) (*mcp.
 	), nil
 }
 
-// PromptSearchHandler implements /mcp__klyne__search. Live:
+// PromptSearchHandler implements /klyne:search. Live:
 // invokes search_messages and returns the hits as Markdown so the
 // user (and Claude) can pick a session_id to drill into.
 //
@@ -182,7 +184,7 @@ func formatSearchAsMarkdown(out SearchOutput) string {
 	return b.String()
 }
 
-// PromptPreCompactHandler implements /mcp__klyne__precompact.
+// PromptPreCompactHandler implements /klyne:precompact.
 // Live: recovers messages preceding the last /compact event (Claude)
 // or replacement_history (Codex). When no compact has happened, the
 // text explains why nothing was returned.

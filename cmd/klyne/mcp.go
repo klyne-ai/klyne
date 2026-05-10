@@ -49,11 +49,11 @@ Tools (auto-invoked by the AI):
                               decode replacement_history (Codex)
 
 Slash prompts (user-triggered via /):
-  /mcp__klyne__health      → live get_context_health
-  /mcp__klyne__sessions    → live list_sessions
-  /mcp__klyne__search      → live search_messages
-  /mcp__klyne__handoff     → live generate_handoff
-  /mcp__klyne__precompact  → live get_pre_compact_context
+  /klyne:health      → live get_context_health
+  /klyne:sessions    → live list_sessions
+  /klyne:search      → live search_messages
+  /klyne:handoff     → live generate_handoff
+  /klyne:precompact  → live get_pre_compact_context
 
 To register the server with each host, run: klyne mcp install`,
 		RunE: runMcp,
@@ -129,6 +129,18 @@ func runMcpInstall(cmd *cobra.Command, platformFlag string) error {
 		fmt.Fprintf(cmd.OutOrStdout(), "%s: %s — %s\n",
 			report.Platform, report.Action, report.Path)
 	}
+
+	// Slash-command bundle. Installed alongside the Claude Code
+	// MCP entry — only meaningful for that host today, but the
+	// commands live under ~/.claude/commands/ regardless of which
+	// platform target the user picked, so install them whenever
+	// any target is selected.
+	scReport, err := mcpserver.InstallSlashCommands()
+	if err != nil {
+		return fmt.Errorf("install slash commands: %w", err)
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "slash-commands: %s — %s (%d files)\n",
+		scReport.Action, scReport.Dir, scReport.Files)
 	return nil
 }
 

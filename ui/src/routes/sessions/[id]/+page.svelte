@@ -5,7 +5,7 @@
   import { fetchSession, fetchMessages, fetchRestore, deleteSession } from '$lib/api.js';
   import { removeSession } from '$lib/stores.svelte.js';
   import { subscribe } from '$lib/sse.js';
-  import { kfmt, relAgo } from '$lib/format.js';
+  import { kfmt, relAgo, costFmt } from '$lib/format.js';
   import type { Session, Message, RestoreResponse, ToolCall, ToolResult } from '$lib/types.js';
   import CliBadge from '$lib/ui/CliBadge.svelte';
   import StatusBadge from '$lib/ui/StatusBadge.svelte';
@@ -249,7 +249,7 @@
     {@const cachedWrite = session.cached_write_tokens ?? 0}
     {@const freshIn = Math.max(0, session.tokens_in - cachedRead - cachedWrite)}
     {@const cachedPct = session.tokens_in > 0 ? Math.round(((cachedRead + cachedWrite) / session.tokens_in) * 100) : 0}
-    <div class="ad-card" style="display: grid; grid-template-columns: repeat(3, 1fr); padding: 0; margin-bottom: 16px;">
+    <div class="ad-card" style="display: grid; grid-template-columns: repeat(4, 1fr); padding: 0; margin-bottom: 16px;">
       <div style="padding: 12px 16px; border-right: 1px solid var(--ad-border-soft);">
         <div style="font-size: 11px; color: var(--ad-faint); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 4px;">Messages</div>
         <div class="ad-mono ad-tnum" style="font-size: 16px; font-weight: 600;">{session.msg_count}</div>
@@ -266,9 +266,13 @@
           </div>
         {/if}
       </div>
-      <div style="padding: 12px 16px;">
+      <div style="padding: 12px 16px; border-right: 1px solid var(--ad-border-soft);">
         <div style="font-size: 11px; color: var(--ad-faint); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 4px;">↓ tokens out</div>
         <div class="ad-mono ad-tnum" style="font-size: 16px; font-weight: 600;">{kfmt(session.tokens_out)}</div>
+      </div>
+      <div style="padding: 12px 16px;">
+        <div style="font-size: 11px; color: var(--ad-faint); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 4px;">Cost</div>
+        <div class="ad-mono ad-tnum" style="font-size: 16px; font-weight: 600; color: {session.cost_usd > 0 ? 'var(--ad-fg)' : 'var(--ad-faint)'};">{costFmt(session.cost_usd, session.cost_usd > 0)}</div>
       </div>
     </div>
 
