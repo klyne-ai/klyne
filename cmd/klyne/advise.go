@@ -78,6 +78,8 @@ type hookInput struct {
 
 // newAdviseCmd registers `klyne advise`.
 func newAdviseCmd() *cobra.Command {
+	var explain bool
+	var explainSession string
 	c := &cobra.Command{
 		Use:   "advise",
 		Short: "Compute the proactive session advisory (used by the UserPromptSubmit hook)",
@@ -96,13 +98,27 @@ of JSON conforming to the UserPromptSubmit hook schema. Stderr:
 human-readable diagnostics.
 
 Exit code: always 0 unless invoked with bad flags. The hook must
-never block the user prompt on a klyne error.`,
-		RunE: runAdvise,
+never block the user prompt on a klyne error.
+
+For debugging "why didn't I get an advisory?", pass --explain.
+That prints every trigger's current verdict (fired / would fire /
+silent + reason) ignoring the once-per-state-transition rule —
+useful for confirming the advisor saw the same situation you did.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if explain {
+				return runAdviseExplain(cmd, explainSession)
+			}
+			return runAdvise(cmd, args)
+		},
 		// Suppress cobra's usage-on-error: a hook should fail
 		// silently rather than print boilerplate to the AI's prompt.
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
+	c.Flags().BoolVar(&explain, "explain", false,
+		"print every trigger's current verdict (debug mode; ignores fire-once state)")
+	c.Flags().StringVar(&explainSession, "session", "",
+		"explicit session id when running --explain (default: latest in cwd)")
 	return c
 }
 
@@ -282,3 +298,134 @@ func computeFiveHourSummary(_ context.Context, cfg *config.Config, state context
 // session_id is available. Kept distinct so tests can branch on
 // it directly.
 var errResolveCWD = errors.New("klyne advise: no cwd and no session_id provided")
+
+// runAdviseExplain is the human-facing diagnostic mode. It loads
+// the same data the hook would consume, runs every trigger, and
+// prints a per-trigger verdict — including triggers that wouldn't
+// fire because of the fire-once-per-transition rule. Useful when
+// the user wants to know "why didn't klyne tell me about X?"
+//
+// Output goes to stdout (not the hook channel) and is plain text,
+// not JSON.
+func runAdviseExplain(cmd *cobra.Command, explicitSession string) error {
+	stdout := cmd.OutOrStdout()
+	cwd, _ := os.Getwd()
+
+	path, err := resolvePath(explicitSession, cwd)
+	if err != nil {
+		fmt.Fprintf(stdout, "klyne advise --explain: %v\n", err)
+		return nil
+	}
+	if path == "" {
+		fmt.Fprintln(stdout, "klyne advise --explain: no Claude Code session found in this cwd. Pass --session=<id>.")
+		return nil
+	}
+
+	snap, err := mcpserver.LoadSnapshot(path)
+	if err != nil {
+		fmt.Fprintf(stdout, "klyne advise --explain: load snapshot: %v\n", err)
+		return nil
+	}
+
+	cfg, _ := config.Load()
+	if cfg == nil {
+		cfg = config.Defaults()
+	}
+
+	statePath, _ := contexthealth.DefaultStatePath()
+	state := contexthealth.LoadState(statePath)
+	now := time.Now().UnixMilli()
+	summary := computeFiveHourSummary(context.Background(), cfg, state, now)
+
+	relevance := contexthealth.ScoreFiles(snap.Messages)
+	accel := contexthealth.EvaluateAcceleration(snap.Messages)
+	hardCeiling := snap.ContextFillPct >= 75
+
+	fmt.Fprintf(stdout, "klyne advise --explain — session %s\n\n", short(snap.SessionID))
+	fmt.Fprintf(stdout, "Advisor toggle: %s\n", advisorState(cfg.Advisor.Disabled))
+	fmt.Fprintf(stdout, "Context fill : %.1f%%\n\n", snap.ContextFillPct)
+
+	fmt.Fprintln(stdout, "Trigger evaluations (live, ignoring fire-once state):")
+	fmt.Fprintf(stdout, "  hard_ceiling     : fill >= 75%% → %s\n",
+		boolToFire(hardCeiling))
+	fmt.Fprintf(stdout, "  acceleration     : last-3 mean >2x prior-5 mean AND latest >=5K → %s\n",
+		boolToFire(accel.ShouldFire))
+	fmt.Fprintf(stdout, "    sampled %d turns; recent mean ~%s, prior mean ~%s, latest ~%s\n",
+		accel.SampledTurns,
+		humanInt(int64(accel.RecentMean)), humanInt(int64(accel.PriorMean)),
+		humanInt(accel.LatestEffectiveInput))
+	fmt.Fprintf(stdout, "  stale_context    : stale-share >50%% AND total >=8KB → %s\n",
+		boolToFire(relevance.ShouldFire))
+	fmt.Fprintf(stdout, "    stale share %.0f%% (%s of %s loaded file bytes)\n",
+		relevance.StaleShare*100,
+		humanInt(int64(relevance.StaleBytes)), humanInt(int64(relevance.TotalBytes)))
+	if cap := cfg.Plan.FiveHourCap(); cap > 0 {
+		fmt.Fprintf(stdout, "  five_hour_window : pct used >=50%% (warn) / >=75%% (urgent) → %s\n",
+			fiveHourLabel(summary))
+		fmt.Fprintf(stdout, "    %.1f%% of your %s plan (~%s used / ~%s cap)\n",
+			summary.PctUsed, cfg.Plan.Tier,
+			humanInt(summary.TotalEffective), humanInt(cap))
+	} else {
+		fmt.Fprintln(stdout, "  five_hour_window : (skipped — no plan tier configured; run `klyne config set plan <tier>`)")
+	}
+
+	fmt.Fprintln(stdout, "\nFire-once state for this session:")
+	if row := state.Sessions[snap.SessionID]; row != nil && len(row.Fired) > 0 {
+		for _, t := range row.Fired {
+			fmt.Fprintf(stdout, "  %s already fired this session — staying silent until it clears.\n", t)
+		}
+		fmt.Fprintln(stdout, "  (To re-fire after a clear, the underlying condition must first drop below threshold then trip again.)")
+	} else {
+		fmt.Fprintln(stdout, "  (no triggers have fired yet for this session)")
+	}
+	return nil
+}
+
+func boolToFire(b bool) string {
+	if b {
+		return "WOULD FIRE"
+	}
+	return "silent"
+}
+
+func advisorState(disabled bool) string {
+	if disabled {
+		return "OFF (hook returns silent on every prompt)"
+	}
+	return "on"
+}
+
+func fiveHourLabel(s contexthealth.FiveHourSummary) string {
+	switch s.Threshold() {
+	case contexthealth.FiveHourThresholdUrgent:
+		return "WOULD FIRE (urgent)"
+	case contexthealth.FiveHourThresholdWarn:
+		return "WOULD FIRE (warn)"
+	default:
+		return "silent"
+	}
+}
+
+// humanInt is a thin wrapper that mirrors humanTokens but accepts
+// any int64 the explain output needs. Kept tiny on purpose.
+func humanInt(n int64) string {
+	if n <= 0 {
+		return "0"
+	}
+	switch {
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.1fM", float64(n)/1e6)
+	case n >= 1_000:
+		return fmt.Sprintf("%.1fK", float64(n)/1e3)
+	default:
+		return fmt.Sprintf("%d", n)
+	}
+}
+
+// short truncates a long uuid to its first 8 hex chars.
+func short(id string) string {
+	if len(id) <= 8 {
+		return id
+	}
+	return id[:8]
+}

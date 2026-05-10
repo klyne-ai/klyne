@@ -278,32 +278,60 @@ func formatHealthAsMarkdown(out GetContextHealthOutput) string {
 }
 
 // formatSessionsAsMarkdown renders a ListSessionsOutput as a list of
-// sessions with CLI / activity / last-modified per row.
+// sessions with CLI / activity / last-modified / preview per row.
+//
+// The directive prefix asks the AI host to render the section
+// verbatim. Without it, hosts tend to condense the list to "the
+// active session is f876eadd" — losing the previews and timestamps
+// the user actually invoked /klyne:sessions to see.
+//
+// The preview cleanup drops Claude Code's `<environment_context>…`
+// boilerplate that appears as the literal first user message of
+// most sessions. That string is structurally meaningless to a
+// human scanning a session list; the second non-trivial line is
+// what they actually want.
 func formatSessionsAsMarkdown(out ListSessionsOutput) string {
 	if len(out.Candidates) == 0 {
 		return fmt.Sprintf("No klyne-discoverable sessions in `%s`.", out.CWD)
 	}
 	var b strings.Builder
+	b.WriteString("The user invoked `/klyne:sessions`. Render the list below VERBATIM, every row preserved. Do not collapse to a single 'the active session is X' line. After the list you may add at most one short sentence of context.\n\n")
 	fmt.Fprintf(&b, "# Sessions in `%s`\n\n", out.CWD)
 	for _, c := range out.Candidates {
 		active := ""
 		if c.IsActive {
 			active = " · **active**"
 		}
-		// CandidateRow doesn't expose CLI directly today; the AI can
-		// infer it from the session-id format, but we include CLI in
-		// the rendered text by prefix-matching the SessionID against
-		// known shapes. Cleaner: extend CandidateRow with CLI in a
-		// follow-up; left as-is for this slice to avoid a JSON-shape
-		// change without need.
+		preview := cleanSessionPreview(c.Preview)
 		fmt.Fprintf(&b, "- `%s`%s — %s · %d msgs · %q\n",
-			c.SessionID, active, c.ModTime, c.MsgCount, c.Preview)
+			c.SessionID, active, c.ModTime, c.MsgCount, preview)
 	}
 	return b.String()
 }
 
+// cleanSessionPreview drops Claude Code's `<environment_context>`
+// boilerplate that often appears as the first user message of a
+// resumed session. When the original preview is just that envelope,
+// returns a placeholder ("(env header)") so the row stays readable
+// rather than printing 200 chars of context-tag XML.
+func cleanSessionPreview(preview string) string {
+	trimmed := strings.TrimSpace(preview)
+	if trimmed == "" {
+		return ""
+	}
+	if strings.HasPrefix(trimmed, "<environment_context>") ||
+		strings.HasPrefix(trimmed, "<command-message>") ||
+		strings.HasPrefix(trimmed, "<command-name>") {
+		return "(session-resume metadata — no human prompt yet)"
+	}
+	return trimmed
+}
+
 // formatPreCompactAsMarkdown renders the recovered messages (or the
-// "no compact yet" status) as a readable block.
+// "no compact yet" status) as a readable block. The directive prefix
+// asks the AI host to render the section verbatim — without it,
+// hosts tend to summarise the recovered messages back into a single
+// "we did X then Y" line, defeating the purpose of recovery.
 func formatPreCompactAsMarkdown(out PreCompactOutput) string {
 	if out.Ambiguous {
 		return formatAmbiguousAsMarkdown("get_pre_compact_context", out.Candidates)
@@ -315,8 +343,10 @@ func formatPreCompactAsMarkdown(out PreCompactOutput) string {
 		return "This session has not been /compact'd yet — nothing to recover."
 	}
 	var b strings.Builder
+	b.WriteString("The user invoked `/klyne:precompact`. Render the report below VERBATIM, including every message row with its timestamp and role exactly as written. Do not summarise; do not omit rows. After the report you may add at most one short sentence of context.\n\n")
 	fmt.Fprintf(&b, "# Pre-compact recovery\n\n")
-	fmt.Fprintf(&b, "Recovered %d messages from before the last /compact event.\n\n", len(out.Messages))
+	fmt.Fprintf(&b, "Recovered %d messages from immediately before the LAST `/compact` event in this session.\n\n", len(out.Messages))
+	b.WriteString("> Note: this returns only the slice of conversation that the last `/compact` ate. If you ran `/compact` early in a long session, only those early turns are recovered here; later turns are still in the live transcript and visible via `klyne tokens` or by scrolling the chat.\n\n")
 	if out.Trigger != "" {
 		fmt.Fprintf(&b, "- Trigger: `%s`\n", out.Trigger)
 	}
@@ -326,9 +356,18 @@ func formatPreCompactAsMarkdown(out PreCompactOutput) string {
 	if out.CompactTimestamp != "" {
 		fmt.Fprintf(&b, "- Compact timestamp: `%s`\n", out.CompactTimestamp)
 	}
-	b.WriteString("\n## Messages\n\n")
+	b.WriteString("\n## Messages (oldest first)\n\n")
+	loc := time.Local
 	for _, m := range out.Messages {
-		fmt.Fprintf(&b, "**%s** — %s\n\n", m.Role, oneLine(m.Content))
+		body := oneLine(m.Content)
+		if body == "" {
+			continue
+		}
+		when := ""
+		if m.TS > 0 {
+			when = time.UnixMilli(m.TS).In(loc).Format("15:04:05") + " "
+		}
+		fmt.Fprintf(&b, "**%s%s** — %s\n\n", when, m.Role, body)
 	}
 	return b.String()
 }
