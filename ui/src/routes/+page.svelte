@@ -145,7 +145,13 @@
     {:else if projectsStore.loading}
       <div class="ad-card" style="padding: 16px; color: var(--ad-muted); font-size: 13px;">Loading…</div>
     {:else}
-      <div class="ad-card" style="padding: 16px; color: var(--ad-muted); font-size: 13px;">No active sessions</div>
+      <div class="ad-card" style="padding: 16px 18px; display: flex; align-items: center; gap: 16px;">
+        <div style="flex: 1;">
+          <div style="font-size: 13px; color: var(--ad-fg-2); margin-bottom: 2px;">No active sessions right now.</div>
+          <div style="font-size: 12px; color: var(--ad-muted);">Start a Claude Code or Codex session in any project, or browse what you've already worked on.</div>
+        </div>
+        <button class="ad-btn" onclick={() => goto('/projects')}>Browse {projects.length || 'all'} projects →</button>
+      </div>
     {/if}
   </section>
 

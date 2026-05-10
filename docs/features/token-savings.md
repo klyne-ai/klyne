@@ -15,10 +15,16 @@ Three concrete UI elements on the session detail page:
 1. **Passive context-fill indicator** with a per-turn cost projection,
    expressed as a percentage of the user's rolling 5-hour rate-limit cap.
 2. **Active "compact now" CTA** with a concrete savings delta. Appears once
-   the indicator crosses ~50% fill.
+   the indicator crosses 50% fill *and* per-turn cost is calibrated (i.e.
+   the server returned non-`-1` percentages).
 3. **On-demand AI break advisor** that reads the recent conversation and
-   recommends `start_fresh` / `compact` / `continue`. Appears at >60% fill
+   recommends `start_fresh` / `compact` / `continue`. Appears at 60% fill
    and only fires on user click.
+
+The 50% / 60% thresholds and the green-amber-red palette are enforced in
+[`ui/src/lib/components/TokenSavings.svelte`](../../ui/src/lib/components/TokenSavings.svelte);
+the same component polls `/sessions/{id}/usage` every 60s while the page
+is open, so the bar reacts to new turns without a manual refresh.
 
 ## how it solves the user problem
 
@@ -109,21 +115,42 @@ raw dollars) is that it maps directly to the user's lived constraint:
 
 - **Trigger**: user click only. Never auto-fires — calling an LLM on every
   page-paint is both slow and a trust violation.
-- **Model selection**: routed through the existing `internal/ai` selector
-  with `TaskKind = TaskTitle`, which always picks the cheapest configured
-  model (Haiku-class on Anthropic, equivalent tier on Gemini).
+- **Model selection**: a factory built once at startup
+  (`buildBreakAdviceFactory` in [`internal/app/app.go`](../../internal/app/app.go))
+  picks the cheapest configured model — the same tier the `internal/ai`
+  selector would choose for `TaskKind = TaskTitle` (Haiku-class on
+  Anthropic, equivalent tier on Gemini). The selector is not invoked at
+  request time; the chosen `(provider, model)` pair is closed over.
 - **Prompt input**: the last 10 messages of the session, each truncated to
-  1000 chars. Just enough signal to detect "task ended" vs. "task ongoing"
-  without paying for the full history.
+  1000 chars (`breakAdviceMessageWindow` / `breakAdviceContentTruncate`).
+  Just enough signal to detect "task ended" vs. "task ongoing" without
+  paying for the full history.
+- **Model parameters**: `MaxTokens = 200`, `Temperature = 0.0`. Reply is
+  capped (the JSON body is well under 100 tokens; 200 leaves headroom)
+  and deterministic for the same input. A per-call timeout
+  (`breakAdviceCallTimeout`) bounds how long a slow provider can block
+  the request.
 - **Output**: structured JSON parsed into `BreakAdviceResponse`. Verdict is
-  one of `start_fresh` / `compact` / `continue` / `unavailable`.
+  one of `start_fresh` / `compact` / `continue` / `unavailable`. `Reason`
+  is always populated, including for `unavailable` (it explains why
+  advice can't be given).
 - **Caching**: in-memory, server-side, 10 minutes per session. Re-clicks
   inside the window are free. The `cached_at` field on the response lets
   the UI show "advised X ago" and invalidate locally if it wants fresher
-  advice.
-- **Cost guard**: roughly $0.005 per click on Haiku-class models. If no AI
-  provider is configured the handler returns `Verdict = "unavailable"`
-  with a `Reason` that explains why, rather than a 500.
+  advice. Successful verdicts and `unavailable` responses are cached;
+  transient provider failures are not (see *failure modes* below). The
+  cache map is keyed by session ID and grows linearly with distinct
+  sessions accessed — entries are tiny, so it's not bounded beyond TTL.
+- **Failure modes**:
+  - *No provider configured* → `Verdict = unavailable`, cached.
+  - *Provider call errors* (network blip, transport failure, bad
+    credential) → `Verdict = continue` with a generic `Reason`, **not
+    cached**, and a `Warn`-level `slog` line is emitted so operators can
+    see the failure. The next click retries against a (hopefully)
+    recovered provider.
+  - *DB error reading messages* → HTTP 500 with an `Error`-level log.
+- **Cost guard**: roughly $0.005 per click on Haiku-class models, bounded
+  further by `MaxTokens = 200`.
 
 ## endpoints
 
@@ -141,7 +168,11 @@ Both are simple `GET`s, no body, return JSON. Authoritative DTOs live in
 
 - **Model context-window detection is heuristic.** `internal/usage/context_window.go`
   string-matches on model name. Fine for v1; will move to a config-driven
-  table when the supported model list grows.
+  table when the supported model list grows. When the model is unknown,
+  `ContextWindow` is returned as `0` and the UI should treat
+  `ContextFillPct` as not meaningful (the bar still renders the raw
+  ratio, but downstream gating like the 50% / 60% thresholds will simply
+  not trip).
 - **`CompactRatio` is hard-coded at 0.15.** If empirical observation drifts
   (e.g. Claude Code changes its compaction strategy) this becomes a
   user-configurable value.
@@ -152,6 +183,10 @@ Both are simple `GET`s, no body, return JSON. Authoritative DTOs live in
 - **Per-CLI calibration mixing.** A session uses its own CLI's `/usage`
   snapshot only — no cross-CLI averaging. This is intentional but called
   out so reviewers don't ask.
+- **Break-advice cache is unbounded by entry count.** Eviction is TTL-only
+  (10 minutes after the entry is read past freshness). Entries are tiny,
+  but a long-lived daemon serving thousands of distinct sessions will
+  accumulate map keys until restart.
 
 ## file map
 
@@ -168,8 +203,12 @@ For navigation when reading the implementation:
   TTL cache.
 - `internal/usage/codex_snapshot.go` — Codex JSONL snapshot reader.
 - `internal/usage/context_window.go` — model name → context-window lookup.
+- `internal/app/app.go` — `buildBreakAdviceFactory` chooses the cheapest
+  configured AI provider/model at startup and hands the closure to the
+  handler.
 - `ui/src/lib/components/TokenSavings.svelte` — the indicator, CTA, and
-  advisor button (planned mount target).
+  advisor button. Owns the 50% / 60% thresholds and the 60-second poll
+  loop.
 - `ui/src/routes/sessions/[id]/+page.svelte` — mount point on the session
   detail page.
 - `ui/src/lib/types.ts` — TypeScript mirrors of the Go DTOs.
