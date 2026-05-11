@@ -142,8 +142,7 @@ scenarios that match the project's real value prop:
 
 Plus: tools/prompts tables now include `search_messages` and the
 five `/mcp__klyne__*` slash commands; install section covers
-`klyne mcp install` with auto-detect and legacy `agentdeck`
-cleanup; "What klyne does NOT claim" section to prevent overreach;
+`klyne mcp install` with auto-detect; "What klyne does NOT claim" section to prevent overreach;
 roadmap reflects Codex parity, search, and proof artifacts all
 shipped.
 
@@ -152,8 +151,7 @@ shipped.
   - `make proof` → both scenarios green in <2s
   - `make build` → fresh binary at `bin/klyne`
   - Fresh install against temp HOME → writes klyne entries to both
-    Claude and Codex configs; preserves unrelated servers; removes
-    legacy `agentdeck` entries cleanly
+    Claude and Codex configs; preserves unrelated servers
 
 **Per-tool proof coverage matrix:**
 
@@ -210,7 +208,7 @@ Closes that gap with one tool + one slash prompt.
 **Daemon URL discovery**
 - Default: `http://127.0.0.1:7878` (matches
   `internal/config/schema.go:87`)
-- Override: `AGENTDECK_BASE_URL` env var — useful for non-default
+- Override: `KLYNE_BASE_URL` env var — useful for non-default
   ports or remote daemons
 
 **Important caveat**: this is the only MCP tool with a daemon

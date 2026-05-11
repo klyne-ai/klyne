@@ -16,7 +16,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 OUTPUT_FILE="${REPO_ROOT}/bench-output.json"
 
-echo "=== agentdeck spec §12 performance bench ===" >&2
+echo "=== klyne spec §12 performance bench ===" >&2
 
 # Run the bench suite and capture JSON.
 bash "${SCRIPT_DIR}/bench.sh" > "${OUTPUT_FILE}"

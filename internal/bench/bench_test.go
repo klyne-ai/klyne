@@ -47,23 +47,23 @@ func BenchmarkFTS5Search(b *testing.B) {
 	b.Cleanup(func() { _ = db.Close() })
 
 	queries := []string{
-		"hello world", "agentdeck benchmark", "performance test",
+		"hello world", "klyne benchmark", "performance test",
 		"sqlite fts5", "search message", "session content",
 		"model tokens", "cost assistant", "user system", "tool result",
 		"hello", "world", "benchmark", "performance", "sqlite",
 		"fts5", "search", "message", "session", "content",
 		"model", "tokens", "cost", "assistant", "user",
-		"system", "tool", "result", "agentdeck", "test",
-		"hello world agentdeck", "benchmark performance test",
+		"system", "tool", "result", "klyne", "test",
+		"hello world klyne", "benchmark performance test",
 		"sqlite fts5 search", "message session content",
 		"model tokens cost", "assistant user system",
-		"tool result agentdeck", "performance benchmark",
+		"tool result klyne", "performance benchmark",
 		"content message", "session search",
 		"fts5 sqlite", "test benchmark",
 		"cost model", "tokens assistant",
 		"user tool", "result system",
 		"hello benchmark", "world performance",
-		"agentdeck sqlite", "test fts5",
+		"klyne sqlite", "test fts5",
 	}
 
 	ctx := context.Background()

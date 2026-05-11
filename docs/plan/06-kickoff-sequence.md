@@ -7,7 +7,7 @@ These 5 dispatches start the project. Run them in order. **Do not skip ahead.**
 ## Step 1 · Initialize the git repo and worktree base
 
 ```bash
-cd /Users/mohitpatel/Desktop/Project/agentdeck
+cd /Users/mohitpatel/Desktop/Project/klyne
 
 git init
 git checkout -b main
@@ -46,7 +46,7 @@ Paste the prompt from [`workstreams/W00-bootstrap.md`](./workstreams/W00-bootstr
 ## Step 3 · After W0 merges: create 7 Wave-1 worktrees
 
 ```bash
-cd /Users/mohitpatel/Desktop/Project/agentdeck
+cd /Users/mohitpatel/Desktop/Project/klyne
 
 git worktree add ~/klyne-worktrees/W1-store     wave1/W1-store
 git worktree add ~/klyne-worktrees/W4-claude    wave1/W4-claude

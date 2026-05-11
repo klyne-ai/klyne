@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        agentdeck v1 ships with Claude Code and Codex CLI connectors. Community connectors land in v2.
+        klyne v1 ships with Claude Code and Codex CLI connectors. Community connectors land in v2.
 
         Any developer can implement a connector by satisfying the `Connector` Go interface (see `internal/connectors/connector.go`). PRs get merged once the v1 core is stable. This issue template maps to the **v2 connector PR pattern** described in spec §9.
 

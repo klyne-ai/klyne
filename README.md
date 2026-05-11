@@ -142,7 +142,7 @@ The `mcp install` command auto-detects host configs:
 | Claude Code | `~/.claude.json` | `mcpServers.klyne` |
 | Codex CLI | `~/.codex/config.toml` | `[mcp_servers.klyne]` |
 
-It also removes any legacy `agentdeck` entry from those configs (klyne was renamed from agentdeck during early development). Pass `--platform claude` or `--platform codex` to scope the install.
+Pass `--platform claude` or `--platform codex` to scope the install.
 
 ---
 

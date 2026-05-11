@@ -1,5 +1,5 @@
 name: Bug Report
-description: Report a bug or unexpected behavior in agentdeck.
+description: Report a bug or unexpected behavior in klyne.
 labels: ["bug"]
 body:
   - type: markdown
@@ -22,7 +22,7 @@ body:
       label: Steps to Reproduce
       description: Exact steps to reproduce the behavior.
       placeholder: |
-        1. Run `agentdeck start`
+        1. Run `klyne start`
         2. Open the browser at localhost:7878
         3. Click on ...
         4. See error
@@ -48,8 +48,8 @@ body:
   - type: textarea
     id: doctor
     attributes:
-      label: agentdeck doctor output
-      description: Run `agentdeck doctor` and paste the full output here.
+      label: klyne doctor output
+      description: Run `klyne doctor` and paste the full output here.
       render: text
     validations:
       required: true
@@ -71,6 +71,6 @@ body:
         - Claude Code
         - Codex CLI
         - Both
-        - Neither / agentdeck itself
+        - Neither / klyne itself
     validations:
       required: true

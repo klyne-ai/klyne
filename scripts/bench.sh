@@ -23,13 +23,13 @@ BENCH_TIME="${BENCH_TIME:-5s}"
 
 # ── 1. Ensure the binary exists ─────────────────────────────────────────────
 if [[ "${NO_BUILD:-}" != "1" ]]; then
-  echo "Building bin/agentdeck..." >&2
+  echo "Building bin/klyne..." >&2
   (cd "${REPO_ROOT}" && GOTOOLCHAIN=local CGO_ENABLED=0 make build) >&2
 fi
 
-BINARY="${REPO_ROOT}/bin/agentdeck"
+BINARY="${REPO_ROOT}/bin/klyne"
 if [[ ! -f "${BINARY}" ]]; then
-  echo "ERROR: bin/agentdeck not found after build" >&2
+  echo "ERROR: bin/klyne not found after build" >&2
   exit 1
 fi
 BINARY_BYTES=$(wc -c < "${BINARY}" | tr -d ' ')

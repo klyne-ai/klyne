@@ -58,7 +58,7 @@ Platform: macOS 15 arm64, Go 1.21.3, SQLite (modernc.org/sqlite v1.34.4), Apple 
 
 - **Tool**: `go test -run=TestIdleRAM`
 - **Measurement**: `runtime.MemStats.HeapInuse + StackSys` after 30 s idle with `app.BuildOnly()` constructed but `Start()` not called. Two `runtime.GC()` calls before measurement.
-- **Proxy**: 30 s idle instead of 1 h (spec), because 1 h idle is not feasible in CI. To run the 1-hour test manually: `AGENTDECK_IDLE_SECONDS=3600 go test -run TestIdleRAM ./internal/bench/...` (modify `TestIdleRAM` to read the env var).
+- **Proxy**: 30 s idle instead of 1 h (spec), because 1 h idle is not feasible in CI. To run the 1-hour test manually: `KLYNE_IDLE_SECONDS=3600 go test -run TestIdleRAM ./internal/bench/...` (modify `TestIdleRAM` to read the env var).
 - **OS gate**: Skipped on Windows. Runs on darwin and linux only.
 - **Spec budget**: < 40 MB.
 - **Note**: `runtime.MemStats` reports Go heap + stacks only; it does not include SQLite's mmap region (`mmap_size=256MB` is reserved but not resident until accessed), shared library code, or CGO allocations. The actual OS RSS (e.g., `ps -o rss=`) will be higher. We use the Go metric as a reproducible proxy.
