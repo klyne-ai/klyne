@@ -15,13 +15,31 @@ import (
 // "topic anchor" for the file. The user's "current direction" is the
 // bag-of-words of the last currentDirectionMsgs user messages.
 //
-// Per-file relevance = Jaccard(anchor, current_direction). A file is
-// "stale" when its score falls below relevanceThreshold. Stale-share
-// is sum(stale_bytes) / sum(all_loaded_file_bytes).
+// Two signals combine into a single relevance verdict per file:
 //
-// The scoring is fully deterministic (Jaccard over bag-of-words). No
-// AI calls. The thresholds are tunable from one place; eval data lives
-// under docs/marketing/context-rescue-eval.md alongside the existing
+//  1. TOPICAL — Jaccard(anchor, current_direction). Catches the
+//     clean topic-pivot case where the user switches subjects and a
+//     pile of files loaded under the old subject become irrelevant.
+//
+//  2. RECENT — was the file Read or Edited within the span of the
+//     last currentDirectionMsgs user messages? Catches the dominant
+//     real-world case where the user types one big task framing and
+//     then short iterative nudges ("now do X", "now apply Y"). In
+//     those sessions, the user's recent vocabulary is sparse and the
+//     anchor's seed vocabulary stops growing — Jaccard collapses to
+//     zero even though every file in the working set is being
+//     actively used. Recency is the stronger signal there.
+//
+// A file is "stale" only when it is NEITHER topical NOR recently
+// touched. The exposed Score is the effective relevance (the max of
+// the two signals) so the UI's "relevance / status" columns stay
+// consistent — a file that reads as "active" doesn't simultaneously
+// show 0.00 relevance. Stale-share is sum(stale_bytes) /
+// sum(all_loaded_file_bytes).
+//
+// The scoring is fully deterministic. No AI calls. The thresholds
+// are tunable from one place; eval data lives under
+// docs/marketing/context-rescue-eval.md alongside the existing
 // classifier rubric.
 
 const (
@@ -64,14 +82,24 @@ const (
 type FileRelevance struct {
 	// Path is the absolute file path as recorded by the tool call.
 	Path string
-	// Score is the Jaccard overlap between the file's anchor and the
-	// user's current direction. 0..1; higher means more relevant.
+	// Score is the effective relevance of the file to the user's
+	// current direction in [0, 1]. Computed as max(topical, recent)
+	// where topical is the Jaccard overlap between the file's
+	// anchor and the user's current direction, and recent is 1.0
+	// when the file was Read/Edited within the span of the last
+	// currentDirectionMsgs user messages (else 0). A file that is
+	// being actively touched reads as fully relevant even if its
+	// vocabulary doesn't textually overlap with the user's recent
+	// nudges — recency is the stronger signal in iterative coding
+	// sessions where user prompts are terse.
 	Score float64
 	// Bytes is the attributed context cost of the file across all of
 	// its read+edit operations in the snapshot. Same accounting as
 	// computeBloat — read-result bytes plus edit-payload bytes.
 	Bytes int
-	// Stale is true when Score < relevanceThreshold.
+	// Stale is true when the file is NEITHER topical (Jaccard
+	// < relevanceThreshold) NOR recently touched. Files actively
+	// in use are never stale regardless of vocab overlap.
 	Stale bool
 }
 
@@ -100,11 +128,17 @@ type RelevanceVerdict struct {
 //
 // Algorithm:
 //  1. Pass over messages computing the per-file topic anchor
-//     (bag-of-words of nearby user messages) AND attributed bytes
-//     using the same accounting computeBloat already does.
+//     (bag-of-words of nearby user messages), the per-file
+//     last-touch message index, AND attributed bytes using the
+//     same accounting computeBloat already does.
 //  2. Compute the user's current direction (bag-of-words of the last
-//     N user messages).
-//  3. For each file, score = Jaccard(anchor, current_direction).
+//     N user messages) AND the recency horizon (the message index
+//     of the N-th most recent user message; touches at or after
+//     this index are "recent").
+//  3. For each file, compute topical=Jaccard(anchor, current_direction)
+//     and recent = (lastTouchIdx >= recencyHorizon). A file is
+//     stale only when neither signal is positive; the displayed
+//     score is the max of the two.
 //  4. Aggregate stale share and decide ShouldFire.
 //
 // Empty messages or zero loaded bytes return a zero verdict with
@@ -115,6 +149,7 @@ func ScoreFiles(msgs []*connectors.Message) RelevanceVerdict {
 	}
 
 	currentDirection := bagOfWords(lastUserMsgs(msgs, currentDirectionMsgs))
+	recencyHorizon := indexOfNthLastUserMsg(msgs, currentDirectionMsgs)
 
 	files := map[string]*fileAccum{}
 
@@ -136,10 +171,12 @@ func ScoreFiles(msgs []*connectors.Message) RelevanceVerdict {
 				calls[tc.ID] = callMeta{path: path, isRead: true}
 				accum := getOrInitFile(files, path)
 				mergeAnchor(accum.anchor, anchorBagAt(msgs, i))
+				accum.lastTouchIdx = i
 			case isFileEditTool(tc.Name):
 				calls[tc.ID] = callMeta{path: path, isEdit: true}
 				accum := getOrInitFile(files, path)
 				mergeAnchor(accum.anchor, anchorBagAt(msgs, i))
+				accum.lastTouchIdx = i
 				// Edit payload bytes come straight from the call's
 				// input (same accounting as computeBloat).
 				accum.bytes += editPayloadBytes(tc.Input)
@@ -170,8 +207,17 @@ func ScoreFiles(msgs []*connectors.Message) RelevanceVerdict {
 	totalBytes := 0
 	staleBytes := 0
 	for path, accum := range files {
-		score := jaccard(accum.anchor, currentDirection)
-		stale := score < relevanceThreshold
+		topical := jaccard(accum.anchor, currentDirection)
+		recentlyTouched := accum.lastTouchIdx >= recencyHorizon
+		stale := topical < relevanceThreshold && !recentlyTouched
+		score := topical
+		if recentlyTouched && score < 1.0 {
+			// Surface recency as a full-strength relevance signal so
+			// the UI's score column matches its status column. A
+			// file the user is actively touching shouldn't read as
+			// "0.00 relevance / active" — that contradicts itself.
+			score = 1.0
+		}
 		row := FileRelevance{
 			Path:  path,
 			Score: score,
@@ -223,6 +269,14 @@ func getOrInitFile(files map[string]*fileAccum, path string) *fileAccum {
 type fileAccum struct {
 	bytes  int
 	anchor map[string]bool
+	// lastTouchIdx is the message index of the most recent Read or
+	// Edit of this file. Used to decide whether the file is
+	// "recently touched" relative to the current direction window.
+	// Zero is a meaningful index (the first message), so callers
+	// must treat the zero value as "touched at idx 0," not "never
+	// touched" — every file in the map has been touched at least
+	// once by construction.
+	lastTouchIdx int
 }
 
 // anchorBagAt returns the bag-of-words for user messages in the
@@ -257,6 +311,33 @@ func mergeAnchor(dst, src map[string]bool) {
 	for k := range src {
 		dst[k] = true
 	}
+}
+
+// indexOfNthLastUserMsg returns the message index of the n-th most
+// recent user message (1-indexed: n=1 is the last, n=5 is the
+// fifth-from-last). Returns 0 when fewer than n user messages
+// exist — small sessions trivially treat all touches as recent,
+// which is fine because the minLoadedBytesForRelevance gate
+// suppresses the trigger on small sessions anyway.
+//
+// Why an index rather than a count of msgs: callers test
+// lastTouchIdx >= horizon, which is a single integer compare and
+// stays correct under non-contiguous user messages (long
+// assistant-only stretches between user prompts).
+func indexOfNthLastUserMsg(msgs []*connectors.Message, n int) int {
+	if n <= 0 {
+		return len(msgs)
+	}
+	count := 0
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == connectors.RoleUser {
+			count++
+			if count == n {
+				return i
+			}
+		}
+	}
+	return 0
 }
 
 // lastUserMsgs returns the last n user messages from msgs. Returns the
