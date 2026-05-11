@@ -1,0 +1,16 @@
+{
+  "name": "edge_risky_lower",
+  "description": "Edge case at the lower risky threshold (50%). Mirrors the drifting edge case to verify the >= boundary is inclusive on the risky band too.",
+  "shape": {
+    "context_fill_pct": 50,
+    "assistant_turns": 4,
+    "user_turns": 6,
+    "hidden_per_assistant": 1,
+    "tokens_in_per_turn": 5000,
+    "cache_read_ratio": 0.6,
+    "opening_prompt": "refactor auth module split helper functions improve coverage",
+    "closing_prompt": "refactor auth module split helper functions improve coverage"
+  },
+  "expected_state": "risky",
+  "expected_advisor_fires": false
+}

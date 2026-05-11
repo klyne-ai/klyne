@@ -1,0 +1,17 @@
+{
+  "name": "advisor_five_hour_warn",
+  "description": "Otherwise-healthy session but the user has already burned >=50% of their five-hour window across other sessions. Classifier says healthy; advisor's window_50 trigger must fire.",
+  "shape": {
+    "context_fill_pct": 10,
+    "assistant_turns": 3,
+    "user_turns": 6,
+    "hidden_per_assistant": 0,
+    "tokens_in_per_turn": 2000,
+    "cache_read_ratio": 0.6,
+    "five_hour_pct_used": 60,
+    "opening_prompt": "refactor auth module split helper functions improve coverage",
+    "closing_prompt": "refactor auth module split helper functions improve coverage"
+  },
+  "expected_state": "healthy",
+  "expected_advisor_fires": true
+}

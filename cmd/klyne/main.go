@@ -51,6 +51,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newAdviseCmd())
 	root.AddCommand(newConfigCmd())
 	root.AddCommand(newTokensCmd())
+	root.AddCommand(newEvalCmd())
 	return root
 }
 
