@@ -151,7 +151,7 @@ func HandleGetContextHealth(_ context.Context, _ *mcp.CallToolRequest, in GetCon
 //     surface the ambiguity.
 func resolveSession(in GetContextHealthInput) (path string, ambiguous bool, cands []SessionCandidate, err error) {
 	if in.SessionID != "" {
-		path, err = findSessionByID(in.SessionID)
+		path, err = FindSessionByID(in.SessionID)
 		return path, false, nil, err
 	}
 	cwd := in.CWD
@@ -204,7 +204,7 @@ func ambiguousResult(cands []SessionCandidate) (*mcp.CallToolResult, GetContextH
 // place so every tool that returns timestamps formats them the same.
 const timeRFC3339 = "2006-01-02T15:04:05Z07:00"
 
-// findSessionByID searches Claude AND Codex storage roots for a
+// FindSessionByID searches Claude AND Codex storage roots for a
 // transcript matching sessionID. Returns ("", nil) when nothing
 // matches. Restricts every match to the file basename so a malicious
 // session_id cannot cause a directory traversal.
@@ -212,7 +212,7 @@ const timeRFC3339 = "2006-01-02T15:04:05Z07:00"
 // Search order: Claude first (cheaper, encoded-cwd dirs), Codex
 // second (requires a date-partitioned walk + filename match against
 // `rollout-<id>.jsonl`).
-func findSessionByID(sessionID string) (string, error) {
+func FindSessionByID(sessionID string) (string, error) {
 	if sessionID == "" {
 		return "", errors.New("empty session id")
 	}

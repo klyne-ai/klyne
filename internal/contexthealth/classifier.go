@@ -281,6 +281,14 @@ func topByCount(counts map[string]int) (string, int) {
 	return bestKey, bestN
 }
 
+// TopicShifted is the exported wrapper around topicShifted for callers
+// outside the contexthealth package. The advisor-detail handler uses
+// this to produce a live "would fire now" signal for the cockpit's
+// topic-shift advisory badge.
+func TopicShifted(msgs []*connectors.Message) bool {
+	return topicShifted(msgs)
+}
+
 // topicShifted compares the bag-of-words of the first topicSampleSize
 // user messages against the last topicSampleSize user messages. Returns
 // true when the Jaccard overlap falls below topicOverlapMin AND both

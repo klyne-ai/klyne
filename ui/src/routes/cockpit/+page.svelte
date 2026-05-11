@@ -16,12 +16,13 @@
   import { fade, scale } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
   import { goto } from '$app/navigation';
-  import { fetchCockpitThreads, fetchMessages } from '$lib/api.js';
+  import { fetchAdvisories, fetchCockpitThreads, fetchMessages } from '$lib/api.js';
   import { subscribe } from '$lib/sse.js';
   import { relAgo, kfmt } from '$lib/format.js';
   import { renderMarkdown } from '$lib/markdown.js';
   import type { CockpitThread, Message, MsgNew, CLI } from '$lib/types.js';
   import CliBadge from '$lib/ui/CliBadge.svelte';
+  import AdvisorModal from '$lib/components/AdvisorModal.svelte';
 
   type Tile = {
     /** Stable key: session_id (one tile per session). */
@@ -70,11 +71,36 @@
     return `${proj} ${t.thread.session_id}`;
   }
 
+  /** filterQuery — case-insensitive substring filter applied to each
+   *  tile's project basename, full project path, and session id.
+   *  Matched against the same lowercase sortKey strings the grid sorts
+   *  by so what the user types maps directly to what's visible.
+   *  Empty string means no filter. Purely local UI state. */
+  let filterQuery = $state('');
+
+  /** matchesFilter — true when the tile passes the current filter
+   *  query (or when the query is empty). Substring match against the
+   *  project basename, the full project path, and the session id so
+   *  any visible identifier the user types will find the tile. */
+  function matchesFilter(t: Tile, q: string): boolean {
+    if (!q) return true;
+    const needle = q.trim().toLowerCase();
+    if (!needle) return true;
+    const path = t.thread.project_path.toLowerCase();
+    const basename = path.split('/').filter(Boolean).pop() ?? '';
+    return (
+      basename.includes(needle) ||
+      path.includes(needle) ||
+      t.thread.session_id.toLowerCase().includes(needle)
+    );
+  }
+
   const sortedTiles = $derived.by(() => {
     const all = Object.values(tiles);
-    const filtered = showIdle
+    const live = showIdle
       ? all
       : all.filter((t) => tick - t.thread.last_msg_at < ACTIVE_MS);
+    const filtered = live.filter((t) => matchesFilter(t, filterQuery));
     return filtered.sort((a, b) => sortKey(a).localeCompare(sortKey(b)));
   });
 
@@ -82,6 +108,11 @@
     Object.values(tiles).filter((t) => tick - t.thread.last_msg_at < ACTIVE_MS).length
   );
   const idleCount = $derived(Object.keys(tiles).length - activeCount);
+  const filterHiddenCount = $derived(
+    filterQuery.trim()
+      ? (showIdle ? Object.keys(tiles).length : activeCount) - sortedTiles.length
+      : 0
+  );
 
   /** Filter: skip tool/system messages and assistant turns that are pure
    *  tool_use with no prose — they make terrible previews. */
@@ -189,14 +220,19 @@
 
   onMount(() => {
     void loadAll();
+    void refreshAdvisoryCounts();
     unsubscribe = subscribe({ onMsgNew });
     tickHandle = setInterval(() => { tick = Date.now(); }, 5_000);
     // Periodic full refresh: catches new buckets for sessions that
     // never fired SSE during this page's lifetime (e.g. a brand-new
     // session started in another terminal). 60s is rare enough not
     // to matter performance-wise but tight enough that a "missed"
-    // thread surfaces within a minute.
-    periodicHandle = setInterval(() => { void loadAll(); }, 60_000);
+    // thread surfaces within a minute. Also refreshes advisor
+    // counts so the per-tile badge stays current.
+    periodicHandle = setInterval(() => {
+      void loadAll();
+      void refreshAdvisoryCounts();
+    }, 60_000);
     window.addEventListener('keydown', onWindowKey);
   });
 
@@ -255,6 +291,36 @@
     void navigator.clipboard.writeText(resumeCommand(t.thread));
     copiedKey = t.key;
     setTimeout(() => { if (copiedKey === t.key) copiedKey = null; }, 1200);
+  }
+
+  // ── Advisory counts per session ───────────────────────────────────
+  // Fetched once on mount + refreshed when SSE signals new messages.
+  // Map: session_id -> count of advisories. Used by the tile's "ⓘ"
+  // button to badge sessions with active warnings.
+  let advisoryCounts = $state<Record<string, number>>({});
+  let advisorModalKey = $state<string | null>(null);
+
+  async function refreshAdvisoryCounts(): Promise<void> {
+    try {
+      const res = await fetchAdvisories({ limit: 1000 });
+      const counts: Record<string, number> = {};
+      for (const a of res.advisories) {
+        counts[a.session_id] = (counts[a.session_id] ?? 0) + 1;
+      }
+      advisoryCounts = counts;
+    } catch {
+      // Silent — advisor counts are informational. Tiles still render
+      // without the badge if the endpoint is unavailable.
+    }
+  }
+
+  function openAdvisorModal(e: Event, sessionId: string): void {
+    e.stopPropagation();
+    advisorModalKey = sessionId;
+  }
+
+  function closeAdvisorModal(): void {
+    advisorModalKey = null;
   }
 
   // ── Expanded-tile modal ─────────────────────────────────────────────
@@ -324,7 +390,42 @@
         </span>
       {/if}
     </h1>
-    <div style="display: flex; align-items: center; gap: 8px;">
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <div style="position: relative;">
+        <input
+          type="text"
+          placeholder="Filter by project or session…"
+          bind:value={filterQuery}
+          aria-label="Filter cockpit tiles by project or session"
+          style="
+            background: var(--ad-bg-2, var(--ad-bg));
+            border: 1px solid var(--ad-border);
+            color: var(--ad-fg);
+            padding: 5px 28px 5px 10px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-family: inherit;
+            width: 220px;
+            outline: none;
+          "
+          onfocus={(e) => ((e.currentTarget as HTMLInputElement).style.borderColor = 'var(--ad-active, #10b981)')}
+          onblur={(e) => ((e.currentTarget as HTMLInputElement).style.borderColor = 'var(--ad-border)')}
+        />
+        {#if filterQuery}
+          <button
+            type="button"
+            onclick={() => (filterQuery = '')}
+            aria-label="Clear filter"
+            style="
+              position: absolute;
+              right: 4px; top: 50%; transform: translateY(-50%);
+              background: none; border: none; cursor: pointer;
+              color: var(--ad-muted); font-size: 14px;
+              padding: 2px 6px; line-height: 1;
+            "
+          >×</button>
+        {/if}
+      </div>
       <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ad-muted); cursor: pointer; user-select: none;">
         <input type="checkbox" bind:checked={showIdle} />
         show idle
@@ -334,6 +435,9 @@
   </div>
   <p class="ad-muted" style="margin-top: 4px; margin-bottom: 20px; font-size: 13px;">
     Every parallel sub-thread active in the last 30 minutes — sorted alphabetically so tiles stay put while messages stream in.
+    {#if filterQuery.trim() && filterHiddenCount > 0}
+      <span style="margin-left: 4px;">Filter hiding {filterHiddenCount} tile{filterHiddenCount === 1 ? '' : 's'} that don't match “{filterQuery.trim()}”.</span>
+    {/if}
   </p>
 
   {#if loadError}
@@ -342,13 +446,22 @@
     <div class="ad-card" style="padding: 24px; text-align: center; color: var(--ad-muted);">Loading threads…</div>
   {:else if sortedTiles.length === 0}
     <div class="ad-card" style="padding: 32px; text-align: center; color: var(--ad-muted); font-size: 13px;">
-      No active sub-threads in the last 30 minutes.
-      {#if idleCount > 0}
+      {#if filterQuery.trim()}
+        No tiles match “{filterQuery.trim()}”.
         <div style="margin-top: 8px;">
-          <button class="ad-btn ad-btn--ghost ad-btn--sm" onclick={() => (showIdle = true)}>
-            Show {idleCount} idle thread{idleCount > 1 ? 's' : ''}
+          <button class="ad-btn ad-btn--ghost ad-btn--sm" onclick={() => (filterQuery = '')}>
+            Clear filter
           </button>
         </div>
+      {:else}
+        No active sub-threads in the last 30 minutes.
+        {#if idleCount > 0}
+          <div style="margin-top: 8px;">
+            <button class="ad-btn ad-btn--ghost ad-btn--sm" onclick={() => (showIdle = true)}>
+              Show {idleCount} idle thread{idleCount > 1 ? 's' : ''}
+            </button>
+          </div>
+        {/if}
       {/if}
     </div>
   {:else}
@@ -460,11 +573,23 @@
             {/if}
           </div>
 
-          <!-- Tile footer: model, msg count, expand, copy-resume -->
+          <!-- Tile footer: model, msg count, advisor info, expand, copy-resume.
+               advCount is inlined rather than via {@const} because Svelte 5
+               restricts {@const} to the first child of a control block. -->
           <div style="padding: 6px 12px 8px; border-top: 1px solid var(--ad-border-soft); display: flex; align-items: center; gap: 8px; font-size: 10px; color: var(--ad-faint); min-width: 0;">
             <span class="ad-mono" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0;">{t.thread.model || '—'}</span>
             <span class="ad-mono ad-tnum">{t.thread.msg_count} msgs</span>
             <span class="ad-mono ad-tnum">↓ {kfmt(t.thread.tokens_out)}</span>
+            <button
+              type="button"
+              onclick={(e) => openAdvisorModal(e, t.thread.session_id)}
+              title={(advisoryCounts[t.thread.session_id] ?? 0) > 0 ? `${advisoryCounts[t.thread.session_id]} klyne advisor warning(s) — click for proof` : 'View klyne advisor live signals (no warnings yet)'}
+              aria-label="Show advisor detail for this session"
+              class="cockpit-advisor-btn {(advisoryCounts[t.thread.session_id] ?? 0) > 0 ? 'cockpit-advisor-btn--warn' : ''}"
+              style="background: transparent; border: 0; cursor: pointer; padding: 2px 6px; font-size: 11px; font-family: var(--ad-font-mono); position: relative; color: {(advisoryCounts[t.thread.session_id] ?? 0) > 0 ? '#f59e0b' : 'var(--ad-faint)'};"
+            >
+              ⓘ{#if (advisoryCounts[t.thread.session_id] ?? 0) > 0}<sup style="margin-left: 2px; color: #f59e0b; font-weight: 700;">{advisoryCounts[t.thread.session_id]}</sup>{/if}
+            </button>
             <button
               type="button"
               onclick={(e) => openExpand(e, t.key)}
@@ -489,6 +614,14 @@
     </div>
   {/if}
 </div>
+
+<!-- ── Advisor detail modal ───────────────────────────────────────────
+     Opens when the user clicks the "ⓘ" badge on a tile. Lazy-fetches
+     /sessions/{id}/advisor-detail on mount and renders the advisories
+     plus the live proof data per trigger. -->
+{#if advisorModalKey}
+  <AdvisorModal sessionId={advisorModalKey} onClose={closeAdvisorModal} />
+{/if}
 
 <!-- ── Expanded-tile modal ─────────────────────────────────────────────
      Two transitions stack: backdrop fades, card scales-and-fades. Both
@@ -604,6 +737,18 @@
     - links visible but not loud
 -->
 <style>
+  /* Advisor button on each tile. When the session has at least one
+     fired advisory, the icon and superscript count get a slow pulse
+     so the warning is visible without being aggressive. */
+  .cockpit-advisor-btn:hover { color: var(--ad-fg) !important; }
+  .cockpit-advisor-btn--warn {
+    animation: cockpit-advisor-pulse 2.4s ease-in-out infinite;
+  }
+  @keyframes cockpit-advisor-pulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.55; }
+  }
+
   .cockpit-md :global(p)   { margin: 0 0 0.4em; }
   .cockpit-md :global(p:last-child) { margin-bottom: 0; }
   .cockpit-md :global(ul),

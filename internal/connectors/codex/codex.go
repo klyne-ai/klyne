@@ -40,6 +40,18 @@ type fileMeta struct {
 	// (the cache-hit subset of input_tokens) so we can emit per-event
 	// deltas alongside the input/output deltas.
 	prevCachedRead int64
+
+	// lastTurnIn / lastTurnOut / lastTurnCachedRead capture the most recent
+	// per-turn token usage from a token_count event's `last_token_usage`
+	// sub-object. They are NOT used during streaming parsing (that path
+	// emits the system-role delta message); LoadSnapshot's post-pass
+	// projection reads them indirectly via the system-role messages it
+	// finds, but holding them on the meta struct lets future code that
+	// drives a non-streaming snapshot path attach them to the matching
+	// assistant message without re-reading the file.
+	lastTurnIn         int64
+	lastTurnOut        int64
+	lastTurnCachedRead int64
 }
 
 // Connector implements connectors.Connector for the Codex CLI.

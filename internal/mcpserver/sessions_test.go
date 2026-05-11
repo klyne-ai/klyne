@@ -19,6 +19,15 @@ func TestEncodeCWD(t *testing.T) {
 		{"empty", "", ""},
 		{"relative", "proj/subdir", ""},
 		{"root", "/", "-"},
+		// Regression: Claude Code replaces both '/' AND '.' with '-',
+		// producing '--' wherever a path contained '/.'. The git
+		// worktree case (.claude/worktrees/...) is the load-bearing
+		// example — without folding '.' the resolver looks for a
+		// directory that doesn't exist and silently walks up to the
+		// parent project, returning unrelated sessions.
+		{"worktree dotfile", "/Users/x/proj/.claude/worktrees/foo", "-Users-x-proj--claude-worktrees-foo"},
+		{"trailing dotted file", "/Users/x/proj/foo.tsx", "-Users-x-proj-foo-tsx"},
+		{"multiple dots", "/Users/x/proj/.a/.b/c", "-Users-x-proj--a--b-c"},
 	}
 	for _, tc := range cases {
 		tc := tc

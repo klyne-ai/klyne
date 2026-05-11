@@ -58,6 +58,22 @@ type rawLine struct {
 	// Summary fields (type="summary")
 	Summary  string `json:"summary"`
 	LeafUUID string `json:"leafUuid"`
+	// Attachment is present on type="attachment" lines. The shape
+	// klyne consumes today is hook_additional_context (UserPromptSubmit
+	// hook injections); other attachment.type values are silently
+	// skipped so we stay tolerant of future shapes.
+	Attachment *rawAttachment `json:"attachment,omitempty"`
+}
+
+// rawAttachment captures the inline payload Claude Code stores for
+// type="attachment" lines. The interesting case for klyne is
+// `type == "hook_additional_context"` which is what the
+// UserPromptSubmit hook produces.
+type rawAttachment struct {
+	Type      string   `json:"type"`
+	Content   []string `json:"content"`
+	HookName  string   `json:"hookName"`
+	HookEvent string   `json:"hookEvent"`
 }
 
 // rawMessage is the nested "message" object on user/assistant lines.
@@ -145,6 +161,18 @@ func Parse(line []byte, path string) (*connectors.Message, error) {
 
 	case "summary":
 		return parseSummary(msg, raw), nil
+
+	case "attachment":
+		// Hook-injected context (e.g. UserPromptSubmit additions
+		// from klyne advise) lands here with attachment.type =
+		// "hook_additional_context". The advisor text is the
+		// payload that the user typically wants to surface later
+		// via search — without parsing these rows, klyne's index
+		// never sees its own advisories. Returns nil for
+		// non-hook attachments (images, etc.) so the existing
+		// "skip silently" behaviour stays unchanged for shapes
+		// we do not consume yet.
+		return parseAttachment(msg, raw)
 
 	default:
 		return nil, fmt.Errorf("claude parse: unknown type %q", raw.Type)
@@ -290,6 +318,42 @@ func parseSummary(msg *connectors.Message, raw rawLine) *connectors.Message {
 		msg.ParentUUID = raw.LeafUUID
 	}
 	return msg
+}
+
+// parseAttachment turns Claude Code's type="attachment" JSONL line
+// into a canonical Message when the attachment carries searchable
+// text content. The only shape currently consumed is
+// hook_additional_context — what the UserPromptSubmit hook
+// produces (klyne advise injects its inline advisories through
+// this surface). Other attachment shapes (image blobs, large
+// pasted artifacts, etc.) return (nil, nil) so the per-line
+// caller silently skips them without flagging an error.
+//
+// The recovered text is stored under role=system so it lands in
+// the SQLite index and shows up in cross-session search, but
+// is not double-counted as a user/assistant turn for tokens.
+// Hook attribution lives in Content's leading "klyne: " prefix
+// (the only producer today) and in the original JSONL row's
+// attachment.hookName which is preserved on the structured side
+// for any future surface that wants to filter by hook.
+func parseAttachment(msg *connectors.Message, raw rawLine) (*connectors.Message, error) {
+	if raw.Attachment == nil {
+		return nil, nil
+	}
+	switch raw.Attachment.Type {
+	case "hook_additional_context":
+		if len(raw.Attachment.Content) == 0 {
+			return nil, nil
+		}
+		msg.Role = connectors.RoleSystem
+		msg.Content = strings.Join(raw.Attachment.Content, "\n")
+		return msg, nil
+	default:
+		// Unknown attachment.type (image, binary, future shape).
+		// Silently skip — same tolerance the parser applies to any
+		// future field it does not consume yet.
+		return nil, nil
+	}
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────

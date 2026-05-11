@@ -8,6 +8,26 @@ This feature makes the cost of doing nothing visible inside the session view,
 and makes the two actions that actually save tokens — `/compact` and starting
 a fresh session — one click away.
 
+> **Companion CLI surfaces (shipped after this doc was written):**
+>
+> - `klyne tokens [--session=ID] [--window=Xh]` renders the same per-turn
+>   token-cost data this page describes, but on the terminal, with an
+>   ASCII sparkline and a row-per-turn table. See
+>   [docs/features/proactive-session-advisor.md](proactive-session-advisor.md)
+>   for the engine. The CLI is the primary surface today; the UI elements
+>   below are still planned.
+> - `klyne advise` is the Claude Code `UserPromptSubmit` hook that
+>   replaces the "click the break advisor button" flow with an inline
+>   one-line advisory injected when one of four deterministic triggers
+>   crosses its threshold. No AI calls. Toggle with
+>   `klyne config set advisor on|off`.
+> - Both Claude and Codex transcripts now produce a per-turn timeline.
+>   The Codex parser was extended (commit `a587bea`) to project
+>   `event_msg.token_count` records onto the nearest-preceding
+>   assistant message at snapshot-build time. See
+>   [docs/cli-review-2026-05-10.md](../cli-review-2026-05-10.md) for the
+>   pre-fix repro and the post-fix verification.
+
 ## what ships
 
 Three concrete UI elements on the session detail page:

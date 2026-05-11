@@ -19,6 +19,22 @@ type Config struct {
 	Paths      PathsConfig      `toml:"paths"      json:"paths"`
 	Connectors ConnectorsConfig `toml:"connectors" json:"connectors"`
 	AI         AIConfig         `toml:"ai"         json:"ai"`
+	// Plan is the [plan] table — drives the 5-hour-window advisory.
+	// Empty Tier disables the 5-hour trigger.
+	Plan PlanConfig `toml:"plan" json:"plan"`
+	// Advisor is the [advisor] table — top-level on/off toggle for
+	// the UserPromptSubmit hook.
+	Advisor AdvisorConfig `toml:"advisor" json:"advisor"`
+}
+
+// AdvisorConfig is the [advisor] table. Lives separately from
+// PlanConfig so users can disable the hook entirely without losing
+// their plan-tier setting.
+type AdvisorConfig struct {
+	// Disabled, when true, makes `klyne advise` exit silently
+	// without running any triggers. Defaults to false (advisor
+	// active) so a fresh install picks up the proactive behaviour.
+	Disabled bool `toml:"disabled" json:"disabled"`
 }
 
 // ServerConfig is the [server] table.
