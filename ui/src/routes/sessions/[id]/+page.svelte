@@ -10,6 +10,7 @@
   import CliBadge from '$lib/ui/CliBadge.svelte';
   import StatusBadge from '$lib/ui/StatusBadge.svelte';
   import TokenSavings from '$lib/components/TokenSavings.svelte';
+  import TokenTimelineChart from '$lib/components/TokenTimelineChart.svelte';
 
   const sessionId = $derived($page.params.id ?? '');
 
@@ -280,6 +281,11 @@
          compact-now CTA + AI break advisor. Hidden via internal logic
          when uncalibrated or under thresholds. -->
     <TokenSavings sessionId={session.id} cli={session.cli} projectPath={session.project_path} />
+
+    <!-- Token-usage line chart. Shares the same per-turn computation
+         as `klyne tokens` and the get_token_timeline MCP tool, so the
+         curve here matches what the CLI prints. -->
+    <TokenTimelineChart sessionId={session.id} />
 
     <!-- Compact banner -->
     {#if isCompacted}

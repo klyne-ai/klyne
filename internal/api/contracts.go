@@ -36,6 +36,7 @@ const (
 	RouteSessionSummary      = "/sessions/{id}/summary"
 	RouteSessionUsage        = "/sessions/{id}/usage"
 	RouteSessionBreakAdvice  = "/sessions/{id}/break-advice"
+	RouteSessionTokenTimeline = "/sessions/{id}/token-timeline"
 	RouteSearch              = "/search"
 	RouteCostSummary         = "/cost/summary"
 	RouteUsage               = "/usage"
@@ -62,6 +63,7 @@ func AllRoutes() []string {
 		RouteSessionSummary,
 		RouteSessionUsage,
 		RouteSessionBreakAdvice,
+		RouteSessionTokenTimeline,
 		RouteSearch,
 		RouteCostSummary,
 		RouteUsage,
@@ -192,6 +194,78 @@ type SessionUsageResponse struct {
 	// vendor-canonical /usage data; false when the server fell back to a
 	// hard-coded calibration. Lets the UI label "estimate" vs "live".
 	CalibratedFromOAuth bool `json:"calibrated_from_oauth"`
+}
+
+// ---------------------------------------------------------------------------
+// /sessions/{id}/token-timeline — per-turn token usage line chart
+// ---------------------------------------------------------------------------
+
+// TokenTimelinePoint mirrors a single per-assistant-turn row of the
+// session's token-usage timeline. Field semantics line up 1:1 with the
+// internal contexthealth.TimelinePoint type — duplicated here so the
+// HTTP contract is fully described in this package and the api wire
+// type cannot drift from changes to the internal computation struct.
+//
+// The two-axis story:
+//   - total_input is the prefix size at that turn (TokensIn from the
+//     provider). This is what fills the model's context window — the
+//     line the cockpit chart plots as the primary series.
+//   - effective_input is TokensIn - CachedReadTokens — the portion
+//     that burns the user's 5h rate-limit budget at full rate.
+type TokenTimelinePoint struct {
+	// TsMs is the assistant message timestamp in epoch-ms.
+	TsMs int64 `json:"ts_ms"`
+	// EffectiveInput is TokensIn - CachedReadTokens — the portion
+	// that burns the user's rate-limit budget at full rate.
+	EffectiveInput int64 `json:"effective_input"`
+	// TotalInput is the raw TokensIn (fresh + cached read + cached
+	// write). The primary curve plotted on the chart.
+	TotalInput int64 `json:"total_input"`
+	// CachedReadTokens is the prefix served from prompt cache.
+	CachedReadTokens int64 `json:"cached_read_tokens"`
+	// CachedWriteTokens is the new content written to cache.
+	CachedWriteTokens int64 `json:"cached_write_tokens"`
+	// OutputTokens is the completion token count.
+	OutputTokens int64 `json:"output_tokens"`
+}
+
+// TokenTimelineResponse is GET /sessions/{id}/token-timeline. It backs
+// the cockpit session-detail line chart, mirroring the data shape that
+// `klyne tokens` and the get_token_timeline MCP tool already emit so
+// the three surfaces stay consistent.
+//
+// Query params:
+//   - window  Go duration string (e.g. "30m", "5h"); min 1m, max 24h.
+//     Empty means "entire session" (default — long-paused sessions
+//     surface their full history rather than being clipped to 5h).
+//   - hours   convenience integer hours; ignored when window is set.
+type TokenTimelineResponse struct {
+	SessionID     string               `json:"session_id"`
+	// Model is the model id on the most recent qualifying turn. Empty
+	// when the session has no assistant turns yet.
+	Model         string               `json:"model"`
+	// ContextWindow is the model's maximum context size in tokens.
+	// Zero when the model is unknown.
+	ContextWindow int64                `json:"context_window"`
+	// WindowStartMs / WindowEndMs bracket the timestamps included.
+	// For an "entire session" view, WindowStartMs equals the first
+	// point's TsMs so the chart axis reads honestly.
+	WindowStartMs int64                `json:"window_start_ms"`
+	WindowEndMs   int64                `json:"window_end_ms"`
+	// Points are per-assistant-turn rows in chronological order.
+	Points        []TokenTimelinePoint `json:"points"`
+	// FirstInput is the oldest qualifying turn's TokensIn — "where
+	// this session started".
+	FirstInput    int64                `json:"first_input"`
+	// LatestInput is the most recent qualifying turn's TokensIn —
+	// "how big is the prefix right now".
+	LatestInput   int64                `json:"latest_input"`
+	// PeakInput is max(TotalInput) across Points — the largest single-
+	// turn prefix the session ever carried.
+	PeakInput     int64                `json:"peak_input"`
+	// PctOfContext = LatestInput / ContextWindow × 100, capped at 100.
+	// Zero when ContextWindow is unknown.
+	PctOfContext  float64              `json:"pct_of_context"`
 }
 
 // ---------------------------------------------------------------------------
