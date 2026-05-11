@@ -79,20 +79,36 @@ func claudeProjectsDir() (string, error) {
 }
 
 // EncodeCWD turns an absolute path into the directory-name encoding
-// Claude Code uses under ~/.claude/projects. Verified against the user's
-// real layout on 2026-05-08: every "/" becomes "-", with a leading "-"
-// preserved from the leading slash.
+// Claude Code uses under ~/.claude/projects. Both '/' AND '.' map to
+// '-'; multiple consecutive specials produce consecutive dashes.
+//
+// The original implementation only replaced '/' which silently broke
+// paths containing dotted segments. The most common case is a git
+// worktree under '.claude/worktrees/...' — encoding the cwd of a
+// Claude Code session running inside such a worktree produced a
+// directory name that didn't exist (with '-.claude-') so the
+// resolver walked UP to the parent project and returned its
+// (unrelated) sessions, making the /klyne:tokens slash command
+// return disambiguation instead of the current session. Generalising
+// the encoding to also fold '.' fixes it.
 //
 // Examples:
 //
-//	"/Users/x/proj"           -> "-Users-x-proj"
-//	"/Users/x/proj/subdir"    -> "-Users-x-proj-subdir"
-//	"" or non-absolute input  -> ""
+//	"/Users/x/proj"                 -> "-Users-x-proj"
+//	"/Users/x/proj/subdir"          -> "-Users-x-proj-subdir"
+//	"/Users/x/proj/.claude/wt/foo"  -> "-Users-x-proj--claude-wt-foo"
+//	"/Users/x/proj/foo.tsx"         -> "-Users-x-proj-foo-tsx"
+//	"" or non-absolute input        -> ""
 func EncodeCWD(cwd string) string {
 	if cwd == "" || !strings.HasPrefix(cwd, "/") {
 		return ""
 	}
-	return strings.ReplaceAll(cwd, "/", "-")
+	return strings.Map(func(r rune) rune {
+		if r == '/' || r == '.' {
+			return '-'
+		}
+		return r
+	}, cwd)
 }
 
 // LatestSessionForCWD returns the absolute path of the most-recently
@@ -189,7 +205,7 @@ func claudeListSessionsForCWD(cwd string) ([]SessionCandidate, error) {
 // transcript path, derived from the storage root the path lives under.
 // Returns "" for paths outside any known CLI's storage tree (e.g. test
 // fixtures the user manually placed in /tmp). Used by LoadSnapshot
-// and findSessionByID to dispatch to the right parser.
+// and FindSessionByID to dispatch to the right parser.
 func CLIForPath(path string) connectors.CLI {
 	if path == "" {
 		return ""

@@ -53,21 +53,37 @@ type contextPayload struct {
 }
 
 // itemPayload is the union of all response_item payload shapes.
+//
+// Note: function_call_output.output is normally a string, but Codex now
+// occasionally emits it as an array (e.g. when a tool returns image
+// content). To tolerate both shapes without a JSON unmarshal error, this
+// field is decoded as json.RawMessage and post-processed by handleFunctionCallOutput.
+// Same for custom_tool_call.input which mirrors function_call.arguments,
+// and custom_tool_call_output.output which mirrors the function variant.
 type itemPayload struct {
 	// Discriminator
 	Type string `json:"type"`
 
 	// message fields
-	Role    string           `json:"role"`
-	Content []contentItem    `json:"content"`
+	Role    string        `json:"role"`
+	Content []contentItem `json:"content"`
 
-	// function_call fields
+	// function_call / custom_tool_call fields. Codex's `custom_tool_call`
+	// is the function-call variant for arbitrary tools registered via
+	// the new `tools` API; the shape mirrors function_call but uses
+	// `input` instead of `arguments` for the JSON-encoded argument blob.
 	Name      string `json:"name"`
 	Arguments string `json:"arguments"`
+	Input     string `json:"input"`
 	CallID    string `json:"call_id"`
 
-	// function_call_output fields
-	Output string `json:"output"`
+	// function_call_output / custom_tool_call_output fields.
+	// Output is decoded as RawMessage so we can accept either a JSON
+	// string (the legacy/common shape) or a JSON array (newer Codex
+	// flavours that pass back image attachments). The post-processor
+	// downgrades arrays to a marshaled JSON string so the downstream
+	// canonical Message.Content stays a plain string.
+	Output json.RawMessage `json:"output"`
 
 	// reasoning — no fields we use; payload.type == "reasoning" means skip
 }
@@ -98,8 +114,20 @@ type tokenUsage struct {
 }
 
 // tokenCountInfo is the "info" sub-object of a token_count event_msg payload.
+//
+// LastTokenUsage is the per-call usage for the just-completed assistant
+// turn (NOT cumulative); TotalTokenUsage is the session-cumulative roll-up.
+// Per real-fixture observation:
+//
+//	tc[0]: total.input=21990  last.input=21990   (turn 1)
+//	tc[1]: total.input=44510  last.input=22520   (turn 2; sum of last == total)
+//
+// The cumulative-delta computed elsewhere happens to equal LastTokenUsage,
+// but reading LastTokenUsage directly avoids depending on that invariant
+// and surfaces the per-turn value the timeline aggregator wants.
 type tokenCountInfo struct {
-	TotalTokenUsage tokenUsage `json:"total_token_usage"`
+	LastTokenUsage  *tokenUsage `json:"last_token_usage"`
+	TotalTokenUsage tokenUsage  `json:"total_token_usage"`
 }
 
 // tokenCountPayload fully decodes the payload of an event_msg/token_count line.
@@ -282,6 +310,15 @@ func handleTokenCount(raw json.RawMessage, line []byte, meta *fileMeta, mu *sync
 		return nil, nil
 	}
 
+	// Capture the per-turn snapshot when present (the LoadSnapshot post-pass
+	// uses this to project per-call usage onto the matching assistant message).
+	var lastIn, lastOut, lastCachedRead int64
+	if p.Info.LastTokenUsage != nil {
+		lastIn = p.Info.LastTokenUsage.InputTokens
+		lastOut = p.Info.LastTokenUsage.OutputTokens
+		lastCachedRead = p.Info.LastTokenUsage.CachedInputTokens
+	}
+
 	mu.Lock()
 	prevIn := meta.prevTokensIn
 	prevOut := meta.prevTokensOut
@@ -289,6 +326,9 @@ func handleTokenCount(raw json.RawMessage, line []byte, meta *fileMeta, mu *sync
 	meta.prevTokensIn = cumIn
 	meta.prevTokensOut = cumOut
 	meta.prevCachedRead = cumCachedRead
+	meta.lastTurnIn = lastIn
+	meta.lastTurnOut = lastOut
+	meta.lastTurnCachedRead = lastCachedRead
 	sessionID = meta.sessionID
 	projectPath := meta.projectPath
 	model := meta.model
@@ -337,10 +377,21 @@ func handleTokenCount(raw json.RawMessage, line []byte, meta *fileMeta, mu *sync
 }
 
 // handleResponseItem dispatches on payload.type within a response_item line.
+//
+// Forward-compat policy: unknown response_item types and decode errors are
+// silently skipped. The Codex JSONL schema evolves frequently (the v0 set
+// of types — message / function_call / function_call_output / reasoning —
+// has since grown to include custom_tool_call, custom_tool_call_output,
+// and richer payload shapes). Logging once-per-occurrence floods stderr
+// for any command that walks Codex transcripts (klyne tokens, klyne
+// audit-sessions, klyne advise via the 5h aggregator). Once-per-file
+// logging is gated by warnOnce.
 func handleResponseItem(raw json.RawMessage, line []byte, meta *fileMeta, mu *sync.Mutex, path string, ts int64) (*connectors.Message, error) {
 	var p itemPayload
 	if err := json.Unmarshal(raw, &p); err != nil {
-		log.Printf("codex: failed to decode response_item payload in %s: %v", path, err)
+		warnOncePerFile(path, "decode-error", func() {
+			log.Printf("codex: failed to decode response_item payload in %s: %v (further occurrences silenced)", path, err)
+		})
 		return nil, nil
 	}
 
@@ -348,10 +399,14 @@ func handleResponseItem(raw json.RawMessage, line []byte, meta *fileMeta, mu *sy
 	case "message":
 		return handleMessage(p, line, meta, mu, path, ts)
 
-	case "function_call":
+	case "function_call", "custom_tool_call":
+		// Codex's `custom_tool_call` is the function-call variant for
+		// arbitrary registered tools (e.g. `apply_patch`). It uses
+		// `input` instead of `arguments` to carry the JSON-encoded
+		// argument blob; otherwise the canonical shape is identical.
 		return handleFunctionCall(p, line, meta, mu, path, ts)
 
-	case "function_call_output":
+	case "function_call_output", "custom_tool_call_output":
 		return handleFunctionCallOutput(p, line, meta, mu, path, ts)
 
 	case "reasoning":
@@ -359,7 +414,9 @@ func handleResponseItem(raw json.RawMessage, line []byte, meta *fileMeta, mu *sy
 		return nil, nil
 
 	default:
-		log.Printf("codex: unknown response_item type %q in %s — skipping", p.Type, path)
+		warnOncePerFile(path, "type:"+p.Type, func() {
+			log.Printf("codex: unknown response_item type %q in %s — skipping (further occurrences silenced)", p.Type, path)
+		})
 		return nil, nil
 	}
 }
@@ -426,13 +483,22 @@ func handleMessage(p itemPayload, line []byte, meta *fileMeta, mu *sync.Mutex, p
 	}
 }
 
-// handleFunctionCall handles response_item with payload.type == "function_call".
+// handleFunctionCall handles response_item with payload.type == "function_call"
+// or the equivalent "custom_tool_call" shape. The two shapes differ only in
+// the field carrying the JSON-encoded argument blob: function_call uses
+// `arguments`, custom_tool_call uses `input`. Whichever is non-empty wins;
+// `arguments` is preferred when both happen to be present (legacy precedence).
 func handleFunctionCall(p itemPayload, line []byte, meta *fileMeta, mu *sync.Mutex, path string, ts int64) (*connectors.Message, error) {
 	sessionID, projectPath, model := stateSnapshot(meta, mu)
 
 	if sessionID == "" {
 		log.Printf("codex: function_call before session_meta in %s — skipping", path)
 		return nil, nil
+	}
+
+	args := p.Arguments
+	if args == "" {
+		args = p.Input
 	}
 
 	return &connectors.Message{
@@ -447,7 +513,7 @@ func handleFunctionCall(p itemPayload, line []byte, meta *fileMeta, mu *sync.Mut
 			{
 				ID:    p.CallID,
 				Name:  p.Name,
-				Input: p.Arguments,
+				Input: args,
 			},
 		},
 		Model: model,
@@ -455,7 +521,21 @@ func handleFunctionCall(p itemPayload, line []byte, meta *fileMeta, mu *sync.Mut
 	}, nil
 }
 
-// handleFunctionCallOutput handles response_item with payload.type == "function_call_output".
+// handleFunctionCallOutput handles response_item with payload.type
+// == "function_call_output" or "custom_tool_call_output".
+//
+// p.Output is decoded as json.RawMessage so we can accept either of the two
+// shapes Codex emits today:
+//
+//   - JSON string ("output":"stdout text\nfoo bar"). The legacy shape
+//     produced by simple shell-style tool calls.
+//   - JSON array ("output":[{"type":"input_image", ...}]). Newer Codex
+//     flavours use this when a tool returns image attachments.
+//
+// We unwrap the string variant directly; the array variant is normalized
+// to a re-marshaled JSON string so the canonical Message.Content stays a
+// plain string and the cockpit / DB don't need to know about the dual
+// shape. Either way, downstream code keeps reading `Content` as a string.
 func handleFunctionCallOutput(p itemPayload, line []byte, meta *fileMeta, mu *sync.Mutex, path string, ts int64) (*connectors.Message, error) {
 	sessionID, projectPath, model := stateSnapshot(meta, mu)
 
@@ -464,6 +544,8 @@ func handleFunctionCallOutput(p itemPayload, line []byte, meta *fileMeta, mu *sy
 		return nil, nil
 	}
 
+	output := normalizeOutput(p.Output)
+
 	return &connectors.Message{
 		ID:          messageID(sessionID, line),
 		SessionID:   sessionID,
@@ -471,14 +553,52 @@ func handleFunctionCallOutput(p itemPayload, line []byte, meta *fileMeta, mu *sy
 		ProjectPath: projectPath,
 		Cwd:         projectPath, // Codex doesn't emit per-message cwd; equals project root
 		Role:        connectors.RoleTool,
-		Content:     p.Output,
+		Content:     output,
 		ToolResults: []connectors.ToolResult{
 			{
 				ID:     p.CallID,
-				Output: p.Output,
+				Output: output,
 			},
 		},
 		Model: model,
 		Ts:    ts,
 	}, nil
+}
+
+// normalizeOutput collapses the dual-shape `output` field into a plain
+// string. Empty / null raw becomes the empty string. JSON-string raw is
+// unmarshaled and returned as the inner text. Anything else (object,
+// array, number, bool) is re-marshaled and returned verbatim — losing
+// nothing, but presenting a single shape to the rest of the pipeline.
+func normalizeOutput(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	// Cheap shape check: a JSON string starts with a double-quote.
+	if raw[0] == '"' {
+		var s string
+		if err := json.Unmarshal(raw, &s); err == nil {
+			return s
+		}
+	}
+	// Non-string variant — keep the raw JSON so downstream consumers
+	// can pretty-print it if they want.
+	return string(raw)
+}
+
+// warnOnceState tracks (path, key) pairs already warned about so the
+// log output stays a single line per occurrence per file. Indexed by
+// "<path>::<key>" — sync.Map keeps the lookup lock-free under typical
+// fan-out loads.
+var warnOnceState sync.Map
+
+// warnOncePerFile invokes fn the first time it sees the given (path, key)
+// pair. Subsequent calls with the same pair are no-ops. Used to gate
+// once-per-file warnings for forward-compat skips so commands that walk
+// many Codex JSONLs don't flood stderr.
+func warnOncePerFile(path, key string, fn func()) {
+	k := path + "\x00" + key
+	if _, loaded := warnOnceState.LoadOrStore(k, struct{}{}); !loaded {
+		fn()
+	}
 }

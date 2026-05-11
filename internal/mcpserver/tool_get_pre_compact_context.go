@@ -2,10 +2,13 @@ package mcpserver
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/klyne-ai/klyne/internal/connectors"
 )
 
 // PreCompactInput is the input schema for get_pre_compact_context.
@@ -93,9 +96,20 @@ func HandleGetPreCompactContext(_ context.Context, _ *mcp.CallToolRequest, in Pr
 		}, PreCompactOutput{Path: path, FoundCompact: false}, nil
 	}
 
+	// Build per-row Content from text + tool-call activity. The canonical
+	// Message stores tool_use as ToolCalls and tool_result as ToolResults
+	// — both are typically empty-text on the wire. Without enrichment the
+	// renderer ends up showing "(empty)" for every row that did real
+	// work. Enrich the Content with a one-line summary of the tool
+	// activity so the recovered context is actually useful.
 	rows := make([]PreCompactMessageRow, 0, len(bundle.Messages))
 	for _, m := range bundle.Messages {
-		body := strings.TrimSpace(m.Content)
+		body := buildPreCompactBody(m)
+		if body == "" {
+			// Truly empty after enrichment — drop the row rather than
+			// surfacing a noise line the user has to scroll past.
+			continue
+		}
 		if len(body) > preCompactRowPreviewBytes {
 			body = body[:preCompactRowPreviewBytes] + "…"
 		}
@@ -135,4 +149,171 @@ func defaultStr(s, fallback string) string {
 		return fallback
 	}
 	return s
+}
+
+// buildPreCompactBody enriches a canonical Message into a single
+// human-readable summary for the pre-compact recovery view. The
+// underlying canonical type carries text in Content, tool calls in
+// ToolCalls, and tool results in ToolResults — most messages on
+// the wire have at most one of those non-empty, but the renderer
+// previously only surfaced Content. The result was dozens of
+// "(empty)" rows for any session that actually used tools.
+//
+// Output rules:
+//   - Plain text: rendered as-is (still subject to the per-row
+//     length cap one level up).
+//   - Assistant message with tool calls only: "→ Read foo.go" /
+//     "→ Bash: go test ./..." / "→ Tool: <name>" so the user sees
+//     what the AI actually did.
+//   - Tool-result message: "← <ToolName> result: <preview>" or
+//     "← <ToolName> error: <preview>" when IsError.
+//   - Plain text + tool calls: text first, then a "→ tool" suffix
+//     so both signals survive.
+//
+// Returns "" when the message has no signal at all (which is rare
+// but does happen on stub system rows). The caller drops empty
+// rows so the recovery surface stays dense.
+func buildPreCompactBody(m *connectors.Message) string {
+	text := strings.TrimSpace(m.Content)
+	calls := summariseToolCalls(m.ToolCalls)
+	results := summariseToolResults(m.ToolResults)
+
+	parts := make([]string, 0, 3)
+	if text != "" {
+		parts = append(parts, text)
+	}
+	if calls != "" {
+		parts = append(parts, calls)
+	}
+	if results != "" {
+		parts = append(parts, results)
+	}
+	return strings.Join(parts, "  ·  ")
+}
+
+// summariseToolCalls renders a list of tool calls as a single
+// arrow-prefixed string. Multiple calls in the same turn are
+// joined with commas. Returns "" when there are none.
+func summariseToolCalls(tcs []connectors.ToolCall) string {
+	if len(tcs) == 0 {
+		return ""
+	}
+	const maxCalls = 3
+	parts := make([]string, 0, maxCalls+1)
+	for i, tc := range tcs {
+		if i >= maxCalls {
+			parts = append(parts, fmt.Sprintf("…+%d more", len(tcs)-maxCalls))
+			break
+		}
+		parts = append(parts, summariseOneToolCall(tc))
+	}
+	return "→ " + strings.Join(parts, ", ")
+}
+
+// summariseOneToolCall renders one tool call as "Read foo.go" /
+// "Bash: go test" / "Tool: <name>" depending on the tool family.
+func summariseOneToolCall(tc connectors.ToolCall) string {
+	name := tc.Name
+	if name == "" {
+		name = "Tool"
+	}
+	if isShellToolPC(name) {
+		if cmd := strings.TrimSpace(extractCommandPC(tc.Input)); cmd != "" {
+			if len(cmd) > 60 {
+				cmd = cmd[:60] + "…"
+			}
+			return fmt.Sprintf("%s: %s", name, cmd)
+		}
+		return name
+	}
+	if path := strings.TrimSpace(extractPathPC(tc.Input)); path != "" {
+		return fmt.Sprintf("%s %s", name, displayPathPC(path))
+	}
+	return name
+}
+
+// summariseToolResults renders a list of tool results as a single
+// arrow-prefixed string. Returns "" when there are none. Truncates
+// the output preview so a giant tool blob does not dominate the
+// row.
+func summariseToolResults(trs []connectors.ToolResult) string {
+	if len(trs) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(trs))
+	for _, tr := range trs {
+		preview := strings.TrimSpace(tr.Output)
+		preview = strings.ReplaceAll(preview, "\n", " ")
+		if len(preview) > 80 {
+			preview = preview[:80] + "…"
+		}
+		label := "result"
+		if tr.IsError {
+			label = "error"
+		}
+		if preview == "" {
+			parts = append(parts, label)
+		} else {
+			parts = append(parts, fmt.Sprintf("%s: %s", label, preview))
+		}
+	}
+	return "← " + strings.Join(parts, "; ")
+}
+
+// isShellToolPC, extractCommandPC, extractPathPC, displayPathPC are
+// local copies of the helpers in handoff.go — the pre-compact
+// renderer keeps its own to avoid a circular import friction with
+// future test scaffolding. The behaviour mirrors the canonical
+// helpers in handoff.go and contexthealth/classifier.go.
+func isShellToolPC(name string) bool {
+	switch strings.ToLower(name) {
+	case "bash", "shell", "sh", "exec", "run":
+		return true
+	}
+	return false
+}
+
+func extractCommandPC(input string) string {
+	if input == "" {
+		return ""
+	}
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(input), &raw); err != nil {
+		return ""
+	}
+	for _, key := range []string{"command", "cmd", "script"} {
+		if v, ok := raw[key]; ok {
+			if s, ok := v.(string); ok && s != "" {
+				return s
+			}
+		}
+	}
+	return ""
+}
+
+func extractPathPC(input string) string {
+	if input == "" {
+		return ""
+	}
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(input), &raw); err != nil {
+		return ""
+	}
+	for _, key := range []string{"file_path", "path", "filepath", "filename"} {
+		if v, ok := raw[key]; ok {
+			if s, ok := v.(string); ok && s != "" {
+				return s
+			}
+		}
+	}
+	return ""
+}
+
+func displayPathPC(p string) string {
+	for i := len(p) - 1; i >= 0; i-- {
+		if p[i] == '/' {
+			return p[i+1:]
+		}
+	}
+	return p
 }

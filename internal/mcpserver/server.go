@@ -86,6 +86,15 @@ When Claude Code runs /compact, the original turns are replaced by a summary the
 For Codex sessions, the recovery uses the embedded payload.replacement_history that Codex writes inside its compacted event. Trigger and pre_tokens are not exposed for Codex (it does not record either).`,
 	}, HandleGetPreCompactContext)
 
+	mcp.AddTool(srv, &mcp.Tool{
+		Name: "get_token_timeline",
+		Description: `Return the per-assistant-turn token usage for the active session over the last 5 hours (or window_hours if provided).
+
+Returns one row per qualifying assistant turn with timestamp, effective input (TokensIn - CachedReadTokens), total input, cached read/write, and output tokens — ready to power either an inline ASCII sparkline (slash prompt /klyne:tokens) or a real line chart in the web cockpit.
+
+When the user has configured a plan tier (klyne config set plan <tier>), the response also reports total uncached input as a percentage of that plan's 5-hour cap. Same disambiguation behaviour as get_context_health.`,
+	}, HandleGetTokenTimeline)
+
 	// Live MCP prompts. Each prompt parallels one of the tools above
 	// and surfaces in Claude Code's slash menu as /klyne:<name>
 	// (older Claude Code builds used /mcp__klyne__<name>; that form
@@ -139,6 +148,19 @@ For Codex sessions, the recovery uses the embedded payload.replacement_history t
 			{Name: "cwd", Description: "Override the working directory used to resolve the session."},
 		},
 	}, PromptPreCompactHandler)
+
+	// /klyne:tokens — registered with NO arguments. Claude Code's
+	// slash UI waits for argument input when an MCP prompt declares
+	// optional args, which made the v1 surface fail to fire on
+	// bare press-enter. The handler still resolves cwd from the
+	// process env, so the no-arg form just works. Users who want a
+	// custom window override that via the underlying MCP tool
+	// (get_token_timeline) or the `klyne tokens` CLI subcommand.
+	srv.AddPrompt(&mcp.Prompt{
+		Name:        "tokens",
+		Title:       "Token usage timeline",
+		Description: "Show the per-turn token usage for the active session: cumulative input tokens, % of model context window, ASCII sparkline. Defaults to the last 5 hours.",
+	}, PromptTokenTimelineHandler)
 
 	return srv
 }

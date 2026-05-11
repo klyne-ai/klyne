@@ -37,6 +37,8 @@ const (
 	RouteCostSummary         = "/cost/summary"
 	RouteUsage               = "/usage"
 	RouteCockpitThreads      = "/cockpit/threads"
+	RouteAdvisories          = "/advisories"
+	RouteSessionAdvisorDetail = "/sessions/{id}/advisor-detail"
 	RouteSettings            = "/settings"
 	RouteWizardDetect        = "/wizard/detect"
 	RouteWizardComplete      = "/wizard/complete"
@@ -60,6 +62,8 @@ func AllRoutes() []string {
 		RouteCostSummary,
 		RouteUsage,
 		RouteCockpitThreads,
+		RouteAdvisories,
+		RouteSessionAdvisorDetail,
 		RouteSettings,
 		RouteWizardDetect,
 		RouteWizardComplete,
@@ -461,6 +465,140 @@ type CockpitThread struct {
 // CockpitThreadsResponse is GET /cockpit/threads.
 type CockpitThreadsResponse struct {
 	Threads []CockpitThread `json:"threads"`
+}
+
+// ---------------------------------------------------------------------------
+// /advisories
+// ---------------------------------------------------------------------------
+
+// AdvisoryKind names which klyne advisor trigger produced the row.
+// Strings match the on-disk transition-state names so a future surface
+// that wants to cross-reference can use them directly.
+type AdvisoryKind string
+
+const (
+	// AdvisoryKindStale is the relevance-drift trigger.
+	AdvisoryKindStale AdvisoryKind = "stale"
+	// AdvisoryKindAcceleration is the per-turn uncached doubling.
+	AdvisoryKindAcceleration AdvisoryKind = "acceleration"
+	// AdvisoryKindHardCeiling is the >=75% context-fill warning.
+	AdvisoryKindHardCeiling AdvisoryKind = "hard_ceiling"
+	// AdvisoryKindFiveHourWarn is the 50% rate-limit warning.
+	AdvisoryKindFiveHourWarn AdvisoryKind = "window_50"
+	// AdvisoryKindFiveHourUrgent is the 75% rate-limit warning.
+	AdvisoryKindFiveHourUrgent AdvisoryKind = "window_75"
+	// AdvisoryKindTopicShift is the partial-pivot trigger that
+	// fires when the user's prompts have shifted topic from the
+	// session opening AND some loaded files (≥20%) are stale
+	// relative to the new direction. Milder than AdvisoryKindStale.
+	AdvisoryKindTopicShift AdvisoryKind = "topic_shift"
+	// AdvisoryKindUnknown is the fallback when the text doesn't match
+	// any recognised trigger pattern. Surfaces as a real row so a
+	// future hook can add advisories without UI breakage.
+	AdvisoryKindUnknown AdvisoryKind = "unknown"
+)
+
+// AdvisoryRow is one rendered advisory across any klyne-monitored
+// session. The Markdown content is exactly what the hook injected
+// into chat — preserving punctuation, percentages, file names — so
+// the cockpit can render it verbatim.
+type AdvisoryRow struct {
+	MessageID   string       `json:"message_id"`
+	SessionID   string       `json:"session_id"`
+	CLI         string       `json:"cli"`
+	ProjectPath string       `json:"project_path"`
+	Kind        AdvisoryKind `json:"kind"`
+	Content     string       `json:"content"`
+	TS          int64        `json:"ts"`
+}
+
+// AdvisoryListResponse is GET /advisories — the cockpit's "every
+// advisory klyne has ever fired" feed. Newest first.
+type AdvisoryListResponse struct {
+	Advisories []AdvisoryRow `json:"advisories"`
+}
+
+// FileRelevanceProof is one file's contribution to the loaded
+// context, scored against the user's latest direction. Proves
+// the stale-context advisor's claim by naming exact paths plus
+// their per-file relevance score.
+type FileRelevanceProof struct {
+	Path      string  `json:"path"`
+	Basename  string  `json:"basename"`
+	Bytes     int     `json:"bytes"`
+	Score     float64 `json:"score"`
+	Stale     bool    `json:"stale"`
+}
+
+// StaleProof bundles the relevance scorer's outputs in a shape the
+// cockpit modal can render directly.
+type StaleProof struct {
+	Files          []FileRelevanceProof `json:"files"`
+	StaleBytes     int                  `json:"stale_bytes"`
+	TotalBytes     int                  `json:"total_bytes"`
+	StaleShare     float64              `json:"stale_share"`
+	Threshold      float64              `json:"threshold"`
+}
+
+// AccelerationProof is the per-turn cost trajectory the
+// acceleration advisor judges on. RecentMean / PriorMean / Ratio
+// are the numbers the user sees in the modal's "why klyne thinks
+// you're accelerating" panel.
+type AccelerationProof struct {
+	RecentMean       float64 `json:"recent_mean"`
+	PriorMean        float64 `json:"prior_mean"`
+	Ratio            float64 `json:"ratio"`
+	LatestEffective  int64   `json:"latest_effective"`
+	SampledTurns     int     `json:"sampled_turns"`
+	WouldFire        bool    `json:"would_fire"`
+}
+
+// ContextWindowProof proves the hard-ceiling advisor: current
+// fill percentage, latest prefix size, and the configured
+// threshold (always 75% in v1).
+type ContextWindowProof struct {
+	FillPct       float64 `json:"fill_pct"`
+	LatestInput   int64   `json:"latest_input"`
+	ContextWindow int64   `json:"context_window"`
+	Model         string  `json:"model"`
+	Threshold     float64 `json:"threshold"`
+	WouldFire     bool    `json:"would_fire"`
+}
+
+// FiveHourProof is the cross-session aggregate the 5-hour-window
+// advisor judges on.
+type FiveHourProof struct {
+	TotalEffective int64   `json:"total_effective"`
+	Cap            int64   `json:"cap"`
+	PctUsed        float64 `json:"pct_used"`
+	PlanTier       string  `json:"plan_tier,omitempty"`
+}
+
+// TopicShiftProof is the live signal for the topic_shift advisor.
+// The detector compares the bag-of-words of the first 5 user prompts
+// against the last 5; Shifted is true when their Jaccard overlap
+// falls below the topic-overlap threshold. WouldFire combines that
+// with a minimum stale-share floor so the panel matches the
+// advisor's firing logic 1:1.
+type TopicShiftProof struct {
+	Shifted   bool `json:"shifted"`
+	WouldFire bool `json:"would_fire"`
+}
+
+// AdvisorDetailResponse is GET /sessions/{id}/advisor-detail —
+// per-session advisory list PLUS the underlying proof data the
+// cockpit modal needs to show the user *why* klyne fired each
+// advisory. The proof object is always populated regardless of
+// whether the corresponding trigger has fired yet, so the user
+// can see the live state and judge for themselves.
+type AdvisorDetailResponse struct {
+	SessionID     string             `json:"session_id"`
+	Advisories    []AdvisoryRow      `json:"advisories"`
+	Stale         StaleProof         `json:"stale"`
+	Acceleration  AccelerationProof  `json:"acceleration"`
+	ContextWindow ContextWindowProof `json:"context_window"`
+	FiveHour      FiveHourProof      `json:"five_hour,omitempty"`
+	TopicShift    TopicShiftProof    `json:"topic_shift"`
 }
 
 // ---------------------------------------------------------------------------

@@ -7,7 +7,16 @@ import (
 	"strings"
 
 	"github.com/klyne-ai/klyne/internal/connectors"
+	"github.com/klyne-ai/klyne/internal/contexthealth"
 )
+
+// contexthealthScoreFiles is a thin alias so the handoff renderer
+// can reuse the relevance scorer without taking a hard dependency
+// on its package-level naming. Kept tiny on purpose — if the scorer
+// signature ever changes, this is the one place to retarget.
+func contexthealthScoreFiles(msgs []*connectors.Message) contexthealth.RelevanceVerdict {
+	return contexthealth.ScoreFiles(msgs)
+}
 
 // handoffMaxRecentTurns caps how many of the latest user/assistant
 // turns we include verbatim in the handoff. Enough for the new
@@ -15,6 +24,32 @@ import (
 // enough to keep the handoff prompt itself well under any context
 // window the user is likely to paste it into.
 const handoffMaxRecentTurns = 6
+
+// handoffMaxRecentTurnsScoped is the deeper window used when scope
+// is "current-topic" — the new session is replacing the old one
+// because the topic shifted, so it benefits from extra recent
+// context to pick up the new direction without the old framing.
+const handoffMaxRecentTurnsScoped = 10
+
+// HandoffScope is the typed wrapper for HandoffInput.Scope.
+type HandoffScope string
+
+const (
+	HandoffScopeFull         HandoffScope = "full"
+	HandoffScopeCurrentTopic HandoffScope = "current-topic"
+)
+
+// parseHandoffScope normalises an input string into a HandoffScope.
+// Empty strings, "full", and unknown values all fall through to
+// HandoffScopeFull so a typo never breaks the existing surface.
+func parseHandoffScope(s string) HandoffScope {
+	switch s {
+	case string(HandoffScopeCurrentTopic):
+		return HandoffScopeCurrentTopic
+	default:
+		return HandoffScopeFull
+	}
+}
 
 // handoffMaxFiles caps the "files touched" list. Past this point the
 // list becomes noise; the user can always inspect the source JSONL.
@@ -33,6 +68,15 @@ const handoffMessagePreview = 400
 type HandoffInput struct {
 	SessionID string `json:"session_id,omitempty" jsonschema:"explicit Claude Code session id; defaults to latest session in current working directory"`
 	CWD       string `json:"cwd,omitempty" jsonschema:"override the working directory used to resolve the latest session"`
+	// Scope controls which files and exchanges land in the handoff:
+	//   "" or "full"          — every file the session touched plus
+	//                            the recent exchanges (default).
+	//   "current-topic"       — only files whose anchor matches the
+	//                            user's most recent direction (per
+	//                            contexthealth.ScoreFiles), and the
+	//                            last 10 user/assistant exchanges
+	//                            instead of the default 5.
+	Scope string `json:"scope,omitempty" jsonschema:"full (default) | current-topic — current-topic carries forward only files relevant to the user's current direction"`
 }
 
 // HandoffOutput carries the generated handoff Markdown plus enough
@@ -50,16 +94,26 @@ type HandoffOutput struct {
 // RenderHandoff is the exported entry point used by the docs/proof
 // tests (and any external consumer that wants to render a handoff
 // from a snapshot they already loaded). Delegates to renderHandoff
-// so the internal call sites stay unchanged.
+// in HandoffScopeFull mode so existing callers do not need to know
+// about the scope flag.
 func RenderHandoff(snap *SessionSnapshot) string {
-	return renderHandoff(snap)
+	return renderHandoff(snap, HandoffScopeFull)
+}
+
+// RenderScopedHandoff renders the handoff under the given scope.
+// HandoffScopeCurrentTopic restricts the "Files touched" section
+// to files whose relevance score (per contexthealth.ScoreFiles)
+// exceeds the threshold, and bumps the recent-exchanges window
+// from handoffMaxRecentTurns to handoffMaxRecentTurnsScoped.
+func RenderScopedHandoff(snap *SessionSnapshot, scope HandoffScope) string {
+	return renderHandoff(snap, scope)
 }
 
 // renderHandoff turns a SessionSnapshot into the deterministic
 // Markdown handoff. Pure function — no I/O — so callers (tests,
 // future code that wants to re-render from cached snapshots) can
 // reuse it without paying the JSONL re-scan cost.
-func renderHandoff(snap *SessionSnapshot) string {
+func renderHandoff(snap *SessionSnapshot, scope HandoffScope) string {
 	var b strings.Builder
 
 	projectPath := projectPathFromMessages(snap.Messages)
@@ -68,13 +122,17 @@ func renderHandoff(snap *SessionSnapshot) string {
 	}
 
 	fmt.Fprintf(&b, "# Handoff from session `%s`\n\n", short(snap.SessionID))
+	if scope == HandoffScopeCurrentTopic {
+		b.WriteString("_Scope: current-topic — only files relevant to the user's most recent direction are carried forward._\n\n")
+	}
 	fmt.Fprintf(&b, "We are working in `%s`.\n\n", projectPath)
 
 	if topic := recentTopic(snap.Messages); topic != "" {
 		fmt.Fprintf(&b, "## Recent task\n\n%s\n\n", topic)
 	}
 
-	if files := filesTouched(snap.Messages); len(files) > 0 {
+	relevantPaths := relevantPathSet(snap.Messages, scope)
+	if files := filesTouchedFiltered(snap.Messages, relevantPaths); len(files) > 0 {
 		b.WriteString("## Files touched\n\n")
 		for _, f := range files {
 			fmt.Fprintf(&b, "- `%s`%s\n", f.Path, occurrenceSuffix(f.Count))
@@ -98,7 +156,11 @@ func renderHandoff(snap *SessionSnapshot) string {
 		b.WriteString("\n")
 	}
 
-	if recent := recentTurns(snap.Messages); len(recent) > 0 {
+	maxTurns := handoffMaxRecentTurns
+	if scope == HandoffScopeCurrentTopic {
+		maxTurns = handoffMaxRecentTurnsScoped
+	}
+	if recent := recentTurnsLimited(snap.Messages, maxTurns); len(recent) > 0 {
 		b.WriteString("## Last few exchanges\n\n")
 		for _, t := range recent {
 			fmt.Fprintf(&b, "**%s** — %s\n\n", t.Role, oneLine(t.Body))
@@ -241,12 +303,22 @@ type recentTurn struct {
 	Body string
 }
 
-// recentTurns returns the last N user/assistant messages in
-// chronological order (oldest first), capped per-message at
-// handoffMessagePreview characters.
+// recentTurns returns the last handoffMaxRecentTurns user/assistant
+// messages, capped per-message at handoffMessagePreview characters.
+// Kept for callers that don't want to specify a limit.
 func recentTurns(msgs []*connectors.Message) []recentTurn {
+	return recentTurnsLimited(msgs, handoffMaxRecentTurns)
+}
+
+// recentTurnsLimited is recentTurns with a caller-supplied cap so
+// the scoped handoff can pull a deeper window than the default.
+// Returns chronological-order (oldest first) entries.
+func recentTurnsLimited(msgs []*connectors.Message, maxTurns int) []recentTurn {
+	if maxTurns <= 0 {
+		return nil
+	}
 	var picked []*connectors.Message
-	for i := len(msgs) - 1; i >= 0 && len(picked) < handoffMaxRecentTurns; i-- {
+	for i := len(msgs) - 1; i >= 0 && len(picked) < maxTurns; i-- {
 		m := msgs[i]
 		if m.Role != connectors.RoleUser && m.Role != connectors.RoleAssistant {
 			continue
@@ -257,7 +329,6 @@ func recentTurns(msgs []*connectors.Message) []recentTurn {
 		}
 		picked = append(picked, m)
 	}
-	// picked is newest-first; reverse for chronological output.
 	out := make([]recentTurn, 0, len(picked))
 	for i := len(picked) - 1; i >= 0; i-- {
 		body := strings.TrimSpace(picked[i].Content)
@@ -268,6 +339,46 @@ func recentTurns(msgs []*connectors.Message) []recentTurn {
 			Role: string(picked[i].Role),
 			Body: body,
 		})
+	}
+	return out
+}
+
+// relevantPathSet returns the set of file paths the handoff should
+// include under the given scope. nil for HandoffScopeFull (no
+// filtering); a populated set of relevant paths for HandoffScopeCurrentTopic.
+//
+// Empty set on current-topic falls back to "no files" — the caller's
+// filesTouchedFiltered will then return an empty slice and the
+// "Files touched" section is omitted, signalling clearly that no
+// loaded file is currently relevant.
+func relevantPathSet(msgs []*connectors.Message, scope HandoffScope) map[string]bool {
+	if scope != HandoffScopeCurrentTopic {
+		return nil
+	}
+	verdict := contexthealthScoreFiles(msgs)
+	out := map[string]bool{}
+	for _, f := range verdict.Files {
+		if !f.Stale {
+			out[f.Path] = true
+		}
+	}
+	return out
+}
+
+// filesTouchedFiltered is filesTouched with an optional inclusion
+// set. When include is nil, behaves identically to filesTouched.
+// When include is non-nil, only paths present in the set are
+// returned.
+func filesTouchedFiltered(msgs []*connectors.Message, include map[string]bool) []touchedFile {
+	all := filesTouched(msgs)
+	if include == nil {
+		return all
+	}
+	out := make([]touchedFile, 0, len(all))
+	for _, f := range all {
+		if include[f.Path] {
+			out = append(out, f)
+		}
 	}
 	return out
 }

@@ -2,6 +2,7 @@ package claude
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/klyne-ai/klyne/internal/connectors"
@@ -136,6 +137,36 @@ func TestParse_ToolResult(t *testing.T) {
 	}
 	if tr.IsError {
 		t.Error("tool_result.is_error should be false")
+	}
+}
+
+func TestParse_AttachmentHookAdditionalContext(t *testing.T) {
+	// Real-world shape from klyne's own UserPromptSubmit hook
+	// injecting into a trackIt session on 2026-05-10.
+	line := `{"parentUuid":"469e5b13-17e9-414a-b858-690298be06ed","isSidechain":false,"attachment":{"type":"hook_additional_context","content":["klyne: ~66% of loaded file context is stale relative to your current direction. Files still relevant: TransactionNotificationListenerService.java."],"hookName":"UserPromptSubmit","hookEvent":"UserPromptSubmit"},"type":"attachment","uuid":"89dead6f-7d0d-4fe4-8010-58ac4623fe22","timestamp":"2026-05-10T07:24:55.773Z","sessionId":"f876eadd","cwd":"/Users/mohitpatel/Desktop/Learning/trackIt"}`
+
+	msg := mustParse(t, line)
+	if msg.Role != connectors.RoleSystem {
+		t.Errorf("role = %q; want %q (hook attachments map to system)", msg.Role, connectors.RoleSystem)
+	}
+	if !strings.Contains(msg.Content, "stale relative to your current direction") {
+		t.Errorf("content missing the injected advisory text; got %q", msg.Content)
+	}
+	if msg.SessionID != "f876eadd" {
+		t.Errorf("session id should be propagated; got %q", msg.SessionID)
+	}
+}
+
+func TestParse_AttachmentUnknownTypeSkipped(t *testing.T) {
+	// Other attachment.type values must not error; the parser
+	// returns nil so the per-line loop skips them silently.
+	line := `{"type":"attachment","uuid":"img-001","sessionId":"sess-1","timestamp":"2026-05-10T07:00:00.000Z","cwd":"/tmp","attachment":{"type":"image","content":["base64..."]}}`
+	msg, err := Parse([]byte(line), testPath)
+	if err != nil {
+		t.Fatalf("unknown attachment type should not error; got %v", err)
+	}
+	if msg != nil {
+		t.Errorf("unknown attachment type should produce nil Message; got %+v", msg)
 	}
 }
 
