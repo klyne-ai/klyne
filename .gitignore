@@ -33,3 +33,5 @@ Thumbs.db
 
 # goreleaser
 dist/
+
+.claude
