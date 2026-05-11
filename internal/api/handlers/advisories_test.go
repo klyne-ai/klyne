@@ -164,6 +164,7 @@ func TestClassifyAdvisory_KnownPatterns(t *testing.T) {
 		{"hard_ceiling", "klyne: this session is 78% full — the next turn's prefix will keep growing.", api.AdvisoryKindHardCeiling},
 		{"warn", "klyne: you've used ~52% of your 5-hour window. This session is the dominant consumer.", api.AdvisoryKindFiveHourWarn},
 		{"urgent", "klyne: you're at ~78% of your 5-hour window — the cheapest next step is /klyne:handoff.", api.AdvisoryKindFiveHourUrgent},
+		{"topic_shift", "klyne: your prompts have shifted topic since the session opened — about 32% of loaded files are stale relative to your new direction. Run /klyne:handoff scope=current to start fresh.", api.AdvisoryKindTopicShift},
 		{"unknown", "klyne: something different we don't recognise yet.", api.AdvisoryKindUnknown},
 	}
 	for _, tc := range cases {

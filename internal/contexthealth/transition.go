@@ -47,6 +47,15 @@ const (
 	TriggerHardCeiling    TriggerKind = "hard_ceiling"
 	TriggerFiveHourWarn   TriggerKind = "window_50"
 	TriggerFiveHourUrgent TriggerKind = "window_75"
+	// TriggerTopicShift fires when the user's prompts have shifted
+	// topic between session-opening and session-current (Jaccard of
+	// first-5 vs last-5 user prompts below topicOverlapMin) AND
+	// there is at least topicShiftMinStaleShare worth of stale
+	// loaded files to recommend handing off. Milder signal than
+	// TriggerStale, which only fires once the stale share crosses
+	// the staleShareThreshold (>50%). Acts as an earlier-warning
+	// tier specifically for partial pivots.
+	TriggerTopicShift TriggerKind = "topic_shift"
 )
 
 // AllTriggers returns every trigger kind. Used by clearance logic.
@@ -57,6 +66,7 @@ func AllTriggers() []TriggerKind {
 		TriggerHardCeiling,
 		TriggerFiveHourWarn,
 		TriggerFiveHourUrgent,
+		TriggerTopicShift,
 	}
 }
 

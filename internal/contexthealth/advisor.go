@@ -12,11 +12,11 @@ import (
 // summary, and the persisted advisor state, return the single
 // advisory line to inject (or an empty Line for "stay silent").
 //
-// All four triggers are evaluated independently, then a priority
-// rule picks the highest-priority trigger that has NOT already
-// fired. State for the firing trigger is marked; states for
-// triggers whose conditions no longer hold are cleared so the
-// next trip can fire fresh.
+// All triggers are evaluated independently, then a priority rule
+// picks the highest-priority trigger that has NOT already fired.
+// State for the firing trigger is marked; states for triggers
+// whose conditions no longer hold are cleared so the next trip
+// can fire fresh.
 //
 // Priority order (highest first):
 //   1. five_hour_urgent — losing the rate-limit cap is the most
@@ -25,11 +25,28 @@ import (
 //      balloon (≥75% fill).
 //   3. five_hour_warn — half the rate-limit cap is gone.
 //   4. acceleration — per-turn growth is trending bad.
-//   5. stale — opportunity-cost: switching saves bytes.
+//   5. stale — opportunity-cost: more than half the loaded
+//      context is stale.
+//   6. topic_shift — milder version of stale: the user's prompts
+//      have clearly shifted topic since the session opened, and
+//      some loaded files (≥20%) are stale relative to the new
+//      direction. Catches partial pivots before stale-share
+//      crosses 50%.
 //
 // Why this order: rate-limit > session quality > prediction >
 // opportunity cost. The user explicitly flagged "save my vibes"
-// (rate-limit budget) as the primary goal.
+// (rate-limit budget) as the primary goal. topic_shift is last
+// because it's the weakest of the recommend-a-handoff signals —
+// when stale also trips, the stronger advisory carries more
+// information for the user.
+
+const (
+	// topicShiftMinStaleShare is the bottom bar on stale share
+	// for the topic_shift trigger. Below this, the user has too
+	// little loaded context for a handoff to be worth recommending
+	// regardless of any vocab divergence.
+	topicShiftMinStaleShare = 0.20
+)
 
 // AdvisorInput bundles every piece of data the renderer needs.
 // Pure data — the renderer performs no I/O.
@@ -78,6 +95,9 @@ func RenderAdvisor(in AdvisorInput) Advisory {
 	accel := EvaluateAcceleration(in.Messages)
 	hardCeiling := in.ContextFillPct >= rescueFillThreshold
 	fiveHourThresh := in.FiveHour.Threshold()
+	topicShiftFires := topicShifted(in.Messages) &&
+		relevance.StaleShare >= topicShiftMinStaleShare &&
+		relevance.TotalBytes >= minLoadedBytesForRelevance
 
 	// Clearance: when a trigger's condition is no longer true but
 	// state says it was fired, clear it so it can re-fire later.
@@ -89,6 +109,9 @@ func RenderAdvisor(in AdvisorInput) Advisory {
 	}
 	if !hardCeiling {
 		state.ClearTrigger(in.SessionID, TriggerHardCeiling)
+	}
+	if !topicShiftFires {
+		state.ClearTrigger(in.SessionID, TriggerTopicShift)
 	}
 	if fiveHourThresh < FiveHourThresholdUrgent {
 		state.ClearFiveHour(TriggerFiveHourUrgent)
@@ -135,6 +158,13 @@ func RenderAdvisor(in AdvisorInput) Advisory {
 			Line:  staleLine(relevance),
 			State: state,
 		}
+	case topicShiftFires && !state.HasFired(in.SessionID, TriggerTopicShift):
+		state.MarkFired(in.SessionID, TriggerTopicShift, in.NowMs)
+		return Advisory{
+			Fired: TriggerTopicShift,
+			Line:  topicShiftLine(relevance),
+			State: state,
+		}
 	}
 
 	return Advisory{State: state}
@@ -154,6 +184,29 @@ func staleLine(v RelevanceVerdict) string {
 	}
 	return fmt.Sprintf(
 		"klyne: ~%d%% of loaded file context is stale relative to your current direction. "+
+			"Files still relevant: %s. Run /klyne:handoff scope=current to carry forward only those.",
+		pct, subset,
+	)
+}
+
+// topicShiftLine renders the topic-shift advisory. Tells the user
+// their prompts have diverged from the opening framing and that a
+// scoped handoff will keep only the still-relevant files. Mentions
+// stale share so the user has a concrete number to anchor on.
+func topicShiftLine(v RelevanceVerdict) string {
+	pct := int(v.StaleShare*100 + 0.5)
+	subset := v.RelevantBasenames()
+	if subset == "" {
+		return fmt.Sprintf(
+			"klyne: your prompts have shifted topic since the session opened — "+
+				"about %d%% of loaded files are stale relative to your new direction. "+
+				"Run /klyne:handoff scope=current to start fresh with only what's still relevant.",
+			pct,
+		)
+	}
+	return fmt.Sprintf(
+		"klyne: your prompts have shifted topic since the session opened — "+
+			"about %d%% of loaded files are stale relative to your new direction. "+
 			"Files still relevant: %s. Run /klyne:handoff scope=current to carry forward only those.",
 		pct, subset,
 	)

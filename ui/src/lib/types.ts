@@ -266,6 +266,7 @@ export type AdvisoryKind =
   | 'hard_ceiling'
   | 'window_50'
   | 'window_75'
+  | 'topic_shift'
   | 'unknown';
 
 /** AdvisoryRow is one rendered advisory across all klyne-monitored sessions. */
@@ -330,6 +331,12 @@ export interface FiveHourProof {
   plan_tier?: string;
 }
 
+/** TopicShiftProof is the live signal for the topic_shift advisor. */
+export interface TopicShiftProof {
+  shifted: boolean;
+  would_fire: boolean;
+}
+
 /** AdvisorDetailResponse is GET /sessions/{id}/advisor-detail. */
 export interface AdvisorDetailResponse {
   session_id: string;
@@ -338,6 +345,7 @@ export interface AdvisorDetailResponse {
   acceleration: AccelerationProof;
   context_window: ContextWindowProof;
   five_hour?: FiveHourProof;
+  topic_shift: TopicShiftProof;
 }
 
 // --- /cost/summary ---

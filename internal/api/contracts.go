@@ -487,6 +487,11 @@ const (
 	AdvisoryKindFiveHourWarn AdvisoryKind = "window_50"
 	// AdvisoryKindFiveHourUrgent is the 75% rate-limit warning.
 	AdvisoryKindFiveHourUrgent AdvisoryKind = "window_75"
+	// AdvisoryKindTopicShift is the partial-pivot trigger that
+	// fires when the user's prompts have shifted topic from the
+	// session opening AND some loaded files (≥20%) are stale
+	// relative to the new direction. Milder than AdvisoryKindStale.
+	AdvisoryKindTopicShift AdvisoryKind = "topic_shift"
 	// AdvisoryKindUnknown is the fallback when the text doesn't match
 	// any recognised trigger pattern. Surfaces as a real row so a
 	// future hook can add advisories without UI breakage.
@@ -569,6 +574,17 @@ type FiveHourProof struct {
 	PlanTier       string  `json:"plan_tier,omitempty"`
 }
 
+// TopicShiftProof is the live signal for the topic_shift advisor.
+// The detector compares the bag-of-words of the first 5 user prompts
+// against the last 5; Shifted is true when their Jaccard overlap
+// falls below the topic-overlap threshold. WouldFire combines that
+// with a minimum stale-share floor so the panel matches the
+// advisor's firing logic 1:1.
+type TopicShiftProof struct {
+	Shifted   bool `json:"shifted"`
+	WouldFire bool `json:"would_fire"`
+}
+
 // AdvisorDetailResponse is GET /sessions/{id}/advisor-detail —
 // per-session advisory list PLUS the underlying proof data the
 // cockpit modal needs to show the user *why* klyne fired each
@@ -582,6 +598,7 @@ type AdvisorDetailResponse struct {
 	Acceleration  AccelerationProof  `json:"acceleration"`
 	ContextWindow ContextWindowProof `json:"context_window"`
 	FiveHour      FiveHourProof      `json:"five_hour,omitempty"`
+	TopicShift    TopicShiftProof    `json:"topic_shift"`
 }
 
 // ---------------------------------------------------------------------------

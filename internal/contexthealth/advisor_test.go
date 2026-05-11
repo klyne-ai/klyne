@@ -90,6 +90,110 @@ func TestRenderAdvisor_StaleFiresLast(t *testing.T) {
 	}
 }
 
+func TestRenderAdvisor_TopicShiftFiresOnPartialPivot(t *testing.T) {
+	// Partial pivot: the user has clearly shifted topic (first 5
+	// user prompts are auth-only, last 5 are billing-only) AND
+	// some loaded files (>=20%) are stale relative to the new
+	// direction, BUT the stale share is below the 50% staleShare
+	// trigger. The dedicated topic_shift trigger should fire to
+	// catch this earlier-warning case that the headline stale
+	// trigger misses.
+	//
+	// The topicShifted() detector requires at least 2×topicSampleSize
+	// (10) user messages, so the fixture must have 10+ distinct
+	// user prompts split across the two topics.
+	const (
+		stalePayload = 5_000  // smaller, so stale share lands below 50%
+		freshPayload = 12_000 // larger, so stale share stays modest
+	)
+
+	// Need enough user messages on the new-topic side that the
+	// auth file's last touch falls OUTSIDE the recency horizon
+	// (recentTouchHorizonUserMsgs user messages back). Otherwise
+	// the recency override marks login.go relevant and the stale
+	// share stays at 0.
+	msgs := []*connectors.Message{
+		userMsg(0, "fix the authentication middleware login bug"),
+		userMsg(1, "the session cookie issuer is wrong"),
+		userMsg(2, "the auth login redirect is dropping the user"),
+		userMsg(3, "verify the auth session refresh path"),
+		userMsg(4, "double check the login cookie scope"),
+		readCall(5, "/repo/auth/login.go"),
+		readResult(6, 5, stalePayload),
+		userMsg(7, "now switch to billing refund logic"),
+		userMsg(8, "the subscription charge isn't applying"),
+		userMsg(9, "billing invoice for the refund flow"),
+		userMsg(10, "credit the customer for the failed charge"),
+		userMsg(11, "make sure the refund subscription path is right"),
+		userMsg(12, "double check the refund authorization code"),
+		userMsg(13, "the refund retry policy needs adjusting"),
+		userMsg(14, "verify the subscription invoice format"),
+		userMsg(15, "ensure refund credits log correctly"),
+		userMsg(16, "and the customer notification email"),
+		readCall(17, "/repo/billing/refund.go"),
+		readResult(18, 17, freshPayload),
+	}
+
+	adv := RenderAdvisor(AdvisorInput{
+		SessionID: "s-topic",
+		Messages:  msgs,
+		State:     emptyState(),
+		NowMs:     1000,
+	})
+	if adv.Fired != TriggerTopicShift {
+		t.Fatalf("Fired=%q, want %q (Line=%q)", adv.Fired, TriggerTopicShift, adv.Line)
+	}
+	if !strings.Contains(adv.Line, "shifted topic since the session opened") {
+		t.Fatalf("Line missing topic-shift anchor phrase: %q", adv.Line)
+	}
+	if !strings.Contains(adv.Line, "/klyne:handoff scope=current") {
+		t.Fatalf("Line missing scoped-handoff CTA: %q", adv.Line)
+	}
+	if !strings.Contains(adv.Line, "refund.go") {
+		t.Fatalf("Line should name the still-relevant file: %q", adv.Line)
+	}
+}
+
+func TestRenderAdvisor_StalePreemptsTopicShift(t *testing.T) {
+	// When BOTH stale (>=50% stale) AND topic_shift conditions
+	// hold, the stronger stale advisory must win — it carries a
+	// more actionable signal.
+	const stalePayload = 24_000
+	const freshPayload = 8_000
+
+	msgs := []*connectors.Message{
+		userMsg(0, "fix the authentication middleware login bug"),
+		userMsg(1, "the session cookie issuer is wrong"),
+		userMsg(2, "the auth login redirect is dropping the user"),
+		userMsg(3, "verify the auth session refresh path"),
+		userMsg(4, "double check the login cookie scope"),
+		readCall(5, "/repo/auth/login.go"),
+		readResult(6, 5, stalePayload),
+		userMsg(7, "now switch to billing refund logic"),
+		userMsg(8, "the subscription charge isn't applying"),
+		userMsg(9, "billing invoice for the refund flow"),
+		userMsg(10, "credit the customer for the failed charge"),
+		userMsg(11, "make sure the refund subscription path is right"),
+		userMsg(12, "double check the refund authorization code"),
+		userMsg(13, "the refund retry policy needs adjusting"),
+		userMsg(14, "verify the subscription invoice format"),
+		userMsg(15, "ensure refund credits log correctly"),
+		userMsg(16, "and the customer notification email"),
+		readCall(17, "/repo/billing/refund.go"),
+		readResult(18, 17, freshPayload),
+	}
+
+	adv := RenderAdvisor(AdvisorInput{
+		SessionID: "s-priority",
+		Messages:  msgs,
+		State:     emptyState(),
+		NowMs:     1000,
+	})
+	if adv.Fired != TriggerStale {
+		t.Fatalf("expected stale to preempt topic_shift; Fired=%q Line=%q", adv.Fired, adv.Line)
+	}
+}
+
 func TestRenderAdvisor_TransitionRule(t *testing.T) {
 	// Same input twice; the second call should NOT fire because the
 	// state already records the trigger.

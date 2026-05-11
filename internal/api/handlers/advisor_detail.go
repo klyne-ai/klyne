@@ -61,12 +61,14 @@ func (h *AdvisorDetailHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	staleProof := buildStaleProof(messages)
 	resp := api.AdvisorDetailResponse{
 		SessionID:     sessionID,
 		Advisories:    advisories,
-		Stale:         buildStaleProof(messages),
+		Stale:         staleProof,
 		Acceleration:  buildAccelerationProof(messages),
 		ContextWindow: buildContextWindowProof(messages),
+		TopicShift:    buildTopicShiftProof(messages, staleProof),
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -158,6 +160,32 @@ func buildAccelerationProof(msgs []*connectors.Message) api.AccelerationProof {
 		LatestEffective: v.LatestEffectiveInput,
 		SampledTurns:    v.SampledTurns,
 		WouldFire:       v.ShouldFire,
+	}
+}
+
+// buildTopicShiftProof surfaces the live topic-shift signal in
+// DTO form. Shifted comes from contexthealth.TopicShifted (first 5
+// user prompts vs last 5). WouldFire mirrors the advisor's firing
+// gate exactly so the cockpit's "currently active / resolved"
+// badge matches what the hook would inject right now.
+//
+// Threshold values for the gate (topicShiftMinStaleShare and the
+// minimum loaded byte floor) live in contexthealth/advisor.go and
+// contexthealth/relevance.go; they are mirrored here as constants
+// because re-exporting them would clutter the package surface for
+// a tiny copy.
+func buildTopicShiftProof(msgs []*connectors.Message, stale api.StaleProof) api.TopicShiftProof {
+	const (
+		minStaleShare       = 0.20    // mirrors topicShiftMinStaleShare
+		minTotalLoadedBytes = 8 * 1024 // mirrors minLoadedBytesForRelevance
+	)
+	shifted := contexthealth.TopicShifted(msgs)
+	wouldFire := shifted &&
+		stale.StaleShare >= minStaleShare &&
+		stale.TotalBytes >= minTotalLoadedBytes
+	return api.TopicShiftProof{
+		Shifted:   shifted,
+		WouldFire: wouldFire,
 	}
 }
 

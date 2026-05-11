@@ -18,6 +18,7 @@
     hard_ceiling: { label: 'hard ceiling', color: 'var(--ad-red, #ef4444)' },
     window_50: { label: '5-h window 50%', color: 'var(--ad-yellow, #eab308)' },
     window_75: { label: '5-h window 75%', color: 'var(--ad-red, #ef4444)' },
+    topic_shift: { label: 'topic shift', color: 'var(--ad-amber, #fbbf24)' },
     unknown: { label: 'other', color: 'var(--ad-muted, #6b7280)' }
   };
 

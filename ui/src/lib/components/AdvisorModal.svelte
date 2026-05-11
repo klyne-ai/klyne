@@ -42,6 +42,7 @@
     hard_ceiling: { label: 'hard ceiling', color: '#ef4444' },
     window_50: { label: '5-h window 50%', color: '#eab308' },
     window_75: { label: '5-h window 75%', color: '#ef4444' },
+    topic_shift: { label: 'topic shift', color: '#fbbf24' },
     unknown: { label: 'other', color: '#6b7280' }
   };
 
@@ -190,6 +191,8 @@
         return (d.five_hour?.pct_used ?? 0) >= 50;
       case 'window_75':
         return (d.five_hour?.pct_used ?? 0) >= 75;
+      case 'topic_shift':
+        return d.topic_shift?.would_fire ?? false;
       default:
         return false;
     }

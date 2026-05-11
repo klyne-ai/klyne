@@ -107,6 +107,12 @@ func ClassifyAdvisory(content string) api.AdvisoryKind {
 		return api.AdvisoryKindAcceleration
 	case strings.Contains(c, "next turn's prefix will keep growing"):
 		return api.AdvisoryKindHardCeiling
+	// Topic-shift phrase must be checked BEFORE the stale phrase
+	// because the topic-shift copy also mentions "stale relative
+	// to your new direction" (similar tail). The "shifted topic
+	// since the session opened" anchor is unique to topic_shift.
+	case strings.Contains(c, "shifted topic since the session opened"):
+		return api.AdvisoryKindTopicShift
 	case strings.Contains(c, "stale relative to your current direction"):
 		return api.AdvisoryKindStale
 	// Five-hour patterns last because acceleration's tail also

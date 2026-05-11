@@ -359,6 +359,14 @@ func runAdviseExplain(cmd *cobra.Command, explicitSession string) error {
 	fmt.Fprintf(stdout, "    stale share %.0f%% (%s of %s loaded file bytes)\n",
 		relevance.StaleShare*100,
 		humanInt(int64(relevance.StaleBytes)), humanInt(int64(relevance.TotalBytes)))
+	topicShifted := contexthealth.TopicShifted(snap.Messages)
+	topicShiftFires := topicShifted &&
+		relevance.StaleShare >= 0.20 &&
+		relevance.TotalBytes >= 8*1024
+	fmt.Fprintf(stdout, "  topic_shift      : opening 5 vs latest 5 prompts diverged AND stale-share >=20%% → %s\n",
+		boolToFire(topicShiftFires))
+	fmt.Fprintf(stdout, "    topic shifted: %t (vocab divergence between first-5 and last-5 user prompts)\n",
+		topicShifted)
 	if cap := cfg.Plan.FiveHourCap(); cap > 0 {
 		fmt.Fprintf(stdout, "  five_hour_window : pct used >=50%% (warn) / >=75%% (urgent) → %s\n",
 			fiveHourLabel(summary))
