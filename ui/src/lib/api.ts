@@ -25,6 +25,8 @@ import type {
   SettingsResponse,
   SettingsUpdateRequest,
   SummaryResponse,
+  TokenTimelineQuery,
+  TokenTimelineResponse,
   UsageResponse,
   WizardDetectResponse
 } from './types.js';
@@ -197,6 +199,29 @@ export async function fetchSessionUsage(id: string): Promise<SessionUsageRespons
  */
 export async function fetchBreakAdvice(id: string): Promise<BreakAdviceResponse> {
   return get<BreakAdviceResponse>(`/sessions/${encodeURIComponent(id)}/break-advice`);
+}
+
+/**
+ * GET /sessions/{id}/token-timeline — per-assistant-turn token usage
+ * series for the cockpit's line chart. Server reuses the same
+ * computation that powers `klyne tokens` and the get_token_timeline
+ * MCP tool, so all three surfaces stay in sync.
+ *
+ * Defaults to the entire-session view. Pass `window` ("30m", "5h",
+ * "2h30m") or `hours` to clip to a recent window — useful when the
+ * session is large and the user only wants to see today's activity.
+ */
+export async function fetchTokenTimeline(
+  sessionId: string,
+  opts?: TokenTimelineQuery
+): Promise<TokenTimelineResponse> {
+  return get<TokenTimelineResponse>(
+    `/sessions/${encodeURIComponent(sessionId)}/token-timeline`,
+    {
+      window: opts?.window,
+      hours: opts?.hours
+    }
+  );
 }
 
 // ---------------------------------------------------------------------------

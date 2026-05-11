@@ -155,6 +155,8 @@ const GO_TO_TS_NAME: Record<string, string> = {
   RestoreResponse: 'RestoreResponse',
   SummaryResponse: 'SummaryResponse',
   SessionUsageResponse: 'SessionUsageResponse',
+  TokenTimelinePoint: 'TokenTimelinePoint',
+  TokenTimelineResponse: 'TokenTimelineResponse',
   BreakAdviceResponse: 'BreakAdviceResponse',
   SearchHit: 'SearchHit',
   SearchResponse: 'SearchResponse',
