@@ -9,14 +9,14 @@ func TestDecodeCWD_RoundTrip(t *testing.T) {
 	// DecodeCWD(EncodeCWD(path)) == path.
 	paths := []string{
 		// Standard Unix home paths
-		"/Users/alice/projects/agentdeck",
+		"/Users/alice/projects/klyne",
 		"/Users/alice/projects/myapp",
 		"/home/dev/work/backend",
 		"/home/dev/work/frontend",
 		"/root/workspace",
 		// Deeper nesting
-		"/Users/mohit/Desktop/Project/agentdeck",
-		"/Users/mohit/Desktop/Project/agentdeck/internal/connectors",
+		"/Users/mohit/Desktop/Project/klyne",
+		"/Users/mohit/Desktop/Project/klyne/internal/connectors",
 		"/opt/homebrew/var/projects/serviceA",
 		"/var/www/html/myapp",
 		"/tmp/testdir",
@@ -30,7 +30,7 @@ func TestDecodeCWD_RoundTrip(t *testing.T) {
 		"/go/src/github.com/myorg/myrepo",
 		"/go/src/github.com/myorg/myrepo/cmd",
 		// Long nested paths
-		"/Users/alice/Developer/openSource/golang/projects/agentdeck",
+		"/Users/alice/Developer/openSource/golang/projects/klyne",
 		"/Users/bob/work/org/team/product/service/v2/pkg",
 		// Paths ending with digits
 		"/home/user/project1",

@@ -68,7 +68,7 @@ Models in use:
 interface Session {
   id:            string  // UUID from CLI
   cli:           'claude' | 'codex'
-  project_path:  string  // e.g. /Users/mohitpatel/Desktop/Project/agentdeck
+  project_path:  string  // e.g. /Users/mohitpatel/Desktop/Project/klyne
   encoded_cwd:   string  // path-encoded form (for Claude only)
   started_at:    number  // epoch-ms
   last_msg_at:   number  // epoch-ms

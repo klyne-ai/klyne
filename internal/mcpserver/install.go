@@ -59,12 +59,6 @@ type InstallReport struct {
 // klyneEntryName is the MCP server name written into host configs.
 const klyneEntryName = "klyne"
 
-// legacyEntryName is the pre-rebrand server name. The install command
-// removes any entry under this key when writing the new one so users
-// migrating from agentdeck don't end up with two MCP servers
-// registered for the same binary.
-const legacyEntryName = "agentdeck"
-
 // klyneArgs is the argv passed to the klyne binary by the MCP host.
 // Stays in one place so Claude + Codex agree.
 var klyneArgs = []string{"mcp"}
@@ -158,21 +152,16 @@ func installClaude(binaryPath string) (*InstallReport, error) {
 		"args":    asAnySlice(klyneArgs),
 	}
 	existing, present := servers[klyneEntryName].(map[string]any)
-	_, legacyPresent := servers[legacyEntryName]
 	action := InstallActionAdded
 	switch {
 	case !present:
 		action = InstallActionAdded
-	case mcpEntryEqual(existing, want) && !legacyPresent:
-		// Idempotent fast-path only when the legacy entry is also
-		// gone — otherwise we still need to rewrite the file to
-		// remove the legacy key.
+	case mcpEntryEqual(existing, want):
 		return &InstallReport{Platform: PlatformClaude, Path: path, Action: InstallActionAlreadyInstalled}, nil
 	default:
 		action = InstallActionUpdated
 	}
 	servers[klyneEntryName] = want
-	delete(servers, legacyEntryName)
 	parsed["mcpServers"] = servers
 
 	out, err := json.MarshalIndent(parsed, "", "  ")
@@ -219,18 +208,16 @@ func installCodex(binaryPath string) (*InstallReport, error) {
 		"args":    asAnySlice(klyneArgs),
 	}
 	existing, present := servers[klyneEntryName].(map[string]any)
-	_, legacyPresent := servers[legacyEntryName]
 	action := InstallActionAdded
 	switch {
 	case !present:
 		action = InstallActionAdded
-	case mcpEntryEqual(existing, want) && !legacyPresent:
+	case mcpEntryEqual(existing, want):
 		return &InstallReport{Platform: PlatformCodex, Path: path, Action: InstallActionAlreadyInstalled}, nil
 	default:
 		action = InstallActionUpdated
 	}
 	servers[klyneEntryName] = want
-	delete(servers, legacyEntryName)
 	parsed["mcp_servers"] = servers
 
 	out, err := toml.Marshal(parsed)

@@ -1,5 +1,5 @@
 name: Feature Request
-description: Propose a new feature or enhancement for agentdeck.
+description: Propose a new feature or enhancement for klyne.
 labels: ["enhancement"]
 body:
   - type: markdown

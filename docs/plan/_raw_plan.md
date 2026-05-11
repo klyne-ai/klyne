@@ -23,30 +23,30 @@ Workstreams are listed by ID. Owned paths follow §11 of the spec exactly. Sizes
 ### W0 — Bootstrap & shared contracts
 - **Goal:** Produce repo skeleton, locked interfaces, schema, and CI scaffolding so all other agents can fan out without colliding.
 - **Owned paths:**
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/go.mod`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/go.sum`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/Makefile`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/README.md` (stub only — full copy in W17)
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/LICENSE`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/.gitignore`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/.golangci.yml`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/.editorconfig`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/.github/workflows/ci.yml` (lint + test only; release in W17)
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/.github/ISSUE_TEMPLATE/*.yml`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/cmd/klyne/main.go` (cobra root with `start`/`stop`/`doctor` subcommand stubs returning "not implemented")
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/connectors/connector.go` (interface + `RawEvent`, `Message`, `PricingTable` types — **no implementations**)
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/store/migrations/001_init.sql`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/store/migrations/002_fts.sql`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/store/migrations/003_summaries.sql`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/store/migrations/embed.go` (just `//go:embed *.sql` + `var FS embed.FS`)
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/api/contracts.go` (route list constants, request/response DTOs — **handlers in W7**)
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/api/sse_events.go` (SSE event payload types: `MsgNew`, `SummaryReady`, `SessionUpdate`, `CostTick`, `ThreadRebuild`)
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/config/schema.go` (typed struct for `~/.klyne/config.toml` — **loader in W6**)
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/cost/pricing_schema.go` (typed struct + JSON tags for the LiteLLM-style pricing table — **table data + lookup in W9**)
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/examples/sample-jsonl/README.md` (describes fixture layout)
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/examples/sample-jsonl/claude/*.jsonl` (3–5 hand-collected fixture sessions, including one that hits `/compact`)
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/examples/sample-jsonl/codex/*.jsonl` (3–5 fixture sessions)
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/docs/contracts.md` (this section, frozen — change requires PR + cross-stream review)
+  - `/Users/mohitpatel/Desktop/Project/klyne/go.mod`
+  - `/Users/mohitpatel/Desktop/Project/klyne/go.sum`
+  - `/Users/mohitpatel/Desktop/Project/klyne/Makefile`
+  - `/Users/mohitpatel/Desktop/Project/klyne/README.md` (stub only — full copy in W17)
+  - `/Users/mohitpatel/Desktop/Project/klyne/LICENSE`
+  - `/Users/mohitpatel/Desktop/Project/klyne/.gitignore`
+  - `/Users/mohitpatel/Desktop/Project/klyne/.golangci.yml`
+  - `/Users/mohitpatel/Desktop/Project/klyne/.editorconfig`
+  - `/Users/mohitpatel/Desktop/Project/klyne/.github/workflows/ci.yml` (lint + test only; release in W17)
+  - `/Users/mohitpatel/Desktop/Project/klyne/.github/ISSUE_TEMPLATE/*.yml`
+  - `/Users/mohitpatel/Desktop/Project/klyne/cmd/klyne/main.go` (cobra root with `start`/`stop`/`doctor` subcommand stubs returning "not implemented")
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/connectors/connector.go` (interface + `RawEvent`, `Message`, `PricingTable` types — **no implementations**)
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/store/migrations/001_init.sql`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/store/migrations/002_fts.sql`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/store/migrations/003_summaries.sql`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/store/migrations/embed.go` (just `//go:embed *.sql` + `var FS embed.FS`)
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/api/contracts.go` (route list constants, request/response DTOs — **handlers in W7**)
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/api/sse_events.go` (SSE event payload types: `MsgNew`, `SummaryReady`, `SessionUpdate`, `CostTick`, `ThreadRebuild`)
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/config/schema.go` (typed struct for `~/.klyne/config.toml` — **loader in W6**)
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/cost/pricing_schema.go` (typed struct + JSON tags for the LiteLLM-style pricing table — **table data + lookup in W9**)
+  - `/Users/mohitpatel/Desktop/Project/klyne/examples/sample-jsonl/README.md` (describes fixture layout)
+  - `/Users/mohitpatel/Desktop/Project/klyne/examples/sample-jsonl/claude/*.jsonl` (3–5 hand-collected fixture sessions, including one that hits `/compact`)
+  - `/Users/mohitpatel/Desktop/Project/klyne/examples/sample-jsonl/codex/*.jsonl` (3–5 fixture sessions)
+  - `/Users/mohitpatel/Desktop/Project/klyne/docs/contracts.md` (this section, frozen — change requires PR + cross-stream review)
 - **Inputs:** spec §7, §8, §10, §11, §18.
 - **Outputs:** every contract, schema, fixture, and module skeleton downstream agents need. Compiles green and `go test ./...` passes (no tests yet, but no errors).
 - **Dependencies:** none.
@@ -65,10 +65,10 @@ Workstreams are listed by ID. Owned paths follow §11 of the spec exactly. Sizes
 ### W1 — Store: open + migrate + dual handles
 - **Goal:** Implement the SQLite store layer (open with WAL pragmas, dual `*sql.DB` handles, migration runner) so every other backend stream can persist and read.
 - **Owned paths:**
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/store/db.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/store/db_test.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/store/migrate.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/store/migrate_test.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/store/db.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/store/db_test.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/store/migrate.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/store/migrate_test.go`
 - **Inputs:** `internal/store/migrations/*.sql` (W0), spec §5 PRAGMAs, §7 schema.
 - **Outputs:** `store.Open(path string) (*store.DB, error)` returning an object with `.Read() *sql.DB` and `.Write() *sql.DB`. `MaxOpenConns=1` on write, `N` on read. Migration runner is idempotent, version-tracked in a `schema_migrations` table.
 - **Dependencies:** W0.
@@ -83,10 +83,10 @@ Workstreams are listed by ID. Owned paths follow §11 of the spec exactly. Sizes
 ### W2 — Store: messages + sessions DAOs
 - **Goal:** CRUD for `messages` and `sessions` tables, with the rollup (`last_msg_at`, `msg_count`, `cost_total`) handled inside `InsertMessage`.
 - **Owned paths:**
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/store/messages.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/store/messages_test.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/store/sessions.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/store/sessions_test.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/store/messages.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/store/messages_test.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/store/sessions.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/store/sessions_test.go`
 - **Inputs:** W1 (`store.DB`), W0 (`Message` type).
 - **Outputs:**
   - `messages.Insert(ctx, db, *Message) error` (also bumps session counters in same tx).
@@ -105,10 +105,10 @@ Workstreams are listed by ID. Owned paths follow §11 of the spec exactly. Sizes
 ### W3 — Store: search (FTS5 BM25) + summaries DAO
 - **Goal:** FTS5 search query + summary CRUD.
 - **Owned paths:**
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/store/search.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/store/search_test.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/store/summaries.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/store/summaries_test.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/store/search.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/store/search_test.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/store/summaries.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/store/summaries_test.go`
 - **Inputs:** W1, W2 (for `messages_fts` triggers — defined in W0 migration but exercised here).
 - **Outputs:**
   - `search.Query(ctx, db, q string, limit int) ([]SearchHit, error)` using BM25 ranking over `messages_fts`.
@@ -125,13 +125,13 @@ Workstreams are listed by ID. Owned paths follow §11 of the spec exactly. Sizes
 ### W4 — Claude Code connector
 - **Goal:** Discover, watch, and parse `~/.claude/projects/<encoded-cwd>/<uuid>.jsonl` into canonical `Message` and `Session`.
 - **Owned paths:**
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/connectors/claude/claude.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/connectors/claude/parse.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/connectors/claude/parse_test.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/connectors/claude/watch.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/connectors/claude/watch_test.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/connectors/claude/decode_cwd.go` (decodes the encoded CWD path segment)
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/connectors/claude/decode_cwd_test.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/connectors/claude/claude.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/connectors/claude/parse.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/connectors/claude/parse_test.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/connectors/claude/watch.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/connectors/claude/watch_test.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/connectors/claude/decode_cwd.go` (decodes the encoded CWD path segment)
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/connectors/claude/decode_cwd_test.go`
 - **Inputs:** W0 (`Connector` interface, `Message` type, fixtures in `examples/sample-jsonl/claude/`).
 - **Outputs:** A `claude.Connector` value that satisfies `connectors.Connector`. Pricing comes from W9 via injected `cost.Lookup` — connector itself does not own pricing data, just declares which models it emits.
 - **Dependencies:** W0.
@@ -148,11 +148,11 @@ Workstreams are listed by ID. Owned paths follow §11 of the spec exactly. Sizes
 ### W5 — Codex CLI connector
 - **Goal:** Same as W4, for `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`.
 - **Owned paths:**
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/connectors/codex/codex.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/connectors/codex/parse.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/connectors/codex/parse_test.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/connectors/codex/watch.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/connectors/codex/watch_test.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/connectors/codex/codex.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/connectors/codex/parse.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/connectors/codex/parse_test.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/connectors/codex/watch.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/connectors/codex/watch_test.go`
 - **Inputs:** W0 (`Connector` interface, fixtures in `examples/sample-jsonl/codex/`).
 - **Outputs:** `codex.Connector` value satisfying `connectors.Connector`.
 - **Dependencies:** W0. **Independent of W4** — runs in parallel.
@@ -163,10 +163,10 @@ Workstreams are listed by ID. Owned paths follow §11 of the spec exactly. Sizes
 ### W6 — Config loader
 - **Goal:** Read/write `~/.klyne/config.toml`, exposing typed config to the rest of the app.
 - **Owned paths:**
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/config/config.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/config/config_test.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/config/paths.go` (XDG-aware default paths per OS)
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/config/paths_test.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/config/config.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/config/config_test.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/config/paths.go` (XDG-aware default paths per OS)
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/config/paths_test.go`
 - **Inputs:** W0 (`schema.go`).
 - **Outputs:** `config.Load() (*Config, error)`, `config.Save(*Config) error`. Atomic writes (write to temp, rename). Defaults applied if file missing.
 - **Dependencies:** W0.
@@ -177,16 +177,16 @@ Workstreams are listed by ID. Owned paths follow §11 of the spec exactly. Sizes
 ### W7 — HTTP API + handlers (no AI yet)
 - **Goal:** chi router and the read-only handlers that frontend needs on Day 2: `/sessions`, `/sessions/:id`, `/sessions/:id/messages`, `/search`, `/cost/summary`, `/settings` (GET/PUT).
 - **Owned paths:**
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/api/http.go` (router + middleware: logger, recover, CORS-loopback-only)
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/api/http_test.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/api/handlers/sessions.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/api/handlers/sessions_test.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/api/handlers/search.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/api/handlers/search_test.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/api/handlers/cost.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/api/handlers/cost_test.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/api/handlers/settings.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/api/handlers/settings_test.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/api/http.go` (router + middleware: logger, recover, CORS-loopback-only)
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/api/http_test.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/api/handlers/sessions.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/api/handlers/sessions_test.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/api/handlers/search.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/api/handlers/search_test.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/api/handlers/cost.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/api/handlers/cost_test.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/api/handlers/settings.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/api/handlers/settings_test.go`
 - **Inputs:** W0 (`api/contracts.go`), W2, W3, W6.
 - **Outputs:** `api.NewRouter(deps Deps) http.Handler`. Each handler validates its DTO against the contract and delegates to store DAOs.
 - **Dependencies:** W0, W2, W3, W6.
@@ -201,10 +201,10 @@ Workstreams are listed by ID. Owned paths follow §11 of the spec exactly. Sizes
 ### W8 — SSE hub + `/events` endpoint
 - **Goal:** Single broadcast hub that backend writers fan out to per-tab subscribers.
 - **Owned paths:**
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/api/sse.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/api/sse_test.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/api/handlers/events.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/api/handlers/events_test.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/api/sse.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/api/sse_test.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/api/handlers/events.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/api/handlers/events_test.go`
 - **Inputs:** W0 (`sse_events.go`), W7 (router registration point — W7 exposes a `Mount(r chi.Router)` hook the SSE handler calls).
 - **Outputs:** `sse.NewHub() *Hub` with `Publish(event)` and `Subscribe() (<-chan Event, cancel)`. Heartbeat every 15 s. Auto-reconnect-friendly (Last-Event-ID supported).
 - **Dependencies:** W0, W7 (must agree on mount point).
@@ -218,11 +218,11 @@ Workstreams are listed by ID. Owned paths follow §11 of the spec exactly. Sizes
 ### W9 — Cost engine + pricing table
 - **Goal:** Embed a LiteLLM-style pricing JSON in the binary; provide `Lookup(model) -> per-token rates` and `Cost(tokensIn, tokensOut, model) -> usd`.
 - **Owned paths:**
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/cost/pricing.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/cost/pricing_test.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/cost/pricing.json` (embedded via `//go:embed`)
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/cost/refresh.go` (loads override from `~/.klyne/pricing.json` if present)
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/cost/refresh_test.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/cost/pricing.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/cost/pricing_test.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/cost/pricing.json` (embedded via `//go:embed`)
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/cost/refresh.go` (loads override from `~/.klyne/pricing.json` if present)
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/cost/refresh_test.go`
 - **Inputs:** W0 (`pricing_schema.go`), W6 (config dir).
 - **Outputs:** `cost.New() *Engine` exposing `Lookup`, `Cost`, `RollupSession(sessionID)`, `RollupProject(path, since)`.
 - **Dependencies:** W0, W6.
@@ -237,15 +237,15 @@ Workstreams are listed by ID. Owned paths follow §11 of the spec exactly. Sizes
 ### W10 — AI providers (Anthropic / OpenAI / Gemini / Ollama) — API-key only
 - **Goal:** A `Provider` interface and 4 implementations. **Never touches `~/.claude` OAuth or `~/.codex/auth.json`** (§17, §18).
 - **Owned paths:**
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/ai/provider.go` (interface + shared types: `ChatRequest`, `ChatResponse`, `EmbedRequest`, `EmbedResponse`, `ProviderInfo`)
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/ai/providers/anthropic.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/ai/providers/anthropic_test.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/ai/providers/openai.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/ai/providers/openai_test.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/ai/providers/gemini.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/ai/providers/gemini_test.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/ai/providers/ollama.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/ai/providers/ollama_test.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/ai/provider.go` (interface + shared types: `ChatRequest`, `ChatResponse`, `EmbedRequest`, `EmbedResponse`, `ProviderInfo`)
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/ai/providers/anthropic.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/ai/providers/anthropic_test.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/ai/providers/openai.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/ai/providers/openai_test.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/ai/providers/gemini.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/ai/providers/gemini_test.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/ai/providers/ollama.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/ai/providers/ollama_test.go`
 - **Inputs:** W0 (config schema for which envs to read), spec §8.
 - **Outputs:** Each provider satisfies the `ai.Provider` interface. `ai.providers.DetectAvailable()` returns `[]ProviderInfo` based on env detection (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `http://localhost:11434/api/tags`).
 - **Dependencies:** W0.
@@ -260,14 +260,14 @@ Workstreams are listed by ID. Owned paths follow §11 of the spec exactly. Sizes
 ### W11 — Smart selector + summarize/title tasks
 - **Goal:** §8 routing logic plus the actual summarize and title tasks that run on the message stream.
 - **Owned paths:**
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/ai/selector.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/ai/selector_test.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/ai/tasks/summarize.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/ai/tasks/summarize_test.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/ai/tasks/title.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/ai/tasks/title_test.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/ai/tasks/runner.go` (worker goroutine: every 50 messages or on compact event, fetch window, run summarize, persist)
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/ai/tasks/runner_test.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/ai/selector.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/ai/selector_test.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/ai/tasks/summarize.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/ai/tasks/summarize_test.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/ai/tasks/title.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/ai/tasks/title_test.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/ai/tasks/runner.go` (worker goroutine: every 50 messages or on compact event, fetch window, run summarize, persist)
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/ai/tasks/runner_test.go`
 - **Inputs:** W0 (config), W3 (summaries DAO), W10 (providers), spec §8 matrix.
 - **Outputs:**
   - `selector.Pick(task TaskKind, available []ProviderInfo) (Choice, Reason)` — pure function, table-driven, easy to test.
@@ -285,14 +285,14 @@ Workstreams are listed by ID. Owned paths follow §11 of the spec exactly. Sizes
 ### W12 — Wiring layer (`internal/app`) + cobra commands
 - **Goal:** Compose all the modules into a running daemon. Implement `klyne start`, `klyne stop`, `klyne doctor`. Bind `127.0.0.1:7878` only.
 - **Owned paths:**
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/app/app.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/app/app_test.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/app/lifecycle.go` (graceful shutdown, signal handling)
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/app/lifecycle_test.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/app/openbrowser.go` (cross-OS `xdg-open`/`open`/`start`)
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/cmd/klyne/start.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/cmd/klyne/stop.go`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/cmd/klyne/doctor.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/app/app.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/app/app_test.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/app/lifecycle.go` (graceful shutdown, signal handling)
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/app/lifecycle_test.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/app/openbrowser.go` (cross-OS `xdg-open`/`open`/`start`)
+  - `/Users/mohitpatel/Desktop/Project/klyne/cmd/klyne/start.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/cmd/klyne/stop.go`
+  - `/Users/mohitpatel/Desktop/Project/klyne/cmd/klyne/doctor.go`
 - **Inputs:** all of W1–W11.
 - **Outputs:** A single binary that, when invoked with no args (cobra root → start), spins up the watcher, store, API, SSE, AI runner, and opens the browser.
 - **Dependencies:** W1, W2, W3, W4, W5, W6, W7, W8, W9, W10, W11. **This is the integration node.**
@@ -307,24 +307,24 @@ Workstreams are listed by ID. Owned paths follow §11 of the spec exactly. Sizes
 ### W13 — Frontend foundation: SvelteKit shell + lib + stores
 - **Goal:** SvelteKit 5 scaffold with Tailwind 4, runes-based stores, API client, SSE client. **No business components yet.**
 - **Owned paths:**
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/ui/package.json`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/ui/svelte.config.js` (adapter-static)
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/ui/vite.config.ts`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/ui/tsconfig.json`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/ui/tailwind.config.ts`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/ui/postcss.config.js`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/ui/.eslintrc.cjs`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/ui/src/app.html`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/ui/src/app.css`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/ui/src/lib/api.ts` (typed fetch wrappers — types mirror W0 `contracts.go` exactly)
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/ui/src/lib/api.test.ts`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/ui/src/lib/sse.ts` (EventSource client; reconnect; payload types mirror W0 `sse_events.go`)
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/ui/src/lib/sse.test.ts`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/ui/src/lib/types.ts` (TS mirror of `Message`, `Session`, `Summary`, etc.)
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/ui/src/lib/stores.svelte.ts`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/ui/src/lib/stores.svelte.test.ts`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/ui/src/routes/+layout.svelte` (just shell; navigation in W14)
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/ui/src/routes/+page.svelte` (placeholder "loading…")
+  - `/Users/mohitpatel/Desktop/Project/klyne/ui/package.json`
+  - `/Users/mohitpatel/Desktop/Project/klyne/ui/svelte.config.js` (adapter-static)
+  - `/Users/mohitpatel/Desktop/Project/klyne/ui/vite.config.ts`
+  - `/Users/mohitpatel/Desktop/Project/klyne/ui/tsconfig.json`
+  - `/Users/mohitpatel/Desktop/Project/klyne/ui/tailwind.config.ts`
+  - `/Users/mohitpatel/Desktop/Project/klyne/ui/postcss.config.js`
+  - `/Users/mohitpatel/Desktop/Project/klyne/ui/.eslintrc.cjs`
+  - `/Users/mohitpatel/Desktop/Project/klyne/ui/src/app.html`
+  - `/Users/mohitpatel/Desktop/Project/klyne/ui/src/app.css`
+  - `/Users/mohitpatel/Desktop/Project/klyne/ui/src/lib/api.ts` (typed fetch wrappers — types mirror W0 `contracts.go` exactly)
+  - `/Users/mohitpatel/Desktop/Project/klyne/ui/src/lib/api.test.ts`
+  - `/Users/mohitpatel/Desktop/Project/klyne/ui/src/lib/sse.ts` (EventSource client; reconnect; payload types mirror W0 `sse_events.go`)
+  - `/Users/mohitpatel/Desktop/Project/klyne/ui/src/lib/sse.test.ts`
+  - `/Users/mohitpatel/Desktop/Project/klyne/ui/src/lib/types.ts` (TS mirror of `Message`, `Session`, `Summary`, etc.)
+  - `/Users/mohitpatel/Desktop/Project/klyne/ui/src/lib/stores.svelte.ts`
+  - `/Users/mohitpatel/Desktop/Project/klyne/ui/src/lib/stores.svelte.test.ts`
+  - `/Users/mohitpatel/Desktop/Project/klyne/ui/src/routes/+layout.svelte` (just shell; navigation in W14)
+  - `/Users/mohitpatel/Desktop/Project/klyne/ui/src/routes/+page.svelte` (placeholder "loading…")
 - **Inputs:** W0 (`contracts.go`, `sse_events.go` — agent must read Go types and translate to TS; types.ts is checked-in canonical TS that downstream UI workstreams import).
 - **Outputs:** Buildable SvelteKit app, `npm run build` produces `ui/build/`. Type-safe `api.fetchSessions()`, `api.search(q)`, etc. Type-safe `sse.subscribe(handler)`.
 - **Dependencies:** W0.
@@ -340,21 +340,21 @@ Workstreams are listed by ID. Owned paths follow §11 of the spec exactly. Sizes
 ### W14 — Frontend components + routes (sessions/search/cost)
 - **Goal:** All v1 user-facing pages except wizard and restore-context modal.
 - **Owned paths:**
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/ui/src/lib/components/SessionList.svelte`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/ui/src/lib/components/SessionList.test.ts`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/ui/src/lib/components/SessionView.svelte`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/ui/src/lib/components/SessionView.test.ts`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/ui/src/lib/components/SearchBar.svelte`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/ui/src/lib/components/SearchBar.test.ts`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/ui/src/lib/components/CostPanel.svelte`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/ui/src/lib/components/CostPanel.test.ts`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/ui/src/lib/components/MessageBubble.svelte`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/ui/src/lib/components/MessageBubble.test.ts`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/ui/src/lib/components/ToolCallBlock.svelte`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/ui/src/lib/components/ToolCallBlock.test.ts`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/ui/src/routes/+page.svelte` (overwrites W13's placeholder — **W13 hands off this single file** to W14)
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/ui/src/routes/sessions/[id]/+page.svelte`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/ui/src/routes/search/+page.svelte`
+  - `/Users/mohitpatel/Desktop/Project/klyne/ui/src/lib/components/SessionList.svelte`
+  - `/Users/mohitpatel/Desktop/Project/klyne/ui/src/lib/components/SessionList.test.ts`
+  - `/Users/mohitpatel/Desktop/Project/klyne/ui/src/lib/components/SessionView.svelte`
+  - `/Users/mohitpatel/Desktop/Project/klyne/ui/src/lib/components/SessionView.test.ts`
+  - `/Users/mohitpatel/Desktop/Project/klyne/ui/src/lib/components/SearchBar.svelte`
+  - `/Users/mohitpatel/Desktop/Project/klyne/ui/src/lib/components/SearchBar.test.ts`
+  - `/Users/mohitpatel/Desktop/Project/klyne/ui/src/lib/components/CostPanel.svelte`
+  - `/Users/mohitpatel/Desktop/Project/klyne/ui/src/lib/components/CostPanel.test.ts`
+  - `/Users/mohitpatel/Desktop/Project/klyne/ui/src/lib/components/MessageBubble.svelte`
+  - `/Users/mohitpatel/Desktop/Project/klyne/ui/src/lib/components/MessageBubble.test.ts`
+  - `/Users/mohitpatel/Desktop/Project/klyne/ui/src/lib/components/ToolCallBlock.svelte`
+  - `/Users/mohitpatel/Desktop/Project/klyne/ui/src/lib/components/ToolCallBlock.test.ts`
+  - `/Users/mohitpatel/Desktop/Project/klyne/ui/src/routes/+page.svelte` (overwrites W13's placeholder — **W13 hands off this single file** to W14)
+  - `/Users/mohitpatel/Desktop/Project/klyne/ui/src/routes/sessions/[id]/+page.svelte`
+  - `/Users/mohitpatel/Desktop/Project/klyne/ui/src/routes/search/+page.svelte`
 - **Inputs:** W13 (lib, types, stores), W7 + W8 (live API).
 - **Outputs:** Functional dashboard, session detail, search page, cost panel; live updating via SSE.
 - **Dependencies:** W13, W7, W8.
@@ -370,26 +370,26 @@ Workstreams are listed by ID. Owned paths follow §11 of the spec exactly. Sizes
 - **Goal:** The "killer demo" flow C plus the first-run wizard. Touches both backend and frontend but **owns disjoint files** from W11/W12/W14.
 - **Owned paths:**
   - **Backend:**
-    - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/api/handlers/restore.go` (`GET /sessions/:id/restore` returns `{ summary, last_messages, resume_command }`)
-    - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/api/handlers/restore_test.go`
-    - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/api/handlers/wizard.go` (`GET /wizard/detect`, `POST /wizard/complete`)
-    - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/api/handlers/wizard_test.go`
-    - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/connectors/claude/compact.go` (heuristic: synthetic summary message + token-count drop signal)
-    - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/connectors/claude/compact_test.go`
-    - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/resume/builder.go` (build `claude --resume <id>` / `codex resume --last` strings, OS-quoted)
-    - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/resume/builder_test.go`
+    - `/Users/mohitpatel/Desktop/Project/klyne/internal/api/handlers/restore.go` (`GET /sessions/:id/restore` returns `{ summary, last_messages, resume_command }`)
+    - `/Users/mohitpatel/Desktop/Project/klyne/internal/api/handlers/restore_test.go`
+    - `/Users/mohitpatel/Desktop/Project/klyne/internal/api/handlers/wizard.go` (`GET /wizard/detect`, `POST /wizard/complete`)
+    - `/Users/mohitpatel/Desktop/Project/klyne/internal/api/handlers/wizard_test.go`
+    - `/Users/mohitpatel/Desktop/Project/klyne/internal/connectors/claude/compact.go` (heuristic: synthetic summary message + token-count drop signal)
+    - `/Users/mohitpatel/Desktop/Project/klyne/internal/connectors/claude/compact_test.go`
+    - `/Users/mohitpatel/Desktop/Project/klyne/internal/resume/builder.go` (build `claude --resume <id>` / `codex resume --last` strings, OS-quoted)
+    - `/Users/mohitpatel/Desktop/Project/klyne/internal/resume/builder_test.go`
   - **Frontend:**
-    - `/Users/mohitpatel/Desktop/Project/agentdeck/ui/src/lib/components/RestoreContext.svelte`
-    - `/Users/mohitpatel/Desktop/Project/agentdeck/ui/src/lib/components/RestoreContext.test.ts`
-    - `/Users/mohitpatel/Desktop/Project/agentdeck/ui/src/lib/components/ModelPicker.svelte`
-    - `/Users/mohitpatel/Desktop/Project/agentdeck/ui/src/lib/components/ModelPicker.test.ts`
-    - `/Users/mohitpatel/Desktop/Project/agentdeck/ui/src/lib/components/Wizard/Welcome.svelte`
-    - `/Users/mohitpatel/Desktop/Project/agentdeck/ui/src/lib/components/Wizard/Detection.svelte`
-    - `/Users/mohitpatel/Desktop/Project/agentdeck/ui/src/lib/components/Wizard/ModelPick.svelte`
-    - `/Users/mohitpatel/Desktop/Project/agentdeck/ui/src/lib/components/Wizard/Done.svelte`
-    - `/Users/mohitpatel/Desktop/Project/agentdeck/ui/src/lib/components/Wizard/*.test.ts`
-    - `/Users/mohitpatel/Desktop/Project/agentdeck/ui/src/routes/wizard/+page.svelte`
-    - `/Users/mohitpatel/Desktop/Project/agentdeck/ui/src/routes/settings/+page.svelte`
+    - `/Users/mohitpatel/Desktop/Project/klyne/ui/src/lib/components/RestoreContext.svelte`
+    - `/Users/mohitpatel/Desktop/Project/klyne/ui/src/lib/components/RestoreContext.test.ts`
+    - `/Users/mohitpatel/Desktop/Project/klyne/ui/src/lib/components/ModelPicker.svelte`
+    - `/Users/mohitpatel/Desktop/Project/klyne/ui/src/lib/components/ModelPicker.test.ts`
+    - `/Users/mohitpatel/Desktop/Project/klyne/ui/src/lib/components/Wizard/Welcome.svelte`
+    - `/Users/mohitpatel/Desktop/Project/klyne/ui/src/lib/components/Wizard/Detection.svelte`
+    - `/Users/mohitpatel/Desktop/Project/klyne/ui/src/lib/components/Wizard/ModelPick.svelte`
+    - `/Users/mohitpatel/Desktop/Project/klyne/ui/src/lib/components/Wizard/Done.svelte`
+    - `/Users/mohitpatel/Desktop/Project/klyne/ui/src/lib/components/Wizard/*.test.ts`
+    - `/Users/mohitpatel/Desktop/Project/klyne/ui/src/routes/wizard/+page.svelte`
+    - `/Users/mohitpatel/Desktop/Project/klyne/ui/src/routes/settings/+page.svelte`
 - **Inputs:** W4 (Claude connector — but compact heuristic is a separate file the connector imports, so no file collision), W7 (router mount via `Mount(r)`), W11 (selector for "recommended" badges in wizard), W14 (UI components: imports them, doesn't modify them).
 - **Outputs:** Compact detection writes a `compact_event` row + emits SSE; restore endpoint returns the resume Markdown block; wizard fully functional.
 - **Dependencies:** W4, W7, W11, W14.
@@ -404,11 +404,11 @@ Workstreams are listed by ID. Owned paths follow §11 of the spec exactly. Sizes
 ### W16 — Performance bench + perf-regression test
 - **Goal:** Validate the §12 budgets and add a CI-runnable bench that fails on regression.
 - **Owned paths:**
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/bench/bench_test.go` (Go benchmarks: search p95, ingest throughput)
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/bench/ram_test.go` (RAM after-hour-idle simulation; OS-gated)
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/internal/bench/fixtures/100k_msgs.go` (generator)
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/scripts/bench.sh`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/docs/perf.md`
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/bench/bench_test.go` (Go benchmarks: search p95, ingest throughput)
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/bench/ram_test.go` (RAM after-hour-idle simulation; OS-gated)
+  - `/Users/mohitpatel/Desktop/Project/klyne/internal/bench/fixtures/100k_msgs.go` (generator)
+  - `/Users/mohitpatel/Desktop/Project/klyne/scripts/bench.sh`
+  - `/Users/mohitpatel/Desktop/Project/klyne/docs/perf.md`
 - **Inputs:** W12 (full daemon assembled), W3 (search), W9 (cost rollups).
 - **Outputs:** Reproducible numbers for every row of §12; CI step that emits `BUDGET_VIOLATION` if any p95 > budget.
 - **Dependencies:** W12.
@@ -422,20 +422,20 @@ Workstreams are listed by ID. Owned paths follow §11 of the spec exactly. Sizes
 ### W17 — Release pipeline + install paths + landing page + README
 - **Goal:** Produce shippable artifacts and the public-facing materials.
 - **Owned paths:**
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/.github/workflows/release.yml` (goreleaser, multi-arch, `embed.FS` of `ui/build/` baked in)
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/.goreleaser.yaml`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/scripts/install.sh`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/scripts/install.ps1`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/scripts/release.sh`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/scripts/sign-darwin.sh` (codesign + notarize stub; reads env vars, no-ops if absent)
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/Formula/klyne.rb` (homebrew tap stub)
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/winget/manifest.yaml`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/README.md` (full copy from spec §16 — overwrites W0 stub)
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/docs/architecture.md`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/docs/connector-guide.md`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/docs/byok-matrix.md`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/docs/CHANGELOG.md`
-  - `/Users/mohitpatel/Desktop/Project/agentdeck/docs/landing/` (static site for `klyne.dev`, deployable to Cloudflare Pages)
+  - `/Users/mohitpatel/Desktop/Project/klyne/.github/workflows/release.yml` (goreleaser, multi-arch, `embed.FS` of `ui/build/` baked in)
+  - `/Users/mohitpatel/Desktop/Project/klyne/.goreleaser.yaml`
+  - `/Users/mohitpatel/Desktop/Project/klyne/scripts/install.sh`
+  - `/Users/mohitpatel/Desktop/Project/klyne/scripts/install.ps1`
+  - `/Users/mohitpatel/Desktop/Project/klyne/scripts/release.sh`
+  - `/Users/mohitpatel/Desktop/Project/klyne/scripts/sign-darwin.sh` (codesign + notarize stub; reads env vars, no-ops if absent)
+  - `/Users/mohitpatel/Desktop/Project/klyne/Formula/klyne.rb` (homebrew tap stub)
+  - `/Users/mohitpatel/Desktop/Project/klyne/winget/manifest.yaml`
+  - `/Users/mohitpatel/Desktop/Project/klyne/README.md` (full copy from spec §16 — overwrites W0 stub)
+  - `/Users/mohitpatel/Desktop/Project/klyne/docs/architecture.md`
+  - `/Users/mohitpatel/Desktop/Project/klyne/docs/connector-guide.md`
+  - `/Users/mohitpatel/Desktop/Project/klyne/docs/byok-matrix.md`
+  - `/Users/mohitpatel/Desktop/Project/klyne/docs/CHANGELOG.md`
+  - `/Users/mohitpatel/Desktop/Project/klyne/docs/landing/` (static site for `klyne.dev`, deployable to Cloudflare Pages)
 - **Inputs:** W12 (working binary), W14 (built UI), W16 (perf docs).
 - **Outputs:** Tagged v1.0.0 release with darwin/linux/windows × amd64/arm64 artifacts. brew formula, winget manifest, install.sh.
 - **Dependencies:** W12, W14, W16.
@@ -647,7 +647,7 @@ These are the artifacts W0 must finalize before fan-out. Each line is a file pat
 Every prompt below is self-contained — paste into a fresh agent session, no other context required (other than the spec file path). Each prompt assumes the agent has access to `superpowers:test-driven-development` and the Go/TS skills it'll need; the prompts mention them but don't depend on them being auto-loaded.
 
 > **Universal preamble (prepend to every prompt below):**
-> You are working on the klyne repository at `/Users/mohitpatel/Desktop/Project/agentdeck`. The shipping spec is `compass_artifact_wf-d189e421-ff1d-443c-95b8-19b52fcd59b4_text_markdown.md` in the repo root. Read §1, §5, §7, §11, §18 before touching code. The `docs/contracts.md` file (produced in W0) lists every contract you must conform to. Decisions in spec §18 are LOCKED — do not propose alternatives.
+> You are working on the klyne repository at `/Users/mohitpatel/Desktop/Project/klyne`. The shipping spec is `compass_artifact_wf-d189e421-ff1d-443c-95b8-19b52fcd59b4_text_markdown.md` in the repo root. Read §1, §5, §7, §11, §18 before touching code. The `docs/contracts.md` file (produced in W0) lists every contract you must conform to. Decisions in spec §18 are LOCKED — do not propose alternatives.
 >
 > **TDD is mandatory.** Write tests first using the `superpowers:test-driven-development` skill. Target ≥80% coverage on new code; CI enforces this on changed lines. After every change >30 lines, run the project's quality gate (`make ci` or the equivalent commands listed in W0's `Makefile`). Use `superpowers:verification-before-completion` before claiming done.
 >
@@ -1005,7 +1005,7 @@ These 5 dispatches start the project. Each line is a discrete action.
 
 1. **Initialize the git repo and worktree base.**
    ```
-   cd /Users/mohitpatel/Desktop/Project/agentdeck
+   cd /Users/mohitpatel/Desktop/Project/klyne
    git init
    git checkout -b main
    git add compass_artifact_wf-d189e421-ff1d-443c-95b8-19b52fcd59b4_text_markdown.md
@@ -1055,8 +1055,8 @@ After Wave 1 lands, your kickoff for Wave 2 is symmetric: 6 worktrees, 6 agents,
 ---
 
 ### Critical Files for Implementation
-- /Users/mohitpatel/Desktop/Project/agentdeck/internal/connectors/connector.go
-- /Users/mohitpatel/Desktop/Project/agentdeck/internal/api/contracts.go
-- /Users/mohitpatel/Desktop/Project/agentdeck/internal/api/sse_events.go
-- /Users/mohitpatel/Desktop/Project/agentdeck/internal/store/migrations/001_init.sql
-- /Users/mohitpatel/Desktop/Project/agentdeck/docs/contracts.md
+- /Users/mohitpatel/Desktop/Project/klyne/internal/connectors/connector.go
+- /Users/mohitpatel/Desktop/Project/klyne/internal/api/contracts.go
+- /Users/mohitpatel/Desktop/Project/klyne/internal/api/sse_events.go
+- /Users/mohitpatel/Desktop/Project/klyne/internal/store/migrations/001_init.sql
+- /Users/mohitpatel/Desktop/Project/klyne/docs/contracts.md

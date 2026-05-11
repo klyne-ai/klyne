@@ -8,7 +8,7 @@ This workstream is the single biggest leverage point in the entire project. Ever
 
 ## Universal preamble (read first)
 
-You are working on the klyne repository at `/Users/mohitpatel/Desktop/Project/agentdeck`. The shipping spec is at `compass_artifact_wf-d189e421-ff1d-443c-95b8-19b52fcd59b4_text_markdown.md` in the repo root. Read §1, §5, §7, §8, §11, §17, §18 before touching code. Decisions in spec §18 are LOCKED.
+You are working on the klyne repository at `/Users/mohitpatel/Desktop/Project/klyne`. The shipping spec is at `compass_artifact_wf-d189e421-ff1d-443c-95b8-19b52fcd59b4_text_markdown.md` in the repo root. Read §1, §5, §7, §8, §11, §17, §18 before touching code. Decisions in spec §18 are LOCKED.
 
 **TDD is mandatory.** Write tests first using the `superpowers:test-driven-development` skill. Target ≥80% coverage on new code. Run `make ci` (which you set up) after every change >30 lines. Use `superpowers:verification-before-completion` before claiming done.
 
