@@ -265,16 +265,11 @@ To silence the advisor for a noisy session (e.g. when you're developing klyne it
 
 ## Roadmap
 
-1. ~~Codex MCP parity~~ — ✅ shipped (slice 4)
-2. ~~Cross-session full-text search~~ — ✅ shipped (slice 5)
-3. ~~Reproducible proof artifacts~~ — ✅ shipped (slice 6)
-4. ~~Proactive session advisor (UserPromptSubmit hook + scoped handoff)~~ — ✅ shipped (slice 7)
-5. ~~Token-usage timeline (`klyne tokens` CLI + `/klyne:tokens` slash) with cached/uncached split, full-session default view, and Codex parity~~ — ✅ shipped (slice 8). Also: real version string via `-ldflags`, advisor on/off toggle, Codex parser warning suppression.
-6. **`suggest_session_name`** — generate a meaningful name from JSONL for Claude Code's "rename" UI (queued)
-7. **Web cockpit line graph** — port the `klyne tokens` data shape to a Svelte chart on the session-detail page so non-CLI users see the same trajectory.
-8. **Labelled context-health eval suite** — move classifier + advisor thresholds from heuristics to data; unlocks predictive "exhaust in N turns" projection in v2.
-9. **Release binaries** + Homebrew tap + one-command installer.
-10. Optional [code-review-graph](https://github.com/tirth8205/code-review-graph) enrichment when `.code-review-graph/` exists in the repo.
+1. **`suggest_session_name`** — generate a meaningful name from JSONL for Claude Code's "rename" UI (queued)
+2. **Web cockpit line graph** — port the `klyne tokens` data shape to a Svelte chart on the session-detail page so non-CLI users see the same trajectory.
+3. **Labelled context-health eval suite** — move classifier + advisor thresholds from heuristics to data; unlocks predictive "exhaust in N turns" projection in v2.
+4. **Release binaries** + Homebrew tap + one-command installer.
+5. Optional [code-review-graph](https://github.com/tirth8205/code-review-graph) enrichment when `.code-review-graph/` exists in the repo.
 
 ---
 
