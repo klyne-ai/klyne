@@ -284,6 +284,62 @@ export interface AdvisoryListResponse {
   advisories: AdvisoryRow[];
 }
 
+/** FileRelevanceProof is one file's per-file relevance row. */
+export interface FileRelevanceProof {
+  path: string;
+  basename: string;
+  bytes: number;
+  score: number;
+  stale: boolean;
+}
+
+/** StaleProof bundles the relevance scorer outputs for the modal. */
+export interface StaleProof {
+  files: FileRelevanceProof[];
+  stale_bytes: number;
+  total_bytes: number;
+  stale_share: number;
+  threshold: number;
+}
+
+/** AccelerationProof is the per-turn cost trajectory. */
+export interface AccelerationProof {
+  recent_mean: number;
+  prior_mean: number;
+  ratio: number;
+  latest_effective: number;
+  sampled_turns: number;
+  would_fire: boolean;
+}
+
+/** ContextWindowProof is the live fill state for the hard-ceiling trigger. */
+export interface ContextWindowProof {
+  fill_pct: number;
+  latest_input: number;
+  context_window: number;
+  model: string;
+  threshold: number;
+  would_fire: boolean;
+}
+
+/** FiveHourProof is the cross-session rate-limit aggregate. */
+export interface FiveHourProof {
+  total_effective: number;
+  cap: number;
+  pct_used: number;
+  plan_tier?: string;
+}
+
+/** AdvisorDetailResponse is GET /sessions/{id}/advisor-detail. */
+export interface AdvisorDetailResponse {
+  session_id: string;
+  advisories: AdvisoryRow[];
+  stale: StaleProof;
+  acceleration: AccelerationProof;
+  context_window: ContextWindowProof;
+  five_hour?: FiveHourProof;
+}
+
 // --- /cost/summary ---
 
 /** CostGroup enumerates the supported group-by axes. */

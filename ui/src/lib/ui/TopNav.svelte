@@ -10,11 +10,15 @@
 
   const { onsearch }: Props = $props();
 
+  // Advisors are surfaced contextually from each cockpit tile's "ⓘ"
+  // button (see ui/src/routes/cockpit/+page.svelte). The standalone
+  // /advisors route still exists for power users who want the
+  // cross-session feed, but it's no longer in the top nav — the
+  // contextual modal in the cockpit is the primary surface.
   const items = [
     { id: 'dashboard', label: 'Dashboard', path: '/' },
     { id: 'cockpit',   label: 'Cockpit',   path: '/cockpit' },
     { id: 'projects',  label: 'Projects',  path: '/projects' },
-    { id: 'advisors',  label: 'Advisors',  path: '/advisors' },
     { id: 'search',    label: 'Search',    path: '/search' },
   ];
 

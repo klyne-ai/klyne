@@ -6,6 +6,7 @@
  */
 
 import type {
+  AdvisorDetailResponse,
   AdvisoryKind,
   AdvisoryListResponse,
   BreakAdviceResponse,
@@ -228,6 +229,12 @@ export async function fetchAdvisories(opts: AdvisoriesQuery = {}): Promise<Advis
     limit: opts.limit,
     kind: opts.kind
   });
+}
+
+/** GET /sessions/{id}/advisor-detail — per-session advisories + proof
+ * data the cockpit modal renders alongside each advisory. */
+export async function fetchAdvisorDetail(sessionId: string): Promise<AdvisorDetailResponse> {
+  return get<AdvisorDetailResponse>(`/sessions/${encodeURIComponent(sessionId)}/advisor-detail`);
 }
 
 // ---------------------------------------------------------------------------

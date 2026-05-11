@@ -89,6 +89,9 @@ func (m *Mounter) Mount(r chi.Router) {
 	hAdvisories := NewAdvisoriesHandler(m.deps.DB)
 	r.Get(api.RouteAdvisories, hAdvisories.List)
 
+	hAdvisorDetail := NewAdvisorDetailHandler(m.deps.DB)
+	r.Get(api.RouteSessionAdvisorDetail, hAdvisorDetail.Get)
+
 	hSettings := NewSettingsHandler(m.deps.Cfg, logger)
 	r.Get(api.RouteSettings, hSettings.Get)
 	r.Put(api.RouteSettings, hSettings.Put)

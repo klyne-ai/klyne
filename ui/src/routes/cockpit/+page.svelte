@@ -16,12 +16,13 @@
   import { fade, scale } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
   import { goto } from '$app/navigation';
-  import { fetchCockpitThreads, fetchMessages } from '$lib/api.js';
+  import { fetchAdvisories, fetchCockpitThreads, fetchMessages } from '$lib/api.js';
   import { subscribe } from '$lib/sse.js';
   import { relAgo, kfmt } from '$lib/format.js';
   import { renderMarkdown } from '$lib/markdown.js';
   import type { CockpitThread, Message, MsgNew, CLI } from '$lib/types.js';
   import CliBadge from '$lib/ui/CliBadge.svelte';
+  import AdvisorModal from '$lib/components/AdvisorModal.svelte';
 
   type Tile = {
     /** Stable key: session_id (one tile per session). */
@@ -189,14 +190,19 @@
 
   onMount(() => {
     void loadAll();
+    void refreshAdvisoryCounts();
     unsubscribe = subscribe({ onMsgNew });
     tickHandle = setInterval(() => { tick = Date.now(); }, 5_000);
     // Periodic full refresh: catches new buckets for sessions that
     // never fired SSE during this page's lifetime (e.g. a brand-new
     // session started in another terminal). 60s is rare enough not
     // to matter performance-wise but tight enough that a "missed"
-    // thread surfaces within a minute.
-    periodicHandle = setInterval(() => { void loadAll(); }, 60_000);
+    // thread surfaces within a minute. Also refreshes advisor
+    // counts so the per-tile badge stays current.
+    periodicHandle = setInterval(() => {
+      void loadAll();
+      void refreshAdvisoryCounts();
+    }, 60_000);
     window.addEventListener('keydown', onWindowKey);
   });
 
@@ -255,6 +261,36 @@
     void navigator.clipboard.writeText(resumeCommand(t.thread));
     copiedKey = t.key;
     setTimeout(() => { if (copiedKey === t.key) copiedKey = null; }, 1200);
+  }
+
+  // ── Advisory counts per session ───────────────────────────────────
+  // Fetched once on mount + refreshed when SSE signals new messages.
+  // Map: session_id -> count of advisories. Used by the tile's "ⓘ"
+  // button to badge sessions with active warnings.
+  let advisoryCounts = $state<Record<string, number>>({});
+  let advisorModalKey = $state<string | null>(null);
+
+  async function refreshAdvisoryCounts(): Promise<void> {
+    try {
+      const res = await fetchAdvisories({ limit: 1000 });
+      const counts: Record<string, number> = {};
+      for (const a of res.advisories) {
+        counts[a.session_id] = (counts[a.session_id] ?? 0) + 1;
+      }
+      advisoryCounts = counts;
+    } catch {
+      // Silent — advisor counts are informational. Tiles still render
+      // without the badge if the endpoint is unavailable.
+    }
+  }
+
+  function openAdvisorModal(e: Event, sessionId: string): void {
+    e.stopPropagation();
+    advisorModalKey = sessionId;
+  }
+
+  function closeAdvisorModal(): void {
+    advisorModalKey = null;
   }
 
   // ── Expanded-tile modal ─────────────────────────────────────────────
@@ -460,11 +496,23 @@
             {/if}
           </div>
 
-          <!-- Tile footer: model, msg count, expand, copy-resume -->
+          <!-- Tile footer: model, msg count, advisor info, expand, copy-resume.
+               advCount is inlined rather than via {@const} because Svelte 5
+               restricts {@const} to the first child of a control block. -->
           <div style="padding: 6px 12px 8px; border-top: 1px solid var(--ad-border-soft); display: flex; align-items: center; gap: 8px; font-size: 10px; color: var(--ad-faint); min-width: 0;">
             <span class="ad-mono" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0;">{t.thread.model || '—'}</span>
             <span class="ad-mono ad-tnum">{t.thread.msg_count} msgs</span>
             <span class="ad-mono ad-tnum">↓ {kfmt(t.thread.tokens_out)}</span>
+            <button
+              type="button"
+              onclick={(e) => openAdvisorModal(e, t.thread.session_id)}
+              title={(advisoryCounts[t.thread.session_id] ?? 0) > 0 ? `${advisoryCounts[t.thread.session_id]} klyne advisor warning(s) — click for proof` : 'View klyne advisor live signals (no warnings yet)'}
+              aria-label="Show advisor detail for this session"
+              class="cockpit-advisor-btn {(advisoryCounts[t.thread.session_id] ?? 0) > 0 ? 'cockpit-advisor-btn--warn' : ''}"
+              style="background: transparent; border: 0; cursor: pointer; padding: 2px 6px; font-size: 11px; font-family: var(--ad-font-mono); position: relative; color: {(advisoryCounts[t.thread.session_id] ?? 0) > 0 ? '#f59e0b' : 'var(--ad-faint)'};"
+            >
+              ⓘ{#if (advisoryCounts[t.thread.session_id] ?? 0) > 0}<sup style="margin-left: 2px; color: #f59e0b; font-weight: 700;">{advisoryCounts[t.thread.session_id]}</sup>{/if}
+            </button>
             <button
               type="button"
               onclick={(e) => openExpand(e, t.key)}
@@ -489,6 +537,14 @@
     </div>
   {/if}
 </div>
+
+<!-- ── Advisor detail modal ───────────────────────────────────────────
+     Opens when the user clicks the "ⓘ" badge on a tile. Lazy-fetches
+     /sessions/{id}/advisor-detail on mount and renders the advisories
+     plus the live proof data per trigger. -->
+{#if advisorModalKey}
+  <AdvisorModal sessionId={advisorModalKey} onClose={closeAdvisorModal} />
+{/if}
 
 <!-- ── Expanded-tile modal ─────────────────────────────────────────────
      Two transitions stack: backdrop fades, card scales-and-fades. Both
@@ -604,6 +660,18 @@
     - links visible but not loud
 -->
 <style>
+  /* Advisor button on each tile. When the session has at least one
+     fired advisory, the icon and superscript count get a slow pulse
+     so the warning is visible without being aggressive. */
+  .cockpit-advisor-btn:hover { color: var(--ad-fg) !important; }
+  .cockpit-advisor-btn--warn {
+    animation: cockpit-advisor-pulse 2.4s ease-in-out infinite;
+  }
+  @keyframes cockpit-advisor-pulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.55; }
+  }
+
   .cockpit-md :global(p)   { margin: 0 0 0.4em; }
   .cockpit-md :global(p:last-child) { margin-bottom: 0; }
   .cockpit-md :global(ul),
