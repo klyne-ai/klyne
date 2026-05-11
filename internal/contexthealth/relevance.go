@@ -55,8 +55,22 @@ const (
 	// currentDirectionMsgs is how many of the most-recent user
 	// messages define "what the user is currently working on." Mirrors
 	// topicSampleSize so the relevance signal stays consistent with
-	// the topic-shift detector.
+	// the topic-shift detector. Kept tight on purpose so a single
+	// topic pivot in the last few prompts shows up in the topical
+	// bag immediately.
 	currentDirectionMsgs = 5
+
+	// recentTouchHorizonUserMsgs is the window for the recency
+	// signal — a file Read or Edited within the span of this many
+	// most-recent user messages is treated as "in active rotation"
+	// and never stale. Decoupled from currentDirectionMsgs because
+	// the two signals answer different questions: current-direction
+	// is "what is the user talking about right this minute" (tight),
+	// recency is "what is the user still actively touching across
+	// the recent burst" (wider). Real sessions have Claude rotating
+	// through file groups, and a file touched 6–10 user messages
+	// ago is still very likely part of the active task.
+	recentTouchHorizonUserMsgs = 10
 
 	// relevanceThreshold is the Jaccard cutoff below which a file is
 	// considered stale relative to the user's current direction.
@@ -149,7 +163,7 @@ func ScoreFiles(msgs []*connectors.Message) RelevanceVerdict {
 	}
 
 	currentDirection := bagOfWords(lastUserMsgs(msgs, currentDirectionMsgs))
-	recencyHorizon := indexOfNthLastUserMsg(msgs, currentDirectionMsgs)
+	recencyHorizon := indexOfNthLastUserMsg(msgs, recentTouchHorizonUserMsgs)
 
 	files := map[string]*fileAccum{}
 

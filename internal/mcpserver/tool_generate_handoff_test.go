@@ -105,6 +105,14 @@ func TestHandleGenerateHandoff_ScopeCurrentTopicFiltersStaleFiles(t *testing.T) 
 		`{"type":"user","sessionId":"sess-scope","timestamp":"2026-04-08T10:00:08.000Z","cwd":"/tmp/handoff-scope","message":{"role":"user","content":[{"type":"text","text":"billing invoice for the refund flow"}]}}`,
 		`{"type":"user","sessionId":"sess-scope","timestamp":"2026-04-08T10:00:09.000Z","cwd":"/tmp/handoff-scope","message":{"role":"user","content":[{"type":"text","text":"credit the customer for the failed charge"}]}}`,
 		`{"type":"user","sessionId":"sess-scope","timestamp":"2026-04-08T10:00:10.000Z","cwd":"/tmp/handoff-scope","message":{"role":"user","content":[{"type":"text","text":"make sure the refund subscription path is right"}]}}`,
+		// Extra billing prompts so the auth files at idx 1 and 4
+		// fall outside the recency horizon (recentTouchHorizonUserMsgs
+		// user messages).
+		`{"type":"user","sessionId":"sess-scope","timestamp":"2026-04-08T10:00:10.100Z","cwd":"/tmp/handoff-scope","message":{"role":"user","content":[{"type":"text","text":"double check the refund authorization code"}]}}`,
+		`{"type":"user","sessionId":"sess-scope","timestamp":"2026-04-08T10:00:10.200Z","cwd":"/tmp/handoff-scope","message":{"role":"user","content":[{"type":"text","text":"the refund retry policy needs adjusting"}]}}`,
+		`{"type":"user","sessionId":"sess-scope","timestamp":"2026-04-08T10:00:10.300Z","cwd":"/tmp/handoff-scope","message":{"role":"user","content":[{"type":"text","text":"verify the subscription invoice format"}]}}`,
+		`{"type":"user","sessionId":"sess-scope","timestamp":"2026-04-08T10:00:10.400Z","cwd":"/tmp/handoff-scope","message":{"role":"user","content":[{"type":"text","text":"ensure refund credits log correctly"}]}}`,
+		`{"type":"user","sessionId":"sess-scope","timestamp":"2026-04-08T10:00:10.500Z","cwd":"/tmp/handoff-scope","message":{"role":"user","content":[{"type":"text","text":"and the customer notification email"}]}}`,
 		`{"type":"assistant","sessionId":"sess-scope","uuid":"a3","timestamp":"2026-04-08T10:00:11.000Z","cwd":"/tmp/handoff-scope","message":{"role":"assistant","model":"claude-opus-4-7","usage":{"input_tokens":100},"content":[{"type":"tool_use","id":"tc3","name":"Read","input":{"file_path":"/tmp/handoff-scope/billing/refund.go"}}]}}`,
 		`{"type":"user","sessionId":"sess-scope","timestamp":"2026-04-08T10:00:12.000Z","cwd":"/tmp/handoff-scope","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tc3","content":"`+bigText+`"}]}}`,
 	)

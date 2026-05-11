@@ -90,6 +90,31 @@
   function shortSession(id: string): string {
     return id.length > 8 ? id.slice(0, 8) : id;
   }
+
+  /** wouldFireNow — true when the LIVE proof for the given trigger
+   *  would currently trip it. Returns false when conditions have
+   *  changed since the historical fire (e.g. the user's recent
+   *  prompts now overlap the loaded files again, or the per-turn
+   *  cost has settled back down). Decoupling the historical fact
+   *  ("this fired 1× an hour ago") from the live verdict ("would
+   *  it fire now?") prevents the modal from looking like an active
+   *  alert when the underlying condition has resolved. */
+  function wouldFireNow(kind: AdvisoryKind, d: AdvisorDetailResponse): boolean {
+    switch (kind) {
+      case 'stale':
+        return d.stale.stale_share > d.stale.threshold;
+      case 'acceleration':
+        return d.acceleration.would_fire;
+      case 'hard_ceiling':
+        return d.context_window.would_fire;
+      case 'window_50':
+        return (d.five_hour?.pct_used ?? 0) >= 50;
+      case 'window_75':
+        return (d.five_hour?.pct_used ?? 0) >= 75;
+      default:
+        return false;
+    }
+  }
 </script>
 
 <!-- Backdrop. Click closes. -->
@@ -158,20 +183,30 @@
           {#each orderedKinds as kind (kind)}
             {@const meta = kindMeta[kind as AdvisoryKind] ?? kindMeta.unknown}
             {@const rows = advisoriesByKind[kind]}
-            <section style="border: 1px solid var(--ad-border); border-left: 3px solid {meta.color}; border-radius: 6px; padding: 12px 14px; background: var(--ad-panel);">
+            {@const stillFiring = wouldFireNow(kind as AdvisoryKind, detail)}
+            <section style="border: 1px solid var(--ad-border); border-left: 3px solid {stillFiring ? meta.color : 'var(--ad-border)'}; border-radius: 6px; padding: 12px 14px; background: var(--ad-panel); opacity: {stillFiring ? 1 : 0.72};">
               <header style="display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px;">
-                <span style="text-transform: uppercase; font-size: 11px; letter-spacing: 0.04em; color: {meta.color}; font-weight: 600;">
+                <span style="text-transform: uppercase; font-size: 11px; letter-spacing: 0.04em; color: {stillFiring ? meta.color : 'var(--ad-muted)'}; font-weight: 600;">
                   {meta.label}
                 </span>
                 <span style="color: var(--ad-muted); font-size: 12px;">
                   fired {rows.length}× in this session
                 </span>
+                {#if !stillFiring}
+                  <span style="color: var(--ad-active, #10b981); font-size: 11px; font-weight: 600; margin-left: auto;">
+                    ✓ resolved — would not fire now
+                  </span>
+                {:else}
+                  <span style="color: {meta.color}; font-size: 11px; font-weight: 600; margin-left: auto;">
+                    currently active
+                  </span>
+                {/if}
               </header>
               <ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px;">
                 {#each rows as adv (adv.message_id)}
                   <li style="font-size: 13px; line-height: 1.5;">
                     <div style="color: var(--ad-muted); font-size: 11px; margin-bottom: 2px;">
-                      {relTime(adv.ts)} ago
+                      {relTime(adv.ts)}
                     </div>
                     <div style="color: var(--ad-fg);">{adv.content}</div>
                   </li>

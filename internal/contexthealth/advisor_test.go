@@ -47,6 +47,8 @@ func TestRenderAdvisor_HardCeilingFiresAtRescueFill(t *testing.T) {
 
 func TestRenderAdvisor_StaleFiresLast(t *testing.T) {
 	// Build messages that trigger stale-share but no other rule.
+	// The pivot needs enough billing user prompts to push the auth
+	// files outside the recency horizon (recentTouchHorizonUserMsgs).
 	const bigPayload = 12_000
 	msgs := []*connectors.Message{
 		userMsg(0, "fix the authentication middleware login bug"),
@@ -60,8 +62,13 @@ func TestRenderAdvisor_StaleFiresLast(t *testing.T) {
 		userMsg(8, "billing invoice for the refund flow"),
 		userMsg(9, "credit the customer for the failed charge"),
 		userMsg(10, "make sure the refund subscription path is right"),
-		readCall(11, "/repo/billing/refund.go"),
-		readResult(12, 11, bigPayload),
+		userMsg(11, "double check the refund authorization code"),
+		userMsg(12, "the refund retry policy needs adjusting"),
+		userMsg(13, "verify the subscription invoice format"),
+		userMsg(14, "ensure refund credits log correctly"),
+		userMsg(15, "and the customer notification email"),
+		readCall(16, "/repo/billing/refund.go"),
+		readResult(17, 16, bigPayload),
 	}
 	in := AdvisorInput{
 		SessionID:      "s3",

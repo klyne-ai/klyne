@@ -10,7 +10,10 @@ import (
 func TestScoreFiles_StaleAfterTopicShift(t *testing.T) {
 	// Opening: user discusses authentication. Two auth files get read,
 	// each producing a sizable tool_result. Then the user pivots to
-	// billing and the most recent N user messages are billing-only.
+	// billing for enough user messages that the auth files fall
+	// outside both the topical bag AND the recency horizon. After
+	// the pivot the user reads a new billing file under the new
+	// vocabulary.
 	const bigPayload = 12_000
 
 	msgs := []*connectors.Message{
@@ -20,14 +23,21 @@ func TestScoreFiles_StaleAfterTopicShift(t *testing.T) {
 		userMsg(3, "the session cookie issuer is wrong"),
 		readCall(4, "/repo/auth/session.go"),
 		readResult(5, 4, bigPayload),
-		// Topic pivot — billing only in the last 5 user messages.
+		// Topic pivot — billing user prompts span more than the
+		// recency horizon (recentTouchHorizonUserMsgs) so the auth
+		// files at idx 1 and 4 fall outside the recent window.
 		userMsg(6, "now switch to billing refund logic"),
 		userMsg(7, "the subscription charge isn't applying"),
 		userMsg(8, "billing invoice for the refund flow"),
 		userMsg(9, "credit the customer for the failed charge"),
 		userMsg(10, "make sure the refund subscription path is right"),
-		readCall(11, "/repo/billing/refund.go"),
-		readResult(12, 11, bigPayload),
+		userMsg(11, "double check the refund authorization code"),
+		userMsg(12, "the refund retry policy needs adjusting"),
+		userMsg(13, "verify the subscription invoice format"),
+		userMsg(14, "ensure refund credits log correctly"),
+		userMsg(15, "and the customer notification email"),
+		readCall(16, "/repo/billing/refund.go"),
+		readResult(17, 16, bigPayload),
 	}
 
 	v := ScoreFiles(msgs)
@@ -123,14 +133,20 @@ func TestScoreFiles_OldFileNotRecentlyTouched_StaysStale(t *testing.T) {
 		userMsg(0, "fix the authentication middleware login bug"),
 		readCall(1, "/repo/auth/login.go"),
 		readResult(2, 1, stalePayload),
-		// Pivot to billing with five fresh user messages and a new file.
+		// Pivot to billing with enough fresh user messages to push
+		// login.go outside the recency horizon, then read a new file.
 		userMsg(3, "now switch to billing refund logic"),
 		userMsg(4, "the subscription charge isn't applying"),
 		userMsg(5, "billing invoice for the refund flow"),
 		userMsg(6, "credit the customer for the failed charge"),
 		userMsg(7, "make sure the refund subscription path is right"),
-		readCall(8, "/repo/billing/refund.go"),
-		readResult(9, 8, freshPayload),
+		userMsg(8, "double check the refund authorization code"),
+		userMsg(9, "the refund retry policy needs adjusting"),
+		userMsg(10, "verify the subscription invoice format"),
+		userMsg(11, "ensure refund credits log correctly"),
+		userMsg(12, "and the customer notification email"),
+		readCall(13, "/repo/billing/refund.go"),
+		readResult(14, 13, freshPayload),
 	}
 
 	v := ScoreFiles(msgs)

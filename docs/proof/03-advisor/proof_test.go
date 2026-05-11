@@ -102,6 +102,9 @@ func emptyState() contexthealth.AdvisorState {
 func TestProof_StaleContextAdvisoryFiresOnTopicShift(t *testing.T) {
 	const bigPayload = 12_000
 
+	// The pivot needs enough billing user prompts to push the auth
+	// files at idx 1 and 4 outside the recency horizon (matching
+	// recentTouchHorizonUserMsgs in the relevance scorer).
 	msgs := []*connectors.Message{
 		userMsg(0, "fix the authentication middleware login bug"),
 		readCall(1, "/repo/auth/login.go"),
@@ -114,8 +117,13 @@ func TestProof_StaleContextAdvisoryFiresOnTopicShift(t *testing.T) {
 		userMsg(8, "billing invoice for the refund flow"),
 		userMsg(9, "credit the customer for the failed charge"),
 		userMsg(10, "make sure the refund subscription path is right"),
-		readCall(11, "/repo/billing/refund.go"),
-		readResult(12, 11, bigPayload),
+		userMsg(11, "double check the refund authorization code"),
+		userMsg(12, "the refund retry policy needs adjusting"),
+		userMsg(13, "verify the subscription invoice format"),
+		userMsg(14, "ensure refund credits log correctly"),
+		userMsg(15, "and the customer notification email"),
+		readCall(16, "/repo/billing/refund.go"),
+		readResult(17, 16, bigPayload),
 	}
 
 	advisory := contexthealth.RenderAdvisor(contexthealth.AdvisorInput{
