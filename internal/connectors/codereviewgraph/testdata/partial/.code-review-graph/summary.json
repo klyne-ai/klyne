@@ -1,0 +1,4 @@
+{
+  "high_risk_files": ["internal/api/contracts.go"],
+  "unknown_future_field": {"version": 2}
+}

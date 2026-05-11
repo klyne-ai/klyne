@@ -1,0 +1,21 @@
+{
+  "high_risk_files": [
+    "internal/cost/engine.go",
+    "cmd/klyne/root.go"
+  ],
+  "recent_blockers": [
+    {
+      "title": "Refactor cost engine: split per-model rates",
+      "url": "https://github.com/klyne-ai/klyne/pull/123",
+      "severity": "high",
+      "opened_at": "2026-05-09T10:00:00Z"
+    },
+    {
+      "title": "Flaky test: TestSearch_Concurrent",
+      "url": "https://github.com/klyne-ai/klyne/issues/456",
+      "severity": "medium",
+      "opened_at": "2026-05-08T14:30:00Z"
+    }
+  ],
+  "frequent_reviewers": ["alice", "bob"]
+}

@@ -95,6 +95,15 @@ Returns one row per qualifying assistant turn with timestamp, effective input (T
 When the user has configured a plan tier (klyne config set plan <tier>), the response also reports total uncached input as a percentage of that plan's 5-hour cap. Same disambiguation behaviour as get_context_health.`,
 	}, HandleGetTokenTimeline)
 
+	mcp.AddTool(srv, &mcp.Tool{
+		Name: "code_review_context",
+		Description: `Surface the optional code-review-graph enrichment for a repository.
+
+Reads <project_root>/.code-review-graph/summary.json (produced by the upstream tirth8205/code-review-graph project) and returns the high-risk files, recent review blockers, and frequent reviewer handles. Gracefully no-ops with detected=false when the directory is absent — most repos won't have the upstream tool installed.
+
+Useful before starting a refactor or code review to learn which files the project has historically struggled with and who to ping.`,
+	}, HandleCodeReviewContext)
+
 	// Live MCP prompts. Each prompt parallels one of the tools above
 	// and surfaces in Claude Code's slash menu as /klyne:<name>
 	// (older Claude Code builds used /mcp__klyne__<name>; that form
