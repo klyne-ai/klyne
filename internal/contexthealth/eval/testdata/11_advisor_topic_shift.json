@@ -1,0 +1,19 @@
+{
+  "name": "advisor_topic_shift",
+  "description": "Low classifier fill but the user's prompts have clearly pivoted topic mid-session AND files loaded under the old topic are no longer touched. Classifier still reports drifting (topic-shifted), advisor must fire (stale or topic_shift trigger). Note the staleReads happen between opening and closing prompts so they sit outside the recency horizon.",
+  "shape": {
+    "context_fill_pct": 20,
+    "assistant_turns": 3,
+    "user_turns": 24,
+    "hidden_per_assistant": 0,
+    "tokens_in_per_turn": 2000,
+    "cache_read_ratio": 0.6,
+    "stale_read_path": "/repo/internal/billing/invoice.go",
+    "stale_read_count": 3,
+    "loaded_file_bytes": 4096,
+    "opening_prompt": "billing invoice ledger reconciliation payment gateway charges",
+    "closing_prompt": "kubernetes deployment helm chart ingress controller traffic routing"
+  },
+  "expected_state": "drifting",
+  "expected_advisor_fires": true
+}
