@@ -208,6 +208,77 @@ export interface SessionUsageResponse {
   calibrated_from_oauth: boolean;
 }
 
+// --- /sessions/{id}/token-timeline — per-turn token usage line chart ---
+
+/**
+ * TokenTimelinePoint is one assistant turn's token-usage row. The
+ * cockpit chart plots `total_input` (the prefix size at that turn)
+ * as the primary curve and may surface `effective_input` and
+ * `cached_read_tokens` as secondary signal when the user wants to
+ * see the prompt-cache discount.
+ */
+export interface TokenTimelinePoint {
+  /** Epoch-ms of the assistant message. */
+  ts_ms: number;
+  /** TokensIn - CachedReadTokens — uncached portion that bills against
+   *  the 5h rate-limit at full rate. */
+  effective_input: number;
+  /** Raw TokensIn (fresh + cached_read + cached_write) — the prefix
+   *  size at that turn. The primary line plotted by the chart. */
+  total_input: number;
+  /** Prefix served from prompt cache. */
+  cached_read_tokens: number;
+  /** New content written to cache. */
+  cached_write_tokens: number;
+  /** Completion token count. */
+  output_tokens: number;
+}
+
+/**
+ * TokenTimelineResponse is GET /sessions/{id}/token-timeline. It backs
+ * the cockpit's per-session token-usage line chart, mirroring the data
+ * shape the `klyne tokens` CLI and the `get_token_timeline` MCP tool
+ * already produce.
+ */
+export interface TokenTimelineResponse {
+  session_id: string;
+  /** Most-recent assistant model used in this session. Empty for
+   *  fresh sessions (in which case the chart should label the axis
+   *  via the session's model field as a fallback). */
+  model: string;
+  /** Model's maximum context window in tokens. Zero when unknown — the
+   *  chart should hide the "% of context" axis in that case. */
+  context_window: number;
+  /** Left edge of the displayed window (epoch-ms). In the entire-
+   *  session default view this equals the first point's ts_ms. */
+  window_start_ms: number;
+  /** Right edge of the window (epoch-ms; typically the server clock
+   *  at request time). */
+  window_end_ms: number;
+  /** Per-assistant-turn rows in chronological order. May be empty for
+   *  brand-new sessions; the UI should render a "no turns yet" hint
+   *  rather than an empty axis. */
+  points: TokenTimelinePoint[];
+  /** Oldest qualifying turn's total_input — where the session started. */
+  first_input: number;
+  /** Most recent qualifying turn's total_input — current prefix size. */
+  latest_input: number;
+  /** Largest single-turn total_input in the window. */
+  peak_input: number;
+  /** latest_input / context_window × 100, capped at 100. Zero when
+   *  context_window is unknown or there are no points. */
+  pct_of_context: number;
+}
+
+/** Query parameters for fetchTokenTimeline. */
+export interface TokenTimelineQuery {
+  /** Go duration string (e.g. "30m", "5h", "2h30m"). Empty means
+   *  "entire session" — long-paused sessions surface their full history. */
+  window?: string;
+  /** Convenience integer hours; ignored when window is set. */
+  hours?: number;
+}
+
 // --- /sessions/{id}/break-advice — AI-powered session-break recommender ---
 
 /** BreakAdviceVerdict mirrors the Go enum string values. */
