@@ -263,16 +263,6 @@ To silence the advisor for a noisy session (e.g. when you're developing klyne it
 
 ---
 
-## Roadmap
-
-1. **`suggest_session_name`** — generate a meaningful name from JSONL for Claude Code's "rename" UI (queued)
-2. **Web cockpit line graph** — port the `klyne tokens` data shape to a Svelte chart on the session-detail page so non-CLI users see the same trajectory.
-3. **Labelled context-health eval suite** — move classifier + advisor thresholds from heuristics to data; unlocks predictive "exhaust in N turns" projection in v2.
-4. **Release binaries** + Homebrew tap + one-command installer.
-5. Optional [code-review-graph](https://github.com/tirth8205/code-review-graph) enrichment when `.code-review-graph/` exists in the repo.
-
----
-
 ## License
 
 MIT. See [LICENSE](LICENSE).
