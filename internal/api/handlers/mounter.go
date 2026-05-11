@@ -83,6 +83,16 @@ func (m *Mounter) Mount(r chi.Router) {
 	})
 	r.Get(api.RouteSessionBreakAdvice, hBreakAdvice.Get)
 
+	// Per-session token-usage timeline — backs the cockpit line
+	// chart. Shares contexthealth.ComputeTimeline with `klyne tokens`
+	// and the get_token_timeline MCP tool so all three surfaces
+	// stay aligned.
+	hTokenTimeline := NewSessionTokenTimelineHandler(SessionTokenTimelineDeps{
+		DB:     m.deps.DB,
+		Logger: logger,
+	})
+	r.Get(api.RouteSessionTokenTimeline, hTokenTimeline.Get)
+
 	hCockpit := NewCockpitHandler(m.deps.DB)
 	r.Get(api.RouteCockpitThreads, hCockpit.Threads)
 
