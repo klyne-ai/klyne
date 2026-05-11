@@ -1,11 +1,11 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { projectsStore, refreshProjects } from '$lib/projects.svelte.js';
-  import { kfmt, relAgo } from '$lib/format.js';
+  import { kfmt, relAgo, costFmt } from '$lib/format.js';
   import CliBadge from '$lib/ui/CliBadge.svelte';
   import { onMount } from 'svelte';
 
-  let sortBy = $state<'recent' | 'name' | 'msgs' | 'tokens' | 'sessions'>('recent');
+  let sortBy = $state<'recent' | 'name' | 'msgs' | 'tokens' | 'sessions' | 'cost'>('recent');
   let cliFilter = $state<'all' | 'claude' | 'codex'>('all');
   let nameFilter = $state('');
 
@@ -26,6 +26,7 @@
       msgs: (a, b) => b.msgs - a.msgs,
       tokens: (a, b) => b.tokensOut - a.tokensOut,
       sessions: (a, b) => b.sessions - a.sessions,
+      cost: (a, b) => b.cost - a.cost,
     };
     return [...p].sort(sorters[sortBy]);
   });
@@ -83,6 +84,7 @@
         <option value="msgs">Messages</option>
         <option value="tokens">Tokens</option>
         <option value="sessions">Sessions</option>
+        <option value="cost">Cost</option>
       </select>
     </div>
 
@@ -107,6 +109,7 @@
             <th class="num">Sessions</th>
             <th class="num">Messages</th>
             <th class="num">↓ Tokens</th>
+            <th class="num">Cost</th>
             <th>Last active</th>
             <th></th>
           </tr>
@@ -127,6 +130,7 @@
               <td class="num">{p.sessions}</td>
               <td class="num">{p.msgs}</td>
               <td class="num">{kfmt(p.tokensOut)}</td>
+              <td class="num ad-mono ad-tnum" style="color: {p.priced ? 'var(--ad-fg)' : 'var(--ad-faint)'};">{costFmt(p.cost, p.priced)}</td>
               <td class="ad-mono" style="font-size: 11px; color: var(--ad-muted);">
                 {relAgo(p.lastMsAgo)}
               </td>
@@ -135,7 +139,7 @@
           {/each}
           {#if sorted.length === 0}
             <tr>
-              <td colspan="9" style="text-align: center; padding: 24px; color: var(--ad-muted);">
+              <td colspan="10" style="text-align: center; padding: 24px; color: var(--ad-muted);">
                 No projects found.
               </td>
             </tr>

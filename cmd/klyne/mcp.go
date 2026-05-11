@@ -49,11 +49,11 @@ Tools (auto-invoked by the AI):
                               decode replacement_history (Codex)
 
 Slash prompts (user-triggered via /):
-  /mcp__klyne__health      → live get_context_health
-  /mcp__klyne__sessions    → live list_sessions
-  /mcp__klyne__search      → live search_messages
-  /mcp__klyne__handoff     → live generate_handoff
-  /mcp__klyne__precompact  → live get_pre_compact_context
+  /klyne:health      → live get_context_health
+  /klyne:sessions    → live list_sessions
+  /klyne:search      → live search_messages
+  /klyne:handoff     → live generate_handoff
+  /klyne:precompact  → live get_pre_compact_context
 
 To register the server with each host, run: klyne mcp install`,
 		RunE: runMcp,

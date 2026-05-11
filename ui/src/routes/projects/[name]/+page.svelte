@@ -5,7 +5,7 @@
   import { fetchSessions, deleteSession, fetchMessages } from '$lib/api.js';
   import { projectsStore, refreshProjects } from '$lib/projects.svelte.js';
   import { removeSession } from '$lib/stores.svelte.js';
-  import { kfmt, relAgo, dayLabel } from '$lib/format.js';
+  import { kfmt, relAgo, dayLabel, costFmt } from '$lib/format.js';
   import type { Session, Message } from '$lib/types.js';
   import CliBadge from '$lib/ui/CliBadge.svelte';
   import StatusBadge from '$lib/ui/StatusBadge.svelte';
@@ -44,6 +44,9 @@
 
   // Tab filter: all | claude | codex. Defaults to 'all'.
   let cliFilter = $state<'all' | 'claude' | 'codex'>('all');
+
+  // Transient hint shown next to "Open in CLI" after a clipboard copy.
+  let copyHint = $state('');
 
   // Sessions filtered by the active CLI tab.
   const filteredSessions = $derived(
@@ -144,20 +147,33 @@
         <div class="ad-mono ad-muted" style="font-size: 12px;">{project.project_path}</div>
       </div>
       <div style="display: flex; gap: 8px;">
-        <button class="ad-btn ad-btn--ghost">Rename label</button>
-        <button class="ad-btn">Open in CLI</button>
+        <button
+          class="ad-btn"
+          title="Copy a shell command that cd's into this project and starts the CLI"
+          onclick={async () => {
+            try {
+              await navigator.clipboard.writeText(`cd "${project.project_path}" && ${project.cli}`);
+              copyHint = 'copied';
+              setTimeout(() => { copyHint = ''; }, 1500);
+            } catch {
+              copyHint = 'copy failed';
+              setTimeout(() => { copyHint = ''; }, 2000);
+            }
+          }}
+        >Open in CLI{#if copyHint} · {copyHint}{/if}</button>
       </div>
     </div>
 
     <!-- Stats strip -->
-    <div class="ad-card" style="display: grid; grid-template-columns: repeat(4, 1fr); padding: 0; margin-bottom: 20px;">
+    <div class="ad-card" style="display: grid; grid-template-columns: repeat(5, 1fr); padding: 0; margin-bottom: 20px;">
       {#each [
         ['Sessions', String(project.sessions)],
         ['Messages', String(project.msgs)],
         ['↑ tokens in', kfmt(project.tokensIn)],
         ['↓ tokens out', kfmt(project.tokensOut)],
+        ['Cost', costFmt(project.cost, project.priced)],
       ] as [label, value], i}
-        <div style="padding: 14px 16px; border-right: {i < 3 ? '1px solid var(--ad-border-soft)' : 'none'};">
+        <div style="padding: 14px 16px; border-right: {i < 4 ? '1px solid var(--ad-border-soft)' : 'none'};">
           <div style="font-size: 11px; color: var(--ad-faint); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 4px;">{label}</div>
           <div class="ad-mono ad-tnum" style="font-size: 18px; font-weight: 600;">{value}</div>
         </div>
@@ -218,7 +234,7 @@
               tabindex="0"
               onclick={() => goto(`/sessions/${encodeURIComponent(s.id)}`)}
               onkeydown={(e) => { if (e.key === 'Enter') goto(`/sessions/${encodeURIComponent(s.id)}`); }}
-              style="display: grid; grid-template-columns: 70px minmax(0, 1fr) 80px 90px 110px 28px 20px; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: {i < list.length - 1 ? '1px solid var(--ad-border-soft)' : 'none'}; font-size: 13px; cursor: pointer;"
+              style="display: grid; grid-template-columns: 70px minmax(0, 1fr) 80px 90px 70px 110px 28px 20px; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: {i < list.length - 1 ? '1px solid var(--ad-border-soft)' : 'none'}; font-size: 13px; cursor: pointer;"
               onmouseenter={(e) => ((e.currentTarget as HTMLElement).style.background = 'var(--ad-panel-hi)')}
               onmouseleave={(e) => ((e.currentTarget as HTMLElement).style.background = 'transparent')}
             >
@@ -233,6 +249,7 @@
               </span>
               <span class="ad-mono ad-tnum num" style="text-align: right; color: var(--ad-fg-2);">{s.msg_count} msgs</span>
               <span class="ad-mono ad-tnum num" style="text-align: right; color: var(--ad-muted);">↓ {kfmt(s.tokens_out)}</span>
+              <span class="ad-mono ad-tnum num" style="text-align: right; color: {s.cost_usd > 0 ? 'var(--ad-fg-2)' : 'var(--ad-faint)'};">{costFmt(s.cost_usd, s.cost_usd > 0)}</span>
               <span><StatusBadge status={s.status === 'compacted' ? 'compacted' : (Date.now() - s.last_msg_at < 60_000 ? 'active' : 'idle')} /></span>
               <button
                 type="button"

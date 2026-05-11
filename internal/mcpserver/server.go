@@ -11,10 +11,10 @@ import (
 // when tool semantics change so MCP hosts can detect upgrades.
 //
 // v0.3.0 — slice 4: Codex parity for all four tools and live MCP
-// prompts surfaced under Claude Code's `/mcp__klyne__*` slash
-// menu.
-// v0.4.0 — slice 5: search_messages tool + /mcp__klyne__search
-// prompt for cross-session full-text search.
+// prompts surfaced under Claude Code's `/klyne:*` slash menu
+// (older builds: `/mcp__klyne__*`, retired).
+// v0.4.0 — slice 5: search_messages tool + /klyne:search prompt
+// for cross-session full-text search.
 const version = "v0.4.0"
 
 // New constructs the klyne MCP server with every v1 tool
@@ -96,9 +96,10 @@ When the user has configured a plan tier (klyne config set plan <tier>), the res
 	}, HandleGetTokenTimeline)
 
 	// Live MCP prompts. Each prompt parallels one of the tools above
-	// and surfaces in Claude Code's slash menu as
-	// /mcp__klyne__<name>. Handlers run server-side and return
-	// the result as injected user-message content — no AI roundtrip
+	// and surfaces in Claude Code's slash menu as /klyne:<name>
+	// (older Claude Code builds used /mcp__klyne__<name>; that form
+	// has been retired). Handlers run server-side and return the
+	// result as injected user-message content — no AI roundtrip
 	// needed for the fetch.
 	srv.AddPrompt(&mcp.Prompt{
 		Name:        "health",

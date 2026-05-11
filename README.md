@@ -6,10 +6,9 @@ klyne is a local-first session rescue layer for Claude Code and Codex power user
 
 No cloud. No proxy. No telemetry. Read-only by design.
 
-<video src="docs/assets/readme/The_Deterministic_Handoff__Escaping_the_Token_Trap_with_Klyne.mp4" controls muted playsinline width="100%">
-  Your browser does not support the video tag. Watch it here:
-  <a href="docs/assets/readme/The_Deterministic_Handoff__Escaping_the_Token_Trap_with_Klyne.mp4">The Deterministic Handoff — Escaping the Token Trap with Klyne</a>.
-</video>
+[![Watch the klyne demo](docs/assets/readme/klyne-demo-poster.png)](https://youtu.be/2NglEGlq3Ns)
+
+[Watch the 5-minute klyne demo](https://youtu.be/2NglEGlq3Ns)
 
 ---
 
@@ -171,7 +170,7 @@ It also removes any legacy `agentdeck` entry from those configs (klyne was renam
 | `/klyne:precompact` | Live `get_pre_compact_context` |
 | `/klyne:tokens` | Live `get_token_timeline` — ASCII sparkline + per-turn table for the active session, full lifetime by default |
 
-The prompts run server-side and inject the result as user-message content — no AI roundtrip needed for the fetch.
+`klyne mcp install` writes these as both MCP prompts (host-native) **and** markdown slash commands under `~/.claude/commands/klyne/*.md`. The markdown form is what Claude Code v2.1.x actually fires when you press Enter on a slash dropdown — no special action needed; just type `/klyne:health` (etc.) and submit. The MCP-prompt form remains in place so older / future Claude Code builds and other MCP hosts (e.g. Codex CLI) keep working through the host-native path.
 
 ---
 

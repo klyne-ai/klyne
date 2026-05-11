@@ -1,11 +1,12 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
   import { search as apiSearch, type SearchSort } from '$lib/api.js';
   import { projectsStore } from '$lib/projects.svelte.js';
   import { relTime } from '$lib/format.js';
   import type { SearchHit } from '$lib/types.js';
+  import DOMPurify from 'dompurify';
 
   const urlQuery = $derived($page.url.searchParams.get('q') ?? '');
 
@@ -19,6 +20,12 @@
     role: 'all',
     project: 'all',
   });
+
+  // Keyboard navigation: index of the currently focused result row.
+  // -1 means "no row selected" (input is the implicit focus target).
+  let selectedIndex = $state(-1);
+  let resultsContainer: HTMLDivElement | null = null;
+  let searchInput: HTMLInputElement | null = null;
 
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -86,12 +93,97 @@
 
   const SUGGESTIONS = ['payment', 'race condition', 'refactor', 'stripe', 'redis', 'dedupe'];
 
+  // Sanitize FTS5 snippets. The server emits <mark> highlights inside
+  // snippets; everything else must be stripped to avoid stored-XSS vectors
+  // through indexed user-generated content.
+  function sanitizeSnippet(html: string): string {
+    return DOMPurify.sanitize(html, {
+      ALLOWED_TAGS: ['mark'],
+      ALLOWED_ATTR: ['style'],
+    });
+  }
+
+  function styleMark(html: string): string {
+    return html.replaceAll(
+      '<mark>',
+      '<mark style="background: var(--ad-claude-bg); color: var(--ad-claude); padding: 0 3px; border-radius: 2px;">'
+    );
+  }
+
+  // Reset the keyboard cursor whenever the result set changes so we never
+  // point at an out-of-range index.
+  $effect(() => {
+    if (filteredHits.length === 0 || selectedIndex >= filteredHits.length) {
+      selectedIndex = -1;
+    }
+  });
+
+  function scrollSelectedIntoView(): void {
+    if (selectedIndex < 0 || !resultsContainer) return;
+    const el = resultsContainer.querySelector<HTMLElement>(`[data-result-index="${selectedIndex}"]`);
+    if (el) el.scrollIntoView({ block: 'nearest' });
+  }
+
+  function handleGlobalKey(e: KeyboardEvent): void {
+    // Ignore keys typed inside a textarea/contenteditable.
+    const target = e.target as HTMLElement | null;
+    const isTyping = target?.tagName === 'TEXTAREA' || target?.isContentEditable;
+    if (isTyping) return;
+
+    const inInput = target === searchInput;
+
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      if (q) {
+        q = '';
+        hits = [];
+        const url = new URL(window.location.href);
+        url.searchParams.delete('q');
+        void goto(url.pathname + url.search, { replaceState: true, keepFocus: true });
+      } else {
+        selectedIndex = -1;
+        searchInput?.blur();
+      }
+      return;
+    }
+
+    if (filteredHits.length === 0) return;
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      selectedIndex = selectedIndex < filteredHits.length - 1 ? selectedIndex + 1 : 0;
+      searchInput?.blur();
+      scrollSelectedIntoView();
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      selectedIndex = selectedIndex <= 0 ? filteredHits.length - 1 : selectedIndex - 1;
+      searchInput?.blur();
+      scrollSelectedIntoView();
+      return;
+    }
+    if (e.key === 'Enter' && selectedIndex >= 0 && !inInput) {
+      e.preventDefault();
+      const hit = filteredHits[selectedIndex];
+      if (hit) goto(`/sessions/${encodeURIComponent(hit.session_id)}`);
+    }
+  }
+
   onMount(() => {
     const initialQ = $page.url.searchParams.get('q') ?? '';
     if (initialQ.trim()) {
       q = initialQ;
       void doSearch(initialQ);
     }
+    window.addEventListener('keydown', handleGlobalKey);
+  });
+
+  onDestroy(() => {
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('keydown', handleGlobalKey);
+    }
+    if (debounceTimer !== null) clearTimeout(debounceTimer);
   });
 </script>
 
@@ -105,6 +197,7 @@
   <!-- Search input -->
   <div style="position: relative; margin-bottom: 12px;">
     <input
+      bind:this={searchInput}
       class="ad-input"
       autofocus
       value={q}
@@ -173,18 +266,26 @@
   {/if}
 
   <!-- Results -->
-  <div style="display: flex; flex-direction: column; gap: 6px;">
+  <div
+    bind:this={resultsContainer}
+    role="listbox"
+    aria-label="Search results"
+    style="display: flex; flex-direction: column; gap: 6px;"
+  >
     {#each filteredHits as h, i}
       {@const pName = h.project_path.split('/').filter(Boolean).pop() ?? h.project_path}
+      {@const isSelected = i === selectedIndex}
       <div
         class="ad-card"
-        style="padding: 12px; cursor: pointer; transition: background 80ms;"
-        onmouseenter={(e) => ((e.currentTarget as HTMLElement).style.background = 'var(--ad-panel-hi)')}
-        onmouseleave={(e) => ((e.currentTarget as HTMLElement).style.background = 'var(--ad-panel)')}
+        data-result-index={i}
+        style="padding: 12px; cursor: pointer; transition: background 80ms; background: {isSelected ? 'var(--ad-panel-hi)' : 'var(--ad-panel)'}; outline: {isSelected ? '1px solid var(--ad-claude)' : 'none'};"
+        onmouseenter={(e) => { if (!isSelected) (e.currentTarget as HTMLElement).style.background = 'var(--ad-panel-hi)'; }}
+        onmouseleave={(e) => { if (!isSelected) (e.currentTarget as HTMLElement).style.background = 'var(--ad-panel)'; }}
         onclick={() => goto(`/sessions/${encodeURIComponent(h.session_id)}`)}
-        role="button"
-        tabindex={i}
-        onkeydown={(e) => e.key === 'Enter' && goto(`/sessions/${encodeURIComponent(h.session_id)}`)}
+        role="option"
+        tabindex={0}
+        aria-selected={isSelected}
+        onkeydown={(e) => { if (e.key === 'Enter') goto(`/sessions/${encodeURIComponent(h.session_id)}`); }}
       >
         <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 12px;">
           <span style="font-weight: 600;">{pName}</span>
@@ -195,7 +296,7 @@
           <span style="margin-left: auto;" class="ad-mono ad-faint">{relTime(h.ts)}</span>
         </div>
         <div style="font-size: 13px; color: var(--ad-fg); line-height: 1.55;">
-          {@html h.snippet.replaceAll('<mark>', `<mark style="background: var(--ad-claude-bg); color: var(--ad-claude); padding: 0 3px; border-radius: 2px;">`)}
+          {@html styleMark(sanitizeSnippet(h.snippet))}
         </div>
       </div>
     {/each}
