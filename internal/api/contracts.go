@@ -16,7 +16,10 @@
 //   - spec §8 (settings / wizard for BYOK)
 package api
 
-import "github.com/klyne-ai/klyne/internal/connectors"
+import (
+	"github.com/klyne-ai/klyne/internal/connectors"
+	"github.com/klyne-ai/klyne/internal/connectors/codereviewgraph"
+)
 
 // ---------------------------------------------------------------------------
 // Routes
@@ -44,6 +47,7 @@ const (
 	RouteWizardComplete      = "/wizard/complete"
 	RouteEvents              = "/events"
 	RouteHealthz             = "/healthz"
+	RouteCodeReviewContext   = "/code-review-context"
 )
 
 // AllRoutes returns the canonical, ordered list of every HTTP path
@@ -69,6 +73,7 @@ func AllRoutes() []string {
 		RouteWizardComplete,
 		RouteEvents,
 		RouteHealthz,
+		RouteCodeReviewContext,
 	}
 }
 
@@ -610,4 +615,29 @@ type HealthzResponse struct {
 	OK            bool   `json:"ok"`
 	Version       string `json:"version"`
 	SchemaVersion int    `json:"schema_version"`
+}
+
+// ---------------------------------------------------------------------------
+// /code-review-context  — optional code-review-graph enrichment
+// ---------------------------------------------------------------------------
+
+// CodeReviewContextResponse is GET /code-review-context — the parsed
+// `<project_root>/.code-review-graph/summary.json` enrichment. When the
+// upstream tool is not installed for the queried repo, Detected is
+// false and every slice is empty (non-nil) so the UI can render
+// "enrichment unavailable" without nil-check gymnastics.
+type CodeReviewContextResponse struct {
+	// ProjectRoot echoes the path that was inspected — the request's
+	// ?project_root= argument or the daemon's working directory.
+	ProjectRoot string `json:"project_root"`
+	// Detected mirrors codereviewgraph.Detect: true iff the
+	// `.code-review-graph/` directory exists AND is non-empty.
+	Detected bool `json:"detected"`
+	// HighRiskFiles lists repo-relative paths upstream flagged as
+	// historically risky.
+	HighRiskFiles []string `json:"high_risk_files"`
+	// RecentBlockers is the open review-blocking issues feed.
+	RecentBlockers []codereviewgraph.Blocker `json:"recent_blockers"`
+	// FrequentReviewers is the de-duped reviewer-handle list.
+	FrequentReviewers []string `json:"frequent_reviewers"`
 }
