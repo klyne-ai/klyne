@@ -1,0 +1,117 @@
+# GoReleaser configuration for klyne.
+#
+# Produces cross-platform binaries (darwin/linux/windows × amd64/arm64),
+# archives, sha256 checksums, a GitHub release, and a Homebrew tap formula.
+#
+# Local testing (no publish): `make release-snapshot` (wraps
+# `goreleaser release --snapshot --clean`). Real releases run from
+# .github/workflows/release.yml on a `v*.*.*` tag push.
+#
+# CGO is disabled to match the Makefile: modernc.org/sqlite is pure Go,
+# and CGO with the macOS 26 + Go 1.21 internal linker produces binaries
+# dyld rejects (see Makefile build target for full rationale).
+#
+# Manual prerequisites BEFORE a real release tag is pushed:
+#   1. Create the empty repo `klyne-ai/homebrew-tap` on GitHub.
+#   2. Create a fine-scoped PAT with `contents:write` on that tap repo
+#      and add it to this repo's secrets as `HOMEBREW_TAP_GITHUB_TOKEN`.
+#      Without that secret, the homebrew step will fail and the rest of
+#      the release will still publish.
+
+version: 2
+
+project_name: klyne
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: klyne
+    main: ./cmd/klyne
+    binary: klyne
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      # Windows on arm64 is not in the target matrix.
+      - goos: windows
+        goarch: arm64
+
+archives:
+  - id: klyne
+    ids:
+      - klyne
+    # Asset filename pattern. MUST stay in sync with scripts/install.sh,
+    # which constructs the same string to fetch the archive.
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot"
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+      - "Merge pull request"
+      - "Merge branch"
+
+release:
+  github:
+    owner: klyne-ai
+    name: klyne
+  draft: false
+  prerelease: auto
+  name_template: "klyne {{ .Tag }}"
+
+# Homebrew tap publishing.
+# Skipped automatically for `--snapshot` runs (see top-level `snapshot:` block
+# plus the `skip_upload` field below, which honors the snapshot flag).
+brews:
+  - name: klyne
+    ids:
+      - klyne
+    repository:
+      owner: klyne-ai
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    commit_author:
+      name: klyne-release-bot
+      email: release@klyne.ai
+    commit_msg_template: "chore(brew): klyne {{ .Tag }}"
+    homepage: "https://github.com/klyne-ai/klyne"
+    description: "Local-first session rescue layer for Claude Code and Codex."
+    license: "MIT"
+    skip_upload: auto
+    test: |
+      system "#{bin}/klyne", "--version"
+    install: |
+      bin.install "klyne"
