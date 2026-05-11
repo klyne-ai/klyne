@@ -1,0 +1,16 @@
+{
+  "name": "risky_hidden_ratio",
+  "description": "Low fill but tool/system rows outnumber assistant turns >=3:1 — the hidden-ratio rule must promote to risky. Advisor silent for the same reason as the other classifier-only fixtures.",
+  "shape": {
+    "context_fill_pct": 25,
+    "assistant_turns": 3,
+    "user_turns": 6,
+    "hidden_per_assistant": 5,
+    "tokens_in_per_turn": 2000,
+    "cache_read_ratio": 0.6,
+    "opening_prompt": "refactor auth module split helper functions improve coverage",
+    "closing_prompt": "refactor auth module split helper functions improve coverage"
+  },
+  "expected_state": "risky",
+  "expected_advisor_fires": false
+}

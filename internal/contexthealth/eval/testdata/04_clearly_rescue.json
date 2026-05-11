@@ -1,0 +1,16 @@
+{
+  "name": "clearly_rescue_fill",
+  "description": "Hard-ceiling fill (>=75%). Classifier must escalate to rescue_now and the advisor must fire (hard_ceiling trigger).",
+  "shape": {
+    "context_fill_pct": 90,
+    "assistant_turns": 4,
+    "user_turns": 6,
+    "hidden_per_assistant": 1,
+    "tokens_in_per_turn": 8000,
+    "cache_read_ratio": 0.6,
+    "opening_prompt": "refactor auth module split helper functions improve coverage",
+    "closing_prompt": "refactor auth module split helper functions improve coverage"
+  },
+  "expected_state": "rescue_now",
+  "expected_advisor_fires": true
+}

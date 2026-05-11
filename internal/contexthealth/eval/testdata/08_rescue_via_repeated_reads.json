@@ -1,0 +1,19 @@
+{
+  "name": "rescue_via_repeated_reads",
+  "description": "Low fill but the same file has been re-read 5 times in the trailing window — the read-repetition rescue rule must trip. Advisor stays quiet because the reads are recent (not stale) and fill is well below the hard-ceiling.",
+  "shape": {
+    "context_fill_pct": 20,
+    "assistant_turns": 3,
+    "user_turns": 6,
+    "hidden_per_assistant": 0,
+    "tokens_in_per_turn": 2000,
+    "cache_read_ratio": 0.6,
+    "repeated_read_path": "/repo/internal/auth/session.go",
+    "repeated_read_count": 5,
+    "loaded_file_bytes": 200,
+    "opening_prompt": "refactor auth module split helper functions improve coverage",
+    "closing_prompt": "refactor auth module split helper functions improve coverage"
+  },
+  "expected_state": "rescue_now",
+  "expected_advisor_fires": false
+}
