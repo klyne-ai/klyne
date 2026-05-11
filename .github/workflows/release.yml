@@ -1,0 +1,60 @@
+# Release workflow.
+#
+# Triggers on `v*.*.*` tag pushes (e.g. `v0.5.0`). Builds cross-platform
+# binaries, publishes a GitHub release, and pushes a formula to
+# `klyne-ai/homebrew-tap`.
+#
+# Required secrets:
+#   - GITHUB_TOKEN              auto-provided by Actions; scoped to this repo.
+#   - HOMEBREW_TAP_GITHUB_TOKEN fine-scoped PAT with `contents:write` on
+#                               klyne-ai/homebrew-tap. MUST be configured
+#                               in repo settings BEFORE the first tag push,
+#                               otherwise the homebrew step fails.
+#
+# Concurrency:
+#   We key on the workflow + tag ref so two simultaneous tag pushes can't
+#   stomp each other's release upload. `cancel-in-progress: false` because
+#   cancelling a half-uploaded release would leave debris on GitHub.
+
+name: release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  goreleaser:
+    name: goreleaser
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # goreleaser needs the full history + tags to compute changelogs
+          # and pick up the tag we're releasing from.
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          # Match the Go toolchain declared in go.mod (currently go 1.25).
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
