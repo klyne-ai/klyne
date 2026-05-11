@@ -16,9 +16,12 @@
   import { fetchAdvisorDetail } from '$lib/api.js';
   import { relTime, kfmt } from '$lib/format.js';
   import type {
+    AccelerationProof,
     AdvisorDetailResponse,
     AdvisoryKind,
-    AdvisoryRow
+    AdvisoryRow,
+    ContextWindowProof,
+    StaleProof
   } from '$lib/types.js';
 
   interface Props {
@@ -97,6 +100,75 @@
    *  already returns the full file list. */
   let filesExpanded = $state(false);
   const FILES_COLLAPSED_LIMIT = 12;
+
+  // ---- Plain-English summaries for each proof section ----
+  //
+  // Each helper takes the live proof DTO and returns a single sentence
+  // that a non-technical user can read without consulting the stats
+  // grid below it. The goal is "read the sentence, understand what's
+  // happening" — the grid stays for power users who want raw numbers.
+
+  /** staleSummary — one-line plain-English summary for the loaded-file
+   *  relevance panel. */
+  function staleSummary(d: StaleProof): string {
+    if (d.files.length === 0) {
+      return 'No files have been loaded into this session yet.';
+    }
+    const total = kfmt(d.total_bytes);
+    const stale = kfmt(d.stale_bytes);
+    const pct = Math.round(d.stale_share * 100);
+    if (pct === 0) {
+      return `All ${total}B of files Claude has loaded match what you're working on. Healthy.`;
+    }
+    if (d.stale_share > d.threshold) {
+      return `${pct}% of loaded files (${stale}B of ${total}B) aren't in your recent rotation — Claude is carrying weight it isn't using. Above the alert threshold.`;
+    }
+    return `${pct}% of loaded files (${stale}B of ${total}B) aren't in your recent rotation, but that's below the alert threshold.`;
+  }
+
+  /** accelSummary — one-line plain-English summary for the per-turn
+   *  cost trend panel. Compares recent vs prior in human terms
+   *  ("3× cheaper", "stable", "trending up"). */
+  function accelSummary(d: AccelerationProof): string {
+    if (d.sampled_turns < 8) {
+      return `Not enough data yet — Claude has only replied ${d.sampled_turns} times in this session.`;
+    }
+    const recent = kfmt(d.recent_mean);
+    const prior = kfmt(d.prior_mean);
+    const r = d.ratio;
+    if (!isFinite(r) || r === 0) {
+      return `Recent replies look very small compared to earlier ones — not enough signal to draw a conclusion.`;
+    }
+    if (r < 0.5) {
+      const factor = (1 / r).toFixed(1);
+      return `Your recent replies cost about ${factor}× less than earlier ones (avg ${recent} new tokens vs ${prior}). Healthy — context isn't bloating.`;
+    }
+    if (r < 1.0) {
+      return `Recent replies are slightly cheaper than earlier ones (avg ${recent} new tokens vs ${prior}). Healthy.`;
+    }
+    if (r < 1.5) {
+      return `Per-reply cost is roughly stable (recent avg ${recent}, earlier avg ${prior}). Healthy.`;
+    }
+    if (r < 2.0) {
+      return `Per-reply cost is trending up — recent ${recent} vs earlier ${prior} (${r.toFixed(2)}× more). Watch this. If it crosses 2× the advisor will recommend a fresh session.`;
+    }
+    return `Recent replies cost ${r.toFixed(2)}× more than earlier ones (avg ${recent} new tokens vs ${prior}). Context is bloating — consider a handoff.`;
+  }
+
+  /** ctxSummary — one-line plain-English summary for the context-window
+   *  fill panel. */
+  function ctxSummary(d: ContextWindowProof): string {
+    const pct = Math.round(d.fill_pct);
+    const used = kfmt(d.latest_input);
+    const max = kfmt(d.context_window);
+    if (pct >= 75) {
+      return `Claude's memory is ${pct}% full (${used} of ${max} tokens). Above ${d.threshold}% the next turn's costs balloon, so the advisor recommends a fresh session.`;
+    }
+    if (pct >= 50) {
+      return `Claude's memory is ${pct}% full (${used} of ${max} tokens). Still healthy, but watch the trend.`;
+    }
+    return `Claude's memory is ${pct}% full (${used} of ${max} tokens). Plenty of headroom.`;
+  }
 
   /** wouldFireNow — true when the LIVE proof for the given trigger
    *  would currently trip it. Returns false when conditions have
@@ -233,15 +305,23 @@
 
       <!-- Stale-context proof: per-file relevance table. -->
       <section style="border: 1px solid var(--ad-border); border-radius: 6px; padding: 12px 14px; margin-bottom: 12px;">
-        <header style="display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px;">
-          <strong style="font-size: 13px;">Loaded file relevance</strong>
+        <header style="display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 6px;">
+          <div>
+            <strong style="font-size: 13px;">Files in Claude's context</strong>
+            <div style="color: var(--ad-muted); font-size: 11px; margin-top: 1px;">
+              What Claude has loaded vs what's still in your active rotation
+            </div>
+          </div>
           <span style="color: var(--ad-muted); font-size: 12px;">
             {Math.round(detail.stale.stale_share * 100)}% of {kfmt(detail.stale.total_bytes)}B stale
             {#if detail.stale.stale_share > detail.stale.threshold}
-              <span style="color: {kindMeta.stale.color}; margin-left: 6px;">(would fire)</span>
+              <span style="color: {kindMeta.stale.color}; margin-left: 6px;">(triggers alert)</span>
             {/if}
           </span>
         </header>
+        <p style="margin: 4px 0 10px 0; font-size: 12.5px; line-height: 1.5; color: var(--ad-fg);">
+          {staleSummary(detail.stale)}
+        </p>
         {#if detail.stale.files.length === 0}
           <p style="margin: 0; color: var(--ad-muted); font-size: 12px;">No files loaded into this session yet.</p>
         {:else}
@@ -293,60 +373,77 @@
 
       <!-- Acceleration proof: recent-vs-prior window math. -->
       <section style="border: 1px solid var(--ad-border); border-radius: 6px; padding: 12px 14px; margin-bottom: 12px;">
-        <header style="display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px;">
-          <strong style="font-size: 13px;">Per-turn cost trajectory</strong>
+        <header style="display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 6px;">
+          <div>
+            <strong style="font-size: 13px;">Per-reply cost trend</strong>
+            <div style="color: var(--ad-muted); font-size: 11px; margin-top: 1px;">
+              Is each of Claude's replies getting more expensive than the one before?
+            </div>
+          </div>
           <span style="color: var(--ad-muted); font-size: 12px;">
-            {detail.acceleration.sampled_turns} qualifying turns sampled
+            based on {detail.acceleration.sampled_turns} of Claude's replies
             {#if detail.acceleration.would_fire}
-              <span style="color: {kindMeta.acceleration.color}; margin-left: 6px;">(would fire)</span>
+              <span style="color: {kindMeta.acceleration.color}; margin-left: 6px;">(triggers alert)</span>
             {/if}
           </span>
         </header>
+        <p style="margin: 4px 0 10px 0; font-size: 12.5px; line-height: 1.5; color: var(--ad-fg);">
+          {accelSummary(detail.acceleration)}
+        </p>
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px;">
           <div>
-            <div style="color: var(--ad-muted); font-size: 11px; margin-bottom: 2px;">prior 5-turn mean</div>
+            <div style="color: var(--ad-muted); font-size: 11px; margin-bottom: 2px;" title="Average new (uncached) tokens across the 5 Claude replies before the most recent 3.">earlier 5 replies (avg)</div>
             <div style="font-family: var(--ad-font-mono); font-size: 16px;">{kfmt(detail.acceleration.prior_mean)}</div>
           </div>
           <div>
-            <div style="color: var(--ad-muted); font-size: 11px; margin-bottom: 2px;">recent 3-turn mean</div>
+            <div style="color: var(--ad-muted); font-size: 11px; margin-bottom: 2px;" title="Average new (uncached) tokens across Claude's most recent 3 replies.">last 3 replies (avg)</div>
             <div style="font-family: var(--ad-font-mono); font-size: 16px;">{kfmt(detail.acceleration.recent_mean)}</div>
           </div>
           <div>
-            <div style="color: var(--ad-muted); font-size: 11px; margin-bottom: 2px;">ratio (recent / prior)</div>
+            <div style="color: var(--ad-muted); font-size: 11px; margin-bottom: 2px;" title="Last 3 average ÷ earlier 5 average. Below 1.0 means cheaper than before; ≥ 2.0 triggers the alert.">trend (last 3 vs earlier 5)</div>
             <div style="font-family: var(--ad-font-mono); font-size: 16px; color: {detail.acceleration.ratio >= 2 ? kindMeta.acceleration.color : 'var(--ad-fg)'};">
               {detail.acceleration.ratio.toFixed(2)}×
             </div>
           </div>
           <div>
-            <div style="color: var(--ad-muted); font-size: 11px; margin-bottom: 2px;">latest uncached</div>
+            <div style="color: var(--ad-muted); font-size: 11px; margin-bottom: 2px;" title="New (uncached) tokens in Claude's most recent reply.">last reply (new tokens)</div>
             <div style="font-family: var(--ad-font-mono); font-size: 16px;">{kfmt(detail.acceleration.latest_effective)}</div>
           </div>
         </div>
-        <p style="margin: 8px 0 0 0; color: var(--ad-muted); font-size: 11px;">
-          Fires when ratio ≥ 2.0× and the latest turn's uncached input ≥ 5K.
+        <p style="margin: 10px 0 0 0; color: var(--ad-muted); font-size: 11px; line-height: 1.5;">
+          A “reply” is one of Claude's turns in the session (reading a file, making an edit, or sending text). “New tokens” means tokens Claude had to read fresh — anything served from the prompt cache is excluded.
+          The alert triggers when the last 3 replies average ≥ 2× the earlier 5 AND the most recent reply alone costs ≥ 5K new tokens.
         </p>
       </section>
 
       <!-- Hard-ceiling proof: current fill state. -->
       <section style="border: 1px solid var(--ad-border); border-radius: 6px; padding: 12px 14px; margin-bottom: 12px;">
-        <header style="display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px;">
-          <strong style="font-size: 13px;">Context window fill</strong>
+        <header style="display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 6px;">
+          <div>
+            <strong style="font-size: 13px;">How full is Claude's memory</strong>
+            <div style="color: var(--ad-muted); font-size: 11px; margin-top: 1px;">
+              Claude can only hold so much before each new turn balloons in cost
+            </div>
+          </div>
           <span style="color: var(--ad-muted); font-size: 12px;">
-            threshold: {detail.context_window.threshold}%
+            alert at {detail.context_window.threshold}%
             {#if detail.context_window.would_fire}
-              <span style="color: {kindMeta.hard_ceiling.color}; margin-left: 6px;">(would fire)</span>
+              <span style="color: {kindMeta.hard_ceiling.color}; margin-left: 6px;">(triggers alert)</span>
             {/if}
           </span>
         </header>
+        <p style="margin: 4px 0 10px 0; font-size: 12.5px; line-height: 1.5; color: var(--ad-fg);">
+          {ctxSummary(detail.context_window)}
+        </p>
         <div style="display: flex; gap: 24px; align-items: baseline;">
           <div>
-            <div style="color: var(--ad-muted); font-size: 11px; margin-bottom: 2px;">current</div>
+            <div style="color: var(--ad-muted); font-size: 11px; margin-bottom: 2px;" title="Percent of Claude's context window currently in use by the last reply's prefix.">% used</div>
             <div style="font-family: var(--ad-font-mono); font-size: 22px; color: {detail.context_window.would_fire ? kindMeta.hard_ceiling.color : 'var(--ad-fg)'};">
               {detail.context_window.fill_pct.toFixed(0)}%
             </div>
           </div>
           <div>
-            <div style="color: var(--ad-muted); font-size: 11px; margin-bottom: 2px;">latest prefix</div>
+            <div style="color: var(--ad-muted); font-size: 11px; margin-bottom: 2px;" title="Tokens currently loaded into the prefix vs the model's maximum context window.">tokens used / max</div>
             <div style="font-family: var(--ad-font-mono); font-size: 16px;">{kfmt(detail.context_window.latest_input)} / {kfmt(detail.context_window.context_window)}</div>
           </div>
           <div>
