@@ -1,0 +1,16 @@
+{
+  "name": "clearly_risky",
+  "description": "Fill comfortably inside the risky band (50-74%). Compact-now state; no advisor fires because fill is still below the hard-ceiling and no other trigger condition holds.",
+  "shape": {
+    "context_fill_pct": 60,
+    "assistant_turns": 4,
+    "user_turns": 6,
+    "hidden_per_assistant": 1,
+    "tokens_in_per_turn": 6000,
+    "cache_read_ratio": 0.6,
+    "opening_prompt": "refactor auth module split helper functions improve coverage",
+    "closing_prompt": "refactor auth module split helper functions improve coverage"
+  },
+  "expected_state": "risky",
+  "expected_advisor_fires": false
+}

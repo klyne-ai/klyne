@@ -1,0 +1,16 @@
+{
+  "name": "edge_drifting_lower",
+  "description": "Edge case sitting EXACTLY on the lower drifting threshold (30%). Verifies the inclusive >= threshold behaviour.",
+  "shape": {
+    "context_fill_pct": 30,
+    "assistant_turns": 4,
+    "user_turns": 6,
+    "hidden_per_assistant": 1,
+    "tokens_in_per_turn": 3000,
+    "cache_read_ratio": 0.6,
+    "opening_prompt": "refactor auth module split helper functions improve coverage",
+    "closing_prompt": "refactor auth module split helper functions improve coverage"
+  },
+  "expected_state": "drifting",
+  "expected_advisor_fires": false
+}

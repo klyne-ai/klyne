@@ -1,0 +1,18 @@
+{
+  "name": "rescue_via_failed_commands",
+  "description": "Same command has failed 4 times in the trailing window — the command-failure rescue rule must trip even when fill is low. Advisor stays quiet because none of its triggers care about command failures directly.",
+  "shape": {
+    "context_fill_pct": 25,
+    "assistant_turns": 3,
+    "user_turns": 6,
+    "hidden_per_assistant": 0,
+    "tokens_in_per_turn": 2000,
+    "cache_read_ratio": 0.6,
+    "repeated_failed_command": "npm test",
+    "repeated_failed_command_count": 4,
+    "opening_prompt": "refactor auth module split helper functions improve coverage",
+    "closing_prompt": "refactor auth module split helper functions improve coverage"
+  },
+  "expected_state": "rescue_now",
+  "expected_advisor_fires": false
+}

@@ -1,4 +1,4 @@
-.PHONY: build build-ui dev test vet lint tidy ci clean release release-snapshot proof
+.PHONY: build build-ui dev test vet lint tidy ci clean release release-snapshot proof eval-contexthealth
 
 # Default target. CGO is off because modernc.org/sqlite is pure-Go (spec §5);
 # leaving CGO on with the macOS 26 + Go 1.21 internal linker can produce
@@ -86,3 +86,12 @@ release-snapshot:
 proof:
 	@echo "Running reproducible-proof tests (docs/proof/...)"
 	@GOTOOLCHAIN=auto CGO_ENABLED=0 go test -v -count=1 ./docs/proof/...
+
+# Score the contexthealth classifier + advisor against the labelled
+# fixture dataset under internal/contexthealth/eval/testdata. Read-
+# only: prints accuracy / FPR / FNR / advisor-correctness so a future
+# threshold-tuning PR has a baseline to beat. Exits 0 regardless of
+# the accuracy numbers — the whole point is to see them, not gate on
+# them.
+eval-contexthealth:
+	@GOTOOLCHAIN=auto CGO_ENABLED=0 go run ./cmd/klyne eval contexthealth --fixtures internal/contexthealth/eval/testdata
