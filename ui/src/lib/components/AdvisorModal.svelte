@@ -91,6 +91,13 @@
     return id.length > 8 ? id.slice(0, 8) : id;
   }
 
+  /** filesExpanded — when false the file table caps at FILES_COLLAPSED_LIMIT
+   *  rows and renders an "...and N more (show all)" link below; when true
+   *  every file is rendered. Toggling is purely local UI state; the server
+   *  already returns the full file list. */
+  let filesExpanded = $state(false);
+  const FILES_COLLAPSED_LIMIT = 12;
+
   /** wouldFireNow — true when the LIVE proof for the given trigger
    *  would currently trip it. Returns false when conditions have
    *  changed since the historical fire (e.g. the user's recent
@@ -248,7 +255,7 @@
               </tr>
             </thead>
             <tbody>
-              {#each detail.stale.files.slice(0, 12) as f (f.path)}
+              {#each (filesExpanded ? detail.stale.files : detail.stale.files.slice(0, FILES_COLLAPSED_LIMIT)) as f (f.path)}
                 <tr style="border-top: 1px solid var(--ad-border-soft);">
                   <td style="padding: 4px 8px 4px 0; font-family: var(--ad-font-mono);" title={f.path}>{f.basename}</td>
                   <td style="padding: 4px 8px; text-align: right;">{kfmt(f.bytes)}</td>
@@ -260,10 +267,26 @@
               {/each}
             </tbody>
           </table>
-          {#if detail.stale.files.length > 12}
-            <p style="margin: 6px 0 0; color: var(--ad-muted); font-size: 11px;">
-              …and {detail.stale.files.length - 12} more files.
-            </p>
+          {#if detail.stale.files.length > FILES_COLLAPSED_LIMIT}
+            <button
+              type="button"
+              onclick={() => (filesExpanded = !filesExpanded)}
+              style="
+                margin: 6px 0 0;
+                padding: 0;
+                background: none;
+                border: none;
+                color: var(--ad-muted);
+                font-size: 11px;
+                cursor: pointer;
+                text-decoration: underline;
+                text-underline-offset: 2px;
+              "
+            >
+              {filesExpanded
+                ? 'show fewer files'
+                : `…and ${detail.stale.files.length - FILES_COLLAPSED_LIMIT} more files (show all)`}
+            </button>
           {/if}
         {/if}
       </section>
