@@ -1,4 +1,4 @@
-.PHONY: build build-ui dev test vet lint tidy ci clean release proof
+.PHONY: build build-ui dev test vet lint tidy ci clean release release-snapshot proof
 
 # Default target. CGO is off because modernc.org/sqlite is pure-Go (spec §5);
 # leaving CGO on with the macOS 26 + Go 1.21 internal linker can produce
@@ -61,10 +61,20 @@ ci: vet lint test
 clean:
 	rm -rf bin/ cov.out ui/build/
 
-# Release placeholder — W17 wires goreleaser.
-# goreleaser release --clean
+# Release: orchestrated by .github/workflows/release.yml on a `v*.*.*`
+# tag push. The CI workflow runs `goreleaser release --clean` with the
+# GITHUB_TOKEN + HOMEBREW_TAP_GITHUB_TOKEN secrets in scope.
+#
+# For local testing without publishing, use `release-snapshot` below.
 release:
-	@echo "Release is wired in W17 (goreleaser). Run: goreleaser release --clean"
+	@echo "Release runs in CI on a v*.*.* tag push (see .github/workflows/release.yml)."
+	@echo "For a local dry-run that does not publish, run: make release-snapshot"
+
+# Local dry-run of the release pipeline. Produces artifacts under dist/
+# without pushing anything to GitHub or the Homebrew tap.
+# Requires goreleaser on PATH (https://goreleaser.com/install/).
+release-snapshot:
+	goreleaser release --snapshot --clean
 
 # Run every reproducible-proof test under docs/proof/. Each subdirectory
 # is a self-contained scenario with a fixture + a Go test asserting the
