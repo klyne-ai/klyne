@@ -116,23 +116,63 @@ The MCP server is independent of the daemon. It reads JSONL directly so it works
 
 ## Install
 
+Three ways to get the `klyne` binary onto your machine. Pick one.
+
+### 1. Homebrew (macOS / Linux)
+
 ```bash
-# Build from source (requires Go 1.25+)
+brew install klyne-ai/tap/klyne
+```
+
+This pulls the latest release formula from the [klyne-ai/homebrew-tap](https://github.com/klyne-ai/homebrew-tap) tap.
+
+### 2. One-line install script (macOS / Linux)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/klyne-ai/klyne/init/scripts/install.sh | sh
+```
+
+Detects your OS + arch (darwin/linux × amd64/arm64), pulls the latest release archive from GitHub, verifies the sha256 against `checksums.txt`, and installs to `/usr/local/bin/klyne`.
+
+Environment overrides:
+
+- `KLYNE_VERSION=v0.5.0` — pin a specific release.
+- `PREFIX=$HOME/.local/bin` — install somewhere else (no sudo needed).
+
+### 3. Direct download from GitHub Releases
+
+Grab the archive for your platform from [github.com/klyne-ai/klyne/releases/latest](https://github.com/klyne-ai/klyne/releases/latest):
+
+- `klyne_<version>_darwin_amd64.tar.gz` / `_darwin_arm64.tar.gz`
+- `klyne_<version>_linux_amd64.tar.gz` / `_linux_arm64.tar.gz`
+- `klyne_<version>_windows_amd64.zip`
+
+Verify with `checksums.txt` (sha256), extract, and move the `klyne` binary onto your `PATH`.
+
+### Or build from source
+
+```bash
+# Requires Go 1.25+.
 git clone https://github.com/klyne-ai/klyne && cd klyne
 make build
+# Binary lands at ./bin/klyne with the real git version baked in.
+```
 
+### After install: wire MCP + advisor hook
+
+```bash
 # Register the MCP server AND the proactive-advisor hook in Claude Code
 # (and the MCP server in Codex). Idempotent: safe to re-run on every
 # binary upgrade.
-./bin/klyne mcp install
+klyne mcp install
 
 # Optional: enable the 5-hour-window advisor by selecting your plan tier.
 # Without this, the other three triggers still work — only the
 # 5-hour-window check stays silent.
-./bin/klyne config set plan max-5x   # or pro / max-20x / team / custom
+klyne config set plan max-5x   # or pro / max-20x / team / custom
 
 # Start the daemon + open the web UI
-./bin/klyne
+klyne
 ```
 
 The `mcp install` command auto-detects host configs:
