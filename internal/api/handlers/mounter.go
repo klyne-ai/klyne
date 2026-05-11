@@ -98,4 +98,9 @@ func (m *Mounter) Mount(r chi.Router) {
 
 	hHealth := NewHealthHandler(m.deps.DB)
 	r.Get(api.RouteHealthz, hHealth.Healthz)
+
+	// Optional code-review-graph enrichment — gracefully no-ops when
+	// the upstream tool is not installed for the queried repo.
+	hCodeReview := NewCodeReviewContextHandler()
+	r.Get(api.RouteCodeReviewContext, hCodeReview.Get)
 }
