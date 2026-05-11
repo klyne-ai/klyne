@@ -6,6 +6,8 @@
  */
 
 import type {
+  AdvisoryKind,
+  AdvisoryListResponse,
   BreakAdviceResponse,
   CockpitThreadsResponse,
   CostSummaryQuery,
@@ -207,6 +209,25 @@ export type SearchSort = 'recent' | 'relevance';
 /** GET /search?q=&limit=&sort= — full-text search over messages. */
 export async function search(q: string, limit?: number, sort: SearchSort = 'recent'): Promise<SearchResponse> {
   return get<SearchResponse>('/search', { q, limit, sort });
+}
+
+// ---------------------------------------------------------------------------
+// /advisories
+// ---------------------------------------------------------------------------
+
+/** Optional filter for fetchAdvisories — by trigger kind. */
+export interface AdvisoriesQuery {
+  limit?: number;
+  kind?: AdvisoryKind;
+}
+
+/** GET /advisories — every klyne advisor message ingested into the index,
+ * newest first. Pass `kind` to filter by trigger type. */
+export async function fetchAdvisories(opts: AdvisoriesQuery = {}): Promise<AdvisoryListResponse> {
+  return get<AdvisoryListResponse>('/advisories', {
+    limit: opts.limit,
+    kind: opts.kind
+  });
 }
 
 // ---------------------------------------------------------------------------

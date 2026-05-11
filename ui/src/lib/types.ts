@@ -257,6 +257,33 @@ export interface SearchResponse {
   took_ms: number;
 }
 
+// --- /advisories ---
+
+/** AdvisoryKind identifies which klyne advisor trigger fired. */
+export type AdvisoryKind =
+  | 'stale'
+  | 'acceleration'
+  | 'hard_ceiling'
+  | 'window_50'
+  | 'window_75'
+  | 'unknown';
+
+/** AdvisoryRow is one rendered advisory across all klyne-monitored sessions. */
+export interface AdvisoryRow {
+  message_id: string;
+  session_id: string;
+  cli: CLI | '';
+  project_path: string;
+  kind: AdvisoryKind;
+  content: string;
+  ts: number;
+}
+
+/** AdvisoryListResponse is GET /advisories. */
+export interface AdvisoryListResponse {
+  advisories: AdvisoryRow[];
+}
+
 // --- /cost/summary ---
 
 /** CostGroup enumerates the supported group-by axes. */

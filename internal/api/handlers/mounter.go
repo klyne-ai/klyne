@@ -86,6 +86,9 @@ func (m *Mounter) Mount(r chi.Router) {
 	hCockpit := NewCockpitHandler(m.deps.DB)
 	r.Get(api.RouteCockpitThreads, hCockpit.Threads)
 
+	hAdvisories := NewAdvisoriesHandler(m.deps.DB)
+	r.Get(api.RouteAdvisories, hAdvisories.List)
+
 	hSettings := NewSettingsHandler(m.deps.Cfg, logger)
 	r.Get(api.RouteSettings, hSettings.Get)
 	r.Put(api.RouteSettings, hSettings.Put)

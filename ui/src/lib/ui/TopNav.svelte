@@ -14,6 +14,7 @@
     { id: 'dashboard', label: 'Dashboard', path: '/' },
     { id: 'cockpit',   label: 'Cockpit',   path: '/cockpit' },
     { id: 'projects',  label: 'Projects',  path: '/projects' },
+    { id: 'advisors',  label: 'Advisors',  path: '/advisors' },
     { id: 'search',    label: 'Search',    path: '/search' },
   ];
 
@@ -26,6 +27,7 @@
     if (pathname === '/') return 'dashboard';
     if (pathname.startsWith('/cockpit')) return 'cockpit';
     if (pathname.startsWith('/projects')) return 'projects';
+    if (pathname.startsWith('/advisors')) return 'advisors';
     if (pathname.startsWith('/search')) return 'search';
     if (pathname.startsWith('/settings')) return 'settings';
     if (pathname.startsWith('/wizard')) return 'wizard';

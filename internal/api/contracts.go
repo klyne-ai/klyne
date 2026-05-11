@@ -37,6 +37,7 @@ const (
 	RouteCostSummary         = "/cost/summary"
 	RouteUsage               = "/usage"
 	RouteCockpitThreads      = "/cockpit/threads"
+	RouteAdvisories          = "/advisories"
 	RouteSettings            = "/settings"
 	RouteWizardDetect        = "/wizard/detect"
 	RouteWizardComplete      = "/wizard/complete"
@@ -60,6 +61,7 @@ func AllRoutes() []string {
 		RouteCostSummary,
 		RouteUsage,
 		RouteCockpitThreads,
+		RouteAdvisories,
 		RouteSettings,
 		RouteWizardDetect,
 		RouteWizardComplete,
@@ -461,6 +463,52 @@ type CockpitThread struct {
 // CockpitThreadsResponse is GET /cockpit/threads.
 type CockpitThreadsResponse struct {
 	Threads []CockpitThread `json:"threads"`
+}
+
+// ---------------------------------------------------------------------------
+// /advisories
+// ---------------------------------------------------------------------------
+
+// AdvisoryKind names which klyne advisor trigger produced the row.
+// Strings match the on-disk transition-state names so a future surface
+// that wants to cross-reference can use them directly.
+type AdvisoryKind string
+
+const (
+	// AdvisoryKindStale is the relevance-drift trigger.
+	AdvisoryKindStale AdvisoryKind = "stale"
+	// AdvisoryKindAcceleration is the per-turn uncached doubling.
+	AdvisoryKindAcceleration AdvisoryKind = "acceleration"
+	// AdvisoryKindHardCeiling is the >=75% context-fill warning.
+	AdvisoryKindHardCeiling AdvisoryKind = "hard_ceiling"
+	// AdvisoryKindFiveHourWarn is the 50% rate-limit warning.
+	AdvisoryKindFiveHourWarn AdvisoryKind = "window_50"
+	// AdvisoryKindFiveHourUrgent is the 75% rate-limit warning.
+	AdvisoryKindFiveHourUrgent AdvisoryKind = "window_75"
+	// AdvisoryKindUnknown is the fallback when the text doesn't match
+	// any recognised trigger pattern. Surfaces as a real row so a
+	// future hook can add advisories without UI breakage.
+	AdvisoryKindUnknown AdvisoryKind = "unknown"
+)
+
+// AdvisoryRow is one rendered advisory across any klyne-monitored
+// session. The Markdown content is exactly what the hook injected
+// into chat — preserving punctuation, percentages, file names — so
+// the cockpit can render it verbatim.
+type AdvisoryRow struct {
+	MessageID   string       `json:"message_id"`
+	SessionID   string       `json:"session_id"`
+	CLI         string       `json:"cli"`
+	ProjectPath string       `json:"project_path"`
+	Kind        AdvisoryKind `json:"kind"`
+	Content     string       `json:"content"`
+	TS          int64        `json:"ts"`
+}
+
+// AdvisoryListResponse is GET /advisories — the cockpit's "every
+// advisory klyne has ever fired" feed. Newest first.
+type AdvisoryListResponse struct {
+	Advisories []AdvisoryRow `json:"advisories"`
 }
 
 // ---------------------------------------------------------------------------
