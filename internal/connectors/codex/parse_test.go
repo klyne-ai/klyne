@@ -15,14 +15,14 @@ const fakePath = "/home/dev/.codex/sessions/2026/05/06/rollout-abc.jsonl"
 
 // realFixtureFilePath returns the absolute path to the sanitized real-format fixture.
 // go test sets the working directory to the package directory
-// (.../agentdeck/internal/connectors/codex), so 3 levels up reaches the repo root.
+// (.../klyne/internal/connectors/codex), so 3 levels up reaches the repo root.
 func realFixtureFilePath(t *testing.T) string {
 	t.Helper()
 	wd, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("cannot get working directory: %v", err)
 	}
-	// wd = .../agentdeck/internal/connectors/codex
+	// wd = .../klyne/internal/connectors/codex
 	// repo root = 3 levels up
 	p := filepath.Join(wd, "..", "..", "..", "examples", "sample-jsonl", "codex", "session-real-001.jsonl")
 	return filepath.Clean(p)

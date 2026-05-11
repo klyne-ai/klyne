@@ -24,7 +24,7 @@ import (
 //
 // The 1-hour idle test can be run manually:
 //
-//	AGENTDECK_IDLE_SECONDS=3600 go test -run TestIdleRAM ./internal/bench/...
+//	KLYNE_IDLE_SECONDS=3600 go test -run TestIdleRAM ./internal/bench/...
 //
 // This test runs only on darwin and linux (OS-gated) where MemStats is
 // representative. Windows is skipped because VirtualAlloc differs from
