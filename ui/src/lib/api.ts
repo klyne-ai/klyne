@@ -26,6 +26,8 @@ import type {
   SettingsUpdateRequest,
   SummaryResponse,
   UsageResponse,
+  UsageStatsQuery,
+  UsageStatsResponse,
   WizardDetectResponse
 } from './types.js';
 
@@ -257,6 +259,21 @@ export async function fetchCostSummary(opts: CostSummaryQuery): Promise<CostSumm
 /** GET /usage — rolling 5h, 7d, and 7d-Sonnet token aggregates per CLI. */
 export async function fetchUsage(): Promise<UsageResponse> {
   return get<UsageResponse>('/usage');
+}
+
+// ---------------------------------------------------------------------------
+// /usage/stats — tokscale-inspired cross-session aggregates
+// ---------------------------------------------------------------------------
+
+/** GET /usage/stats — Overview / Daily / Stats / Models data for the
+ *  dashboard's Stats page. Default lookback is 30 days; heatmap covers
+ *  the last 12 weeks. Pass cli='claude' | 'codex' to scope. */
+export async function fetchUsageStats(opts: UsageStatsQuery = {}): Promise<UsageStatsResponse> {
+  return get<UsageStatsResponse>('/usage/stats', {
+    cli: opts.cli || undefined,
+    days: opts.days,
+    heatmap_weeks: opts.heatmap_weeks
+  });
 }
 
 // ---------------------------------------------------------------------------

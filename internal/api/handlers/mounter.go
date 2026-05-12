@@ -66,6 +66,9 @@ func (m *Mounter) Mount(r chi.Router) {
 	hUsage := NewUsageHandler(m.deps.DB, logger)
 	r.Get(api.RouteUsage, hUsage.Get)
 
+	hUsageStats := NewUsageStatsHandler(m.deps.DB, m.deps.Cost)
+	r.Get(api.RouteUsageStats, hUsageStats.Get)
+
 	// Session-scoped usage projection — same calibration data sources
 	// as /usage so the percentages line up with the dashboard badge.
 	hSessionUsage := NewSessionUsageHandler(SessionUsageDeps{

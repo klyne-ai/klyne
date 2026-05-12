@@ -620,3 +620,71 @@ export interface CostSummaryQuery {
   since?: number;
   until?: number;
 }
+
+// ---------------------------------------------------------------------------
+// /usage/stats — tokscale-inspired cross-session aggregates
+// ---------------------------------------------------------------------------
+
+export interface UsageStatsQuery {
+  /** "claude" or "codex". Both when blank. */
+  cli?: CLI | '';
+  /** Lookback in days. Default 30. Server clamps to [1, 365]. */
+  days?: number;
+  /** Heatmap span in weeks. 0 disables. Default 12. Server clamps to [0, 52]. */
+  heatmap_weeks?: number;
+}
+
+export interface DailyRow {
+  date: string;
+  day_start_ms: number;
+  input: number;
+  output: number;
+  cache_read: number;
+  cache_write: number;
+  total: number;
+  cost_usd: number;
+  messages: number;
+}
+
+export interface ModelRow {
+  model: string;
+  input: number;
+  output: number;
+  cache_read: number;
+  cache_write: number;
+  total: number;
+  cost_usd: number;
+  sessions: number;
+  share_pct: number;
+}
+
+export interface HeatmapCell {
+  date: string;
+  /** 0 = Sunday, 6 = Saturday. */
+  weekday: number;
+  messages: number;
+  /** 0 (none) .. 4 (max). */
+  intensity: number;
+}
+
+export interface UsageStatsResponse {
+  from: string;
+  to: string;
+  total_messages: number;
+  total_sessions: number;
+  total_input: number;
+  total_output: number;
+  total_cache_read: number;
+  total_cache_write: number;
+  total_cost_usd: number;
+  favorite_model: string;
+  peak_hour: number;
+  peak_hour_local: string;
+  current_streak: number;
+  longest_streak: number;
+  active_days: number;
+  window_days: number;
+  daily: DailyRow[];
+  models: ModelRow[];
+  heatmap?: HeatmapCell[];
+}

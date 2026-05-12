@@ -334,6 +334,17 @@ func formatTokenTimelineAsMarkdown(out TokenTimelineOutput) string {
 	}
 	b.WriteString("\n")
 
+	// Hour-of-day heatmap (tokscale-inspired). Bucket every assistant
+	// turn into a (date, hour) cell and render with Unicode block
+	// characters. Sessions in a single day collapse to a 24-cell row;
+	// multi-day sessions get one row per day. Skipped entirely when
+	// the session has only a handful of turns — the resolution is
+	// not useful below ~6 buckets.
+	if heatmap := renderSessionHeatmap(out.Points, loc, tzName); heatmap != "" {
+		b.WriteString(heatmap)
+		b.WriteString("\n")
+	}
+
 	// Bottom line. Final amount + context-window percentage,
 	// anchored to the timestamp of the latest data point so the
 	// reader knows whether "now" means right now or two hours ago.
