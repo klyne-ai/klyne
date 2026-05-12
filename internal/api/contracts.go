@@ -40,6 +40,7 @@ const (
 	RouteSearch              = "/search"
 	RouteCostSummary         = "/cost/summary"
 	RouteUsage               = "/usage"
+	RouteUsageStats          = "/usage/stats"
 	RouteCockpitThreads      = "/cockpit/threads"
 	RouteAdvisories          = "/advisories"
 	RouteSessionAdvisorDetail = "/sessions/{id}/advisor-detail"
@@ -67,6 +68,7 @@ func AllRoutes() []string {
 		RouteSearch,
 		RouteCostSummary,
 		RouteUsage,
+		RouteUsageStats,
 		RouteCockpitThreads,
 		RouteAdvisories,
 		RouteSessionAdvisorDetail,

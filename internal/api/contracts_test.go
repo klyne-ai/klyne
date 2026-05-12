@@ -41,6 +41,7 @@ func TestAllRoutesContainsExpected(t *testing.T) {
 		RouteSearch,
 		RouteCostSummary,
 		RouteUsage,
+		RouteUsageStats,
 		RouteCockpitThreads,
 		RouteAdvisories,
 		RouteSessionAdvisorDetail,
