@@ -40,6 +40,7 @@ func TestMigrationsApply(t *testing.T) {
 		"006_deleted_sessions.sql",      // soft-delete tombstones
 		"007_zero_costs.sql",            // backfill cost=0 for flat-subscription DTO compat
 		"008_message_branch_cwd.sql",    // git_branch + cwd on messages for cockpit splits
+		"009_decisions.sql",             // decisions log (project-scoped persistent notes)
 	}
 	if len(sqlFiles) != len(expected) {
 		t.Fatalf("expected %d migrations, found %d: %v", len(expected), len(sqlFiles), sqlFiles)

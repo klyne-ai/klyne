@@ -198,6 +198,9 @@ Pass `--platform claude` or `--platform codex` to scope the install.
 | `generate_handoff` | Deterministic Markdown handoff prompt for fresh sessions; optional `scope=current-topic` carries forward only relevant files | When you've hit your rate-limit and need to start over |
 | `get_pre_compact_context` | Recovers messages preceding the last `/compact` (Claude) or `replacement_history` (Codex) | When the compact summary lost important details |
 | `get_token_timeline` | Per-turn token usage for one session — sparkline + table with `time / input / % of context / cached / uncached` columns. Spans the entire session by default; pass `window=30m` / `window=5h` / `window=2h30m` to narrow. | "How much of my context window have I burned, and how did it grow?" |
+| `record_decision` | Persist a short, immutable decision pinned to the current project so it survives across sessions | When the user states a load-bearing choice ("we picked X because…") that future sessions should remember |
+| `list_decisions` | Return recently-recorded decisions, scoped to the current project by default | When starting a new task — recall prior choices to avoid re-litigating them |
+| `search_decisions` | Substring-search recorded decisions by text (case-insensitive) | "Did we decide anything about Y?" — find pinned decisions by keyword |
 
 ### Slash prompts (user-triggered via `/` menu in Claude Code)
 
@@ -247,6 +250,11 @@ For Codex sessions, `pre_tokens` and `trigger` (manual/auto) fields are not expo
 | `klyne top [--project=PATH] [--since=24h] [--limit=N] [--json]` | Tool-usage rankings across sessions — most-called tool, share of total, error count, sessions seen in. |
 | `klyne patterns [--kind=tight_loop\|bash_overuse\|low_cache_reuse] [--json]` | Deterministic inefficiency detection: same-tool loops, Bash overuse, low cache reuse — with severity. |
 | `klyne roast [--max=N] [--json]` | Templated, deterministic zingers about your usage. No AI calls — every line is interpolated from real numbers in your local DB. |
+| `klyne statusline [--format=short\|mini\|plain]` | One-line summary intended for Claude Code's `statusLine` settings hook. Compact, never errors, exits 0 even on missing state. |
+| `klyne files [--project=PATH] [--since=24h] [--mutated-only] [--json]` | Per-file usage heatmap. Walks tool-call inputs across sessions and ranks files by Reads / Edits / Writes / Sessions. |
+| `klyne decisions add\|list\|search\|delete` | Project-scoped decisions log. Persists short, immutable notes (`add`), recalls them (`list` / `search`), removes one (`delete`). Same data the `record_decision` MCP tool writes. |
+| `klyne subagents [--since=24h] [--json]` | Roll up Task-tool subagent transcripts back to the parent session. Surfaces the hidden cost of Task-spawned subagents that the parent's `cost_usd` does not include. |
+| `klyne otel emit [--out=PATH] [--since=24h]` | Emit one OTel-shaped JSON span per assistant message turn. Opt-in, file-only — no daemon-side push. Each span carries `gen_ai.*` attributes per the OTel GenAI WG draft. |
 
 The three analytics commands (`top`, `patterns`, `roast`) are inspired by [claudestat](https://github.com/DeibyGS/claudestat). They re-use klyne's existing SQLite store — read-only, deterministic, zero network traffic.
 
