@@ -52,6 +52,10 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newConfigCmd())
 	root.AddCommand(newTokensCmd())
 	root.AddCommand(newEvalCmd())
+	// claudestat-inspired analytics — read-only, no AI calls.
+	root.AddCommand(newTopCmd())
+	root.AddCommand(newPatternsCmd())
+	root.AddCommand(newRoastCmd())
 	return root
 }
 
