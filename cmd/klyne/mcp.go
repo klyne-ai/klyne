@@ -142,6 +142,19 @@ func runMcpInstall(cmd *cobra.Command, platformFlag string) error {
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "advisor: %s — %s\n",
 			report.Action, report.Path)
+
+		// Unpack the bundled markdown slash commands under
+		// ~/.claude/commands/klyne/. Claude Code surfaces these as
+		// /klyne:<name> in every project on the host — independent
+		// of the MCP-prompt path, which has a v2.1.x bug that drops
+		// no-arg server prompts in the slash UI.
+		slashReport, err := mcpserver.InstallSlashCommands()
+		if err != nil {
+			return fmt.Errorf("install slash commands: %w", err)
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "slash commands: %s — %d files in %s\n",
+			slashReport.Action, slashReport.Files, slashReport.Dir)
+
 		fmt.Fprintln(cmd.OutOrStdout(),
 			"klyne: advisor active — you'll see inline warnings in Claude Code when sessions drift, accelerate, or approach your 5-hour cap.")
 		fmt.Fprintln(cmd.OutOrStdout(),

@@ -115,6 +115,12 @@ type FileRelevance struct {
 	// < relevanceThreshold) NOR recently touched. Files actively
 	// in use are never stale regardless of vocab overlap.
 	Stale bool
+	// LastTouchTs is the epoch-millisecond timestamp of the most
+	// recent Read or Edit message attributed to this file. Zero
+	// means the touch message had no timestamp (defensive — every
+	// real touch has one). Surfaced so the UI can show "last
+	// touched 5m ago" alongside the relevance score.
+	LastTouchTs int64
 }
 
 // RelevanceVerdict is the aggregate result of ScoreFiles. Ready to
@@ -186,11 +192,13 @@ func ScoreFiles(msgs []*connectors.Message) RelevanceVerdict {
 				accum := getOrInitFile(files, path)
 				mergeAnchor(accum.anchor, anchorBagAt(msgs, i))
 				accum.lastTouchIdx = i
+				accum.lastTouchTs = m.Ts
 			case isFileEditTool(tc.Name):
 				calls[tc.ID] = callMeta{path: path, isEdit: true}
 				accum := getOrInitFile(files, path)
 				mergeAnchor(accum.anchor, anchorBagAt(msgs, i))
 				accum.lastTouchIdx = i
+				accum.lastTouchTs = m.Ts
 				// Edit payload bytes come straight from the call's
 				// input (same accounting as computeBloat).
 				accum.bytes += editPayloadBytes(tc.Input)
@@ -233,10 +241,11 @@ func ScoreFiles(msgs []*connectors.Message) RelevanceVerdict {
 			score = 1.0
 		}
 		row := FileRelevance{
-			Path:  path,
-			Score: score,
-			Bytes: accum.bytes,
-			Stale: stale,
+			Path:        path,
+			Score:       score,
+			Bytes:       accum.bytes,
+			Stale:       stale,
+			LastTouchTs: accum.lastTouchTs,
 		}
 		rows = append(rows, row)
 		totalBytes += accum.bytes
@@ -291,6 +300,11 @@ type fileAccum struct {
 	// touched" — every file in the map has been touched at least
 	// once by construction.
 	lastTouchIdx int
+	// lastTouchTs is the epoch-millisecond timestamp of the touch
+	// message at lastTouchIdx. Mirrors lastTouchIdx but in
+	// wall-clock terms so the proof DTO can render "5m ago" without
+	// needing the index → message lookup outside this package.
+	lastTouchTs int64
 }
 
 // anchorBagAt returns the bag-of-words for user messages in the

@@ -116,4 +116,17 @@ func (m *Mounter) Mount(r chi.Router) {
 	// the upstream tool is not installed for the queried repo.
 	hCodeReview := NewCodeReviewContextHandler()
 	r.Get(api.RouteCodeReviewContext, hCodeReview.Get)
+
+	// /memory — the dashboard's grouped-by-service view over the
+	// decisions table. Read-only list + per-id delete; writes go
+	// through the MCP `remember` tool (or the CLI).
+	hMemory := NewMemoryHandler(m.deps.DB)
+	r.Get(api.RouteMemory, hMemory.List)
+	r.Delete(api.RouteMemoryItem, hMemory.Delete)
+
+	// /insights/projects — per-project rollup powering the Insights
+	// dashboard. Reads from sessions + messages + compact_events; no
+	// dollar figures (subscription users don't pay per-token).
+	hInsights := NewProjectInsightsHandler(m.deps.DB)
+	r.Get(api.RouteInsightsProjects, hInsights.Get)
 }

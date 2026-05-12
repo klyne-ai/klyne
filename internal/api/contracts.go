@@ -19,6 +19,7 @@ package api
 import (
 	"github.com/klyne-ai/klyne/internal/connectors"
 	"github.com/klyne-ai/klyne/internal/connectors/codereviewgraph"
+	"github.com/klyne-ai/klyne/internal/store"
 )
 
 // ---------------------------------------------------------------------------
@@ -50,6 +51,16 @@ const (
 	RouteEvents              = "/events"
 	RouteHealthz             = "/healthz"
 	RouteCodeReviewContext   = "/code-review-context"
+	// Memory: SPA page lives at `/memory`, so the API uses a
+	// /memory/items[/{id}] subpath to avoid colliding with the SPA
+	// route (same pattern as /cockpit/threads and /usage/stats).
+	RouteMemory              = "/memory/items"
+	RouteMemoryItem          = "/memory/items/{id}"
+	// Insights: per-project rollup powering the Insights dashboard.
+	// Returns one rich record per project with agent split, cache hit %,
+	// efficiency, /compact pain signal, top sessions, daily sparkline,
+	// and trend vs the prior-period window of equal duration.
+	RouteInsightsProjects    = "/insights/projects"
 )
 
 // AllRoutes returns the canonical, ordered list of every HTTP path
@@ -78,6 +89,9 @@ func AllRoutes() []string {
 		RouteEvents,
 		RouteHealthz,
 		RouteCodeReviewContext,
+		RouteMemory,
+		RouteMemoryItem,
+		RouteInsightsProjects,
 	}
 }
 
@@ -604,11 +618,16 @@ type AdvisoryListResponse struct {
 // the stale-context advisor's claim by naming exact paths plus
 // their per-file relevance score.
 type FileRelevanceProof struct {
-	Path      string  `json:"path"`
-	Basename  string  `json:"basename"`
-	Bytes     int     `json:"bytes"`
-	Score     float64 `json:"score"`
-	Stale     bool    `json:"stale"`
+	Path     string  `json:"path"`
+	Basename string  `json:"basename"`
+	Bytes    int     `json:"bytes"`
+	Score    float64 `json:"score"`
+	Stale    bool    `json:"stale"`
+	// LastTouchTs is the epoch-millisecond timestamp of the most
+	// recent Read or Edit message attributed to this file. Zero is
+	// possible when the underlying touch message had no timestamp
+	// (defensive); the UI renders it as "—" in that case.
+	LastTouchTs int64 `json:"last_touch_ts"`
 }
 
 // StaleProof bundles the relevance scorer's outputs in a shape the
@@ -716,4 +735,179 @@ type CodeReviewContextResponse struct {
 	RecentBlockers []codereviewgraph.Blocker `json:"recent_blockers"`
 	// FrequentReviewers is the de-duped reviewer-handle list.
 	FrequentReviewers []string `json:"frequent_reviewers"`
+}
+
+// ---------------------------------------------------------------------------
+// /memory  — user-facing facade over the decisions table
+// ---------------------------------------------------------------------------
+
+// MemoryProjectGroup is one bucket in MemoryResponse.ByProject —
+// every memory recorded under the same project_path, grouped together
+// for the dashboard's per-service view.
+type MemoryProjectGroup struct {
+	// ProjectPath is the absolute project root (e.g.
+	// "/Users/mohitpatel/Desktop/Learning/consultation-service").
+	ProjectPath string `json:"project_path"`
+	// Name is the last path segment of ProjectPath — the human-
+	// readable "service" label used as the group heading.
+	Name string `json:"name"`
+	// Memories are the rows scoped to this project, newest first.
+	Memories []store.Decision `json:"memories"`
+	// Count mirrors len(Memories) for JSON consumers.
+	Count int `json:"count"`
+}
+
+// MemoryResponse is GET /memory. Splits memories into one "global"
+// list (project_path == "") and one group per project. Mirrors the
+// MCP `recall` tool's output shape but expanded across every project
+// for the dashboard view.
+type MemoryResponse struct {
+	// Global is every memory with project_path == "" (applies
+	// everywhere). Newest first.
+	Global []store.Decision `json:"global"`
+	// ByProject is one bucket per distinct project_path, sorted by
+	// most-recent-activity DESC.
+	ByProject []MemoryProjectGroup `json:"by_project"`
+	// Totals — pre-computed so the UI doesn't need to re-iterate.
+	GlobalCount  int `json:"global_count"`
+	ProjectCount int `json:"project_count"` // distinct projects with ≥ 1 memory
+	Total        int `json:"total"`         // grand total of memories
+}
+
+// ---------------------------------------------------------------------------
+// /insights/projects — per-project rollup for the Insights dashboard
+// ---------------------------------------------------------------------------
+
+// AgentSlice carries one CLI's contribution within a project bucket.
+// Always populated (zero-valued when the project has no activity for
+// that CLI in the window) so the UI can render a stacked bar without
+// nil-check branching.
+type AgentSlice struct {
+	// Tokens is tokens_in + tokens_out for this CLI within the window.
+	Tokens int64 `json:"tokens"`
+	// TokensIn / TokensOut are exposed separately so the UI can compute
+	// cache and efficiency ratios per-agent if it ever wants to.
+	TokensIn  int64 `json:"tokens_in"`
+	TokensOut int64 `json:"tokens_out"`
+	Messages  int64 `json:"messages"`
+	Sessions  int64 `json:"sessions"`
+}
+
+// DailyPoint is one day-bucket on the per-project activity sparkline.
+// Day is an ISO-8601 calendar day in UTC (e.g. "2026-05-12").
+type DailyPoint struct {
+	Day    string `json:"day"`
+	Tokens int64  `json:"tokens"`
+}
+
+// TopSession is one of the heaviest sessions inside a project bucket —
+// the drill-down target the user clicks to answer "which session ate
+// the tokens here?". Always tokens_in + tokens_out for the session row.
+type TopSession struct {
+	SessionID string `json:"session_id"`
+	CLI       string `json:"cli"`
+	Model     string `json:"model"`
+	Tokens    int64  `json:"tokens"`
+	Messages  int64  `json:"messages"`
+	LastMsgAt int64  `json:"last_msg_at"`
+}
+
+// ProjectInsight is one fully-enriched row of the Insights dashboard.
+// Everything the UI needs to render the project row + expanded panel
+// without a follow-up round-trip.
+//
+// Subscription-aware design note: this DTO deliberately does NOT carry
+// dollar costs. Klyne users are on flat plans; raw $ figures don't
+// match the bill and create more confusion than insight. The
+// "weight" of a project is conveyed via share-of-total and the trend
+// vs prior window instead.
+type ProjectInsight struct {
+	// ProjectPath is the absolute path used as the stable key. Empty
+	// string is the catch-all "(unknown)" bucket for sessions without
+	// a resolved project_path.
+	ProjectPath string `json:"project_path"`
+	// Name is the last path segment of ProjectPath — the human-readable
+	// label used for the row heading.
+	Name string `json:"name"`
+
+	// Tokens is tokens_in + tokens_out within the window. The primary
+	// sort key when the UI sorts by tokens.
+	Tokens    int64 `json:"tokens"`
+	TokensIn  int64 `json:"tokens_in"`
+	TokensOut int64 `json:"tokens_out"`
+	// Messages and Sessions counts within the window.
+	Messages int64 `json:"messages"`
+	Sessions int64 `json:"sessions"`
+	// LastMsgAt is the most-recent session activity within the window
+	// (epoch-ms). Zero when the project has no sessions in the window.
+	LastMsgAt int64 `json:"last_msg_at"`
+
+	// Per-CLI breakdown. Always both present (zero when absent) so the
+	// UI can render the stacked bar without a presence check.
+	Claude AgentSlice `json:"claude"`
+	Codex  AgentSlice `json:"codex"`
+
+	// CachedReadTokens is the prompt-cache prefix served during the
+	// window. CacheHitPct = CachedReadTokens / TokensIn * 100; zero
+	// when TokensIn is zero. Low cache-hit % is the closest available
+	// "wasted effort" signal under flat-rate subscriptions.
+	CachedReadTokens int64   `json:"cached_read_tokens"`
+	CacheHitPct      float64 `json:"cache_hit_pct"`
+
+	// TokensPerMessage = Tokens / Messages; zero when Messages is zero.
+	// High values flag context-bloated projects regardless of plan tier.
+	TokensPerMessage float64 `json:"tokens_per_message"`
+
+	// CompactCount is the number of /compact events the project's
+	// sessions hit within the window — a pain signal (compact = the
+	// user ran out of context room).
+	CompactCount int64 `json:"compact_count"`
+
+	// PriorTokens is the same Tokens metric computed over the prior
+	// window of equal duration. TrendPct = (Tokens-PriorTokens) /
+	// PriorTokens * 100; zero when PriorTokens is zero AND Tokens is
+	// zero, or +100*Tokens when PriorTokens is zero and Tokens > 0
+	// (encoded as the largest meaningful jump for the UI to flag).
+	PriorTokens int64   `json:"prior_tokens"`
+	TrendPct    float64 `json:"trend_pct"`
+
+	// Daily is the per-day token sparkline for the window, oldest
+	// first. Empty when there is no activity. Days with zero tokens
+	// are omitted (the UI can fill gaps if it wants a continuous axis).
+	Daily []DailyPoint `json:"daily"`
+
+	// TopSessions are the heaviest sessions in this project within
+	// the window, tokens DESC, capped at 3. Empty when the project
+	// has no sessions in the window.
+	TopSessions []TopSession `json:"top_sessions"`
+}
+
+// ProjectInsightsResponse is GET /insights/projects.
+//
+// Query params:
+//   - since int64   epoch-ms lower bound (default 0 = all time)
+//   - until int64   epoch-ms upper bound (default 0 = "now")
+//   - top   int     # of top sessions to attach per project (default 3,
+//                   max 10). Zero disables the drill-down.
+//
+// The prior-window comparison reuses the same duration as
+// [Since, Until], shifted left by exactly that duration. When Since==0
+// the prior window is empty (no comparable past), TrendPct is 0, and
+// PriorTokens is 0 for every project.
+type ProjectInsightsResponse struct {
+	Since      int64 `json:"since"`
+	Until      int64 `json:"until"`
+	PriorSince int64 `json:"prior_since"`
+	PriorUntil int64 `json:"prior_until"`
+
+	// Projects ordered by Tokens DESC. The first entry is the "top
+	// project" headline the UI surfaces above the list.
+	Projects []ProjectInsight `json:"projects"`
+
+	// Totals aggregates every Projects row for the current window.
+	// Name is "total". Daily / TopSessions are intentionally nil here —
+	// the per-project rows already carry that detail, and aggregating
+	// them at this level would just duplicate work the UI never
+	// requested.
+	Totals ProjectInsight `json:"totals"`
 }

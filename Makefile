@@ -1,9 +1,14 @@
 .PHONY: build build-ui dev test vet lint tidy ci clean release release-snapshot proof eval-contexthealth
 
-# Default target. CGO is off because modernc.org/sqlite is pure-Go (spec §5);
-# leaving CGO on with the macOS 26 + Go 1.21 internal linker can produce
-# binaries dyld rejects ("missing LC_UUID load command"). Bump to Go 1.23+
-# and drop this flag once the toolchain catches up to the spec.
+# Default target.
+#
+# CGO is off because modernc.org/sqlite is pure-Go — keeping CGO_ENABLED=0
+# means the binary is statically linked and portable across glibc/musl, and
+# avoids the macOS internal-linker quirks older Go toolchains hit on sqlite.
+#
+# GOTOOLCHAIN=auto lets `go` fetch the version required by go.mod (currently
+# 1.25) when the locally-installed Go is older. Use GOTOOLCHAIN=local in
+# your shell if you want to force the host toolchain.
 #
 # VERSION is injected via -ldflags so `klyne doctor` / `klyne --version`
 # reports the commit the binary was built from. Plain `go build` (without
@@ -11,7 +16,7 @@
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
 build: build-ui
-	GOTOOLCHAIN=local CGO_ENABLED=0 go build -ldflags "-X main.version=$(VERSION)" -o bin/klyne ./cmd/klyne
+	GOTOOLCHAIN=auto CGO_ENABLED=0 go build -ldflags "-X main.version=$(VERSION)" -o bin/klyne ./cmd/klyne
 
 # Build the SvelteKit UI if ui/package.json exists.
 # The UI build output is embedded via embed.FS (ui/build/).
@@ -32,13 +37,13 @@ dev:
 	@echo "  cd ui && npm run dev"
 
 # Run all Go tests with race detector and coverage output.
-# CGO_ENABLED=0: see comment on the build target.
+# CGO_ENABLED=0 + GOTOOLCHAIN=auto: see comment on the build target.
 test:
-	GOTOOLCHAIN=local CGO_ENABLED=0 go test ./... -race -coverprofile=cov.out
+	GOTOOLCHAIN=auto CGO_ENABLED=0 go test ./... -race -coverprofile=cov.out
 
 # Run go vet.
 vet:
-	GOTOOLCHAIN=local CGO_ENABLED=0 go vet ./...
+	GOTOOLCHAIN=auto CGO_ENABLED=0 go vet ./...
 
 # Run golangci-lint.
 # Requires golangci-lint to be installed: https://golangci-lint.run/usage/install/
@@ -47,7 +52,7 @@ lint:
 
 # Tidy go.mod and go.sum.
 tidy:
-	GOTOOLCHAIN=local go mod tidy
+	GOTOOLCHAIN=auto go mod tidy
 
 # Full CI check: vet, lint, test, and optionally UI checks.
 ci: vet lint test

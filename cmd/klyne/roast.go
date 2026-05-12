@@ -90,7 +90,16 @@ func runRoast(cmd *cobra.Command, sinceStr string, max int, outputJSON bool) err
 		})
 	}
 
-	fmt.Fprintf(cmd.OutOrStdout(), "klyne roast — %d sessions, $%.2f total\n\n", in.SessionCount, in.TotalCostUSD)
+	// CostUSD on the per-session aggregate has been zero for flat-
+	// subscription users since /cost/summary was repurposed to activity
+	// rollups (see internal/api/handlers/cost.go). Hide the dollar amount
+	// from the header when it would print "$0.00 total" — that line was
+	// noise, not a number anyone wants to see.
+	if in.TotalCostUSD > 0 {
+		fmt.Fprintf(cmd.OutOrStdout(), "klyne roast — %d sessions, $%.2f total\n\n", in.SessionCount, in.TotalCostUSD)
+	} else {
+		fmt.Fprintf(cmd.OutOrStdout(), "klyne roast — %d sessions\n\n", in.SessionCount)
+	}
 	for i, r := range roasts {
 		fmt.Fprintf(cmd.OutOrStdout(), "%d. %s\n", i+1, r.Line)
 	}

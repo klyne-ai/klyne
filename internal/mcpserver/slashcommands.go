@@ -18,11 +18,11 @@ import (
 // reliable mechanism. Each command is a thin wrapper that instructs
 // the AI to invoke the matching klyne MCP tool.
 //
-// The five files under slashcommands/*.md are embedded into the binary
+// The six files under slashcommands/*.md are embedded into the binary
 // at build time and unpacked to ~/.claude/commands/klyne/<name>.md by
 // `klyne mcp install`. Once written, Claude Code surfaces them as
 // /klyne:health, /klyne:sessions, /klyne:handoff, /klyne:search,
-// /klyne:precompact in every project on the user's machine.
+// /klyne:precompact, /klyne:tokens in every project on the user's machine.
 //
 // Idempotent: re-running install overwrites with the current bundled
 // content.

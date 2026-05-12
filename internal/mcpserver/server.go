@@ -131,6 +131,46 @@ Use when the user asks "what did we decide about X?" or when you start a new tas
 Use this when the user asks "did we decide anything about Y?" — returns the rows whose text contains the query. Scopes to the current project by default; pass all_projects=true for a cross-project search.`,
 	}, HandleSearchDecisions)
 
+	// --- memory facade -----------------------------------------------
+	// User-facing verbs over the same decisions table. Fire these when
+	// the user uses the trigger phrases:
+	//   "klyne remember this …"           → remember (scope=project)
+	//   "klyne remember this globally …"  → remember (scope=global)
+	//   "refer klyne …" / "check klyne …" → recall (returns project ∪ global)
+	mcp.AddTool(srv, &mcp.Tool{
+		Name: "remember",
+		Description: `Persist a memory (decision, runbook, or note) so it survives across sessions.
+
+Fire this tool when the user says one of:
+  "klyne remember this …"             → scope=project (default)
+  "klyne remember … for this project" → scope=project
+  "klyne remember this globally …"    → scope=global
+  "klyne remember … everywhere"       → scope=global
+
+Inputs: text (required), scope ("project"|"global", default "project"), optional project_path / cwd / tags / session_id. Multi-line text and runbooks (e.g. "Steps: 1. …, 2. …") are explicitly supported. Use tags like "runbook", "decision", "secrets", "infra", "deploy" so recall can filter cleanly.
+
+Scoping rules:
+  * scope=global  → memory applies to every project; stored with project_path=""
+  * scope=project → memory applies only to the named project; project_path is taken from input or falls back to cwd
+
+Returns the new memory's id. Confirm the id and scope back to the user.`,
+	}, HandleRememberMemory)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name: "recall",
+		Description: `Recall all memories relevant to the current project — BOTH project-scoped AND global — in one call.
+
+Fire this tool BEFORE acting on operational requests (secrets, deploys, migrations, "add … for service X", etc.) and whenever the user says "refer klyne …" / "check klyne …" / "what does klyne remember about …".
+
+Returns two labelled lists:
+  * project_memories — memories whose project_path matches the resolved project
+  * global_memories  — memories with project_path="" (apply everywhere)
+
+If a memory looks like a runbook (multi-line with numbered steps), follow it verbatim with variables substituted from the user's request. Confirm the substitution out loud before executing.
+
+Optional filters: query (substring), tag (single tag like "runbook"), project_path / cwd override.`,
+	}, HandleRecallMemory)
+
 	// Live MCP prompts. Each prompt parallels one of the tools above
 	// and surfaces in Claude Code's slash menu as /klyne:<name>
 	// (older Claude Code builds used /mcp__klyne__<name>; that form

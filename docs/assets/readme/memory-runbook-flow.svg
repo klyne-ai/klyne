@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 760" role="img" aria-labelledby="title desc">
+  <title id="title">How klyne memory works</title>
+  <desc id="desc">A user teaches klyne a project runbook once. klyne stores it locally by project or global scope. Later, Claude recalls the matching memory before running commands.</desc>
+  <defs>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#0f172a" flood-opacity="0.14"/>
+    </filter>
+    <style>
+      .bg { fill: #fbfbf7; }
+      .title { font: 700 54px ui-rounded, "SF Pro Rounded", "Segoe UI", sans-serif; fill: #111827; }
+      .body { font: 650 25px ui-rounded, "SF Pro Rounded", "Segoe UI", sans-serif; fill: #1f2937; }
+      .small { font: 600 19px ui-rounded, "SF Pro Rounded", "Segoe UI", sans-serif; fill: #4b5563; }
+      .tiny { font: 600 16px ui-rounded, "SF Pro Rounded", "Segoe UI", sans-serif; fill: #6b7280; }
+      .card { fill: #ffffff; stroke: #111827; stroke-width: 4; rx: 24; filter: url(#shadow); }
+      .green { fill: #16a34a; }
+      .blue { fill: #2563eb; }
+      .purple { fill: #7c3aed; }
+      .amber { fill: #d97706; }
+      .soft-green { fill: #dcfce7; stroke: #16a34a; stroke-width: 4; rx: 18; }
+      .soft-blue { fill: #dbeafe; stroke: #2563eb; stroke-width: 4; rx: 18; }
+      .soft-purple { fill: #ede9fe; stroke: #7c3aed; stroke-width: 4; rx: 18; }
+      .soft-amber { fill: #fef3c7; stroke: #d97706; stroke-width: 4; rx: 18; }
+      .stroke { stroke: #111827; stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; fill: none; }
+    </style>
+    <marker id="arrow" markerWidth="14" markerHeight="14" refX="10" refY="7" orient="auto">
+      <path d="M2,2 L12,7 L2,12 Z" fill="#111827"/>
+    </marker>
+    <marker id="arrow-green" markerWidth="14" markerHeight="14" refX="10" refY="7" orient="auto">
+      <path d="M2,2 L12,7 L2,12 Z" fill="#16a34a"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" width="1600" height="760"/>
+  <text x="800" y="78" text-anchor="middle" class="title">Memory: teach once, recall safely later</text>
+
+  <rect x="75" y="150" width="320" height="170" class="card"/>
+  <text x="235" y="198" text-anchor="middle" class="body">1. Remember</text>
+  <rect x="115" y="222" width="240" height="58" class="soft-blue"/>
+  <text x="235" y="258" text-anchor="middle" class="small blue">"klyne remember this"</text>
+  <text x="235" y="300" text-anchor="middle" class="tiny">runbook, decision, command note</text>
+
+  <path d="M405 235 C455 235 470 235 515 235" class="stroke" marker-end="url(#arrow)"/>
+
+  <rect x="525" y="150" width="320" height="170" class="card"/>
+  <text x="685" y="198" text-anchor="middle" class="body">2. Store locally</text>
+  <rect x="580" y="222" width="210" height="58" class="soft-green"/>
+  <text x="685" y="258" text-anchor="middle" class="small green">~/.klyne/klyne.db</text>
+  <text x="685" y="300" text-anchor="middle" class="tiny">project scope or global scope</text>
+
+  <path d="M855 235 C905 235 920 235 965 235" class="stroke" marker-end="url(#arrow)"/>
+
+  <rect x="975" y="150" width="320" height="170" class="card"/>
+  <text x="1135" y="198" text-anchor="middle" class="body">3. Recall</text>
+  <rect x="1015" y="222" width="240" height="58" class="soft-purple"/>
+  <text x="1135" y="258" text-anchor="middle" class="small purple">"refer klyne"</text>
+  <text x="1135" y="300" text-anchor="middle" class="tiny">Claude asks before acting</text>
+
+  <path d="M1135 330 C1135 375 1135 390 1135 430" stroke="#16a34a" stroke-width="5" fill="none" marker-end="url(#arrow-green)"/>
+
+  <rect x="865" y="440" width="540" height="190" class="soft-green"/>
+  <text x="1135" y="485" text-anchor="middle" class="body green">Concrete safe execution plan</text>
+  <g transform="translate(920 520)">
+    <rect x="0" y="0" width="440" height="34" class="soft-blue"/>
+    <text x="220" y="23" text-anchor="middle" class="tiny">substitute request variables</text>
+    <rect x="0" y="50" width="440" height="34" class="soft-amber"/>
+    <text x="220" y="73" text-anchor="middle" class="tiny">show commands before running</text>
+    <rect x="0" y="100" width="440" height="34" class="soft-purple"/>
+    <text x="220" y="123" text-anchor="middle" class="tiny">avoid overwriting the whole bucket</text>
+  </g>
+
+  <rect x="145" y="430" width="560" height="200" class="card"/>
+  <text x="425" y="476" text-anchor="middle" class="body">What memory is good for</text>
+  <g transform="translate(190 510)">
+    <circle cx="12" cy="10" r="7" class="green"/>
+    <text x="34" y="17" class="small">service runbooks</text>
+    <circle cx="12" cy="55" r="7" class="blue"/>
+    <text x="34" y="62" class="small">project decisions</text>
+    <circle cx="12" cy="100" r="7" class="purple"/>
+    <text x="34" y="107" class="small">dangerous operational steps</text>
+  </g>
+  <text x="425" y="680" text-anchor="middle" class="body amber">No provider key. No cloud memory. Local SQLite only.</text>
+</svg>

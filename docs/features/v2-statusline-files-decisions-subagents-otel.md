@@ -99,7 +99,7 @@ parent session:
 ```
 | Parent session | Project | Subagents | Tokens in | Tokens out | Cache % | Last activity |
 |---|---|---:|---:|---:|---:|---|
-| ccf1c911 | …/Project/agentdeck | 31 | 201.1M | 882k | 96% | 4d ago |
+| ccf1c911 | …/Private/project-redacted | 31 | 201.1M | 882k | 96% | 4d ago |
 ```
 
 A real run on this maintainer's transcripts: **134 subagents across

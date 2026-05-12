@@ -51,6 +51,9 @@ func TestAllRoutesContainsExpected(t *testing.T) {
 		RouteEvents,
 		RouteHealthz,
 		RouteCodeReviewContext,
+		RouteMemory,
+		RouteMemoryItem,
+		RouteInsightsProjects,
 	}
 	got := AllRoutes()
 	if len(got) != len(expected) {

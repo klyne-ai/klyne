@@ -1,0 +1,102 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+  <title id="title">The Context Loss Problem</title>
+  <desc id="desc">Without klyne, compact and fresh sessions bury exact files, commands, failures, and decisions. With klyne, local transcripts feed recovery tools, handoff, search, advisor, and memory.</desc>
+  <defs>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#0f172a" flood-opacity="0.14"/>
+    </filter>
+    <style>
+      .bg { fill: #fbfbf7; }
+      .title { font: 700 58px ui-rounded, "SF Pro Rounded", "Segoe UI", sans-serif; fill: #111827; }
+      .h-red { font: 700 39px ui-rounded, "SF Pro Rounded", "Segoe UI", sans-serif; fill: #dc2626; }
+      .h-green { font: 700 39px ui-rounded, "SF Pro Rounded", "Segoe UI", sans-serif; fill: #16a34a; }
+      .body { font: 600 25px ui-rounded, "SF Pro Rounded", "Segoe UI", sans-serif; fill: #1f2937; }
+      .small { font: 600 19px ui-rounded, "SF Pro Rounded", "Segoe UI", sans-serif; fill: #4b5563; }
+      .tiny { font: 600 16px ui-rounded, "SF Pro Rounded", "Segoe UI", sans-serif; fill: #6b7280; }
+      .red { fill: #ef4444; }
+      .green { fill: #22c55e; }
+      .blue { fill: #2563eb; }
+      .purple { fill: #7c3aed; }
+      .amber { fill: #f59e0b; }
+      .stroke { stroke: #111827; stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; fill: none; }
+      .muted-stroke { stroke: #9ca3af; stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; fill: none; }
+      .dash { stroke-dasharray: 13 13; }
+      .card { fill: #ffffff; stroke: #111827; stroke-width: 4; rx: 24; filter: url(#shadow); }
+      .soft-red { fill: #fee2e2; stroke: #dc2626; stroke-width: 4; rx: 18; }
+      .soft-green { fill: #dcfce7; stroke: #16a34a; stroke-width: 4; rx: 18; }
+      .soft-blue { fill: #dbeafe; stroke: #2563eb; stroke-width: 4; rx: 18; }
+      .soft-purple { fill: #ede9fe; stroke: #7c3aed; stroke-width: 4; rx: 18; }
+      .soft-amber { fill: #fef3c7; stroke: #d97706; stroke-width: 4; rx: 18; }
+    </style>
+    <marker id="arrow-red" markerWidth="14" markerHeight="14" refX="10" refY="7" orient="auto">
+      <path d="M2,2 L12,7 L2,12 Z" fill="#dc2626"/>
+    </marker>
+    <marker id="arrow-green" markerWidth="14" markerHeight="14" refX="10" refY="7" orient="auto">
+      <path d="M2,2 L12,7 L2,12 Z" fill="#16a34a"/>
+    </marker>
+    <marker id="arrow-blue" markerWidth="14" markerHeight="14" refX="10" refY="7" orient="auto">
+      <path d="M2,2 L12,7 L2,12 Z" fill="#2563eb"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" width="1600" height="900"/>
+  <text x="800" y="80" text-anchor="middle" class="title">The Context Loss Problem</text>
+  <line x1="800" y1="135" x2="800" y2="765" class="muted-stroke dash"/>
+
+  <text x="245" y="155" class="h-red">Without klyne</text>
+  <rect x="210" y="195" width="360" height="70" class="card"/>
+  <text x="390" y="240" text-anchor="middle" class="body">Claude Code / Codex</text>
+  <text x="310" y="304" text-anchor="middle" class="small red">session grows</text>
+  <path d="M390 275 C390 315 390 335 390 370" stroke="#dc2626" stroke-width="5" fill="none" marker-end="url(#arrow-red)"/>
+
+  <rect x="105" y="370" width="570" height="210" class="card"/>
+  <text x="390" y="415" text-anchor="middle" class="body">Huge conversation context</text>
+  <g transform="translate(145 445)">
+    <rect x="0" y="0" width="72" height="38" class="soft-red"/>
+    <rect x="100" y="0" width="72" height="38" class="soft-red" opacity="0.65"/>
+    <rect x="200" y="0" width="72" height="38" class="soft-red" opacity="0.45"/>
+    <rect x="300" y="0" width="72" height="38" class="soft-red" opacity="0.65"/>
+    <rect x="400" y="0" width="72" height="38" class="soft-red" opacity="0.45"/>
+    <rect x="0" y="62" width="72" height="38" class="soft-red" opacity="0.45"/>
+    <rect x="100" y="62" width="72" height="38" class="soft-red"/>
+    <rect x="200" y="62" width="72" height="38" class="soft-red" opacity="0.65"/>
+    <rect x="300" y="62" width="72" height="38" class="soft-red" opacity="0.45"/>
+    <rect x="400" y="62" width="72" height="38" class="soft-red"/>
+  </g>
+  <text x="390" y="545" text-anchor="middle" class="small">files + commands + failures + decisions</text>
+
+  <path d="M390 595 C390 630 390 640 390 670" stroke="#dc2626" stroke-width="5" fill="none" marker-end="url(#arrow-red)"/>
+  <rect x="190" y="680" width="400" height="76" class="soft-red"/>
+  <text x="390" y="712" text-anchor="middle" class="body red">/compact or fresh chat</text>
+  <text x="390" y="742" text-anchor="middle" class="small">exact details get buried</text>
+
+  <text x="985" y="155" class="h-green">With klyne</text>
+  <rect x="985" y="195" width="360" height="70" class="card"/>
+  <text x="1165" y="240" text-anchor="middle" class="body">Claude Code / Codex</text>
+  <path d="M1165 275 C1165 315 1165 335 1165 370" stroke="#16a34a" stroke-width="5" fill="none" marker-end="url(#arrow-green)"/>
+  <text x="1245" y="305" class="small green">asks klyne</text>
+
+  <rect x="940" y="374" width="450" height="90" class="soft-blue"/>
+  <text x="1165" y="410" text-anchor="middle" class="body blue">local JSONL transcripts</text>
+  <text x="1165" y="440" text-anchor="middle" class="small">read-only source of truth</text>
+
+  <path d="M1165 470 C1165 500 1165 520 1165 548" stroke="#16a34a" stroke-width="5" fill="none" marker-end="url(#arrow-green)"/>
+  <rect x="870" y="555" width="590" height="142" class="soft-green"/>
+  <text x="1165" y="592" text-anchor="middle" class="body green">Minimal recovery set</text>
+  <g transform="translate(920 615)">
+    <rect x="0" y="0" width="96" height="54" class="soft-green"/>
+    <text x="48" y="34" text-anchor="middle" class="tiny">precompact</text>
+    <rect x="120" y="0" width="96" height="54" class="soft-green"/>
+    <text x="168" y="34" text-anchor="middle" class="tiny">handoff</text>
+    <rect x="240" y="0" width="96" height="54" class="soft-green"/>
+    <text x="288" y="34" text-anchor="middle" class="tiny">search</text>
+    <rect x="360" y="0" width="96" height="54" class="soft-green"/>
+    <text x="408" y="34" text-anchor="middle" class="tiny">memory</text>
+  </g>
+
+  <rect x="910" y="730" width="510" height="70" class="soft-blue"/>
+  <text x="1165" y="774" text-anchor="middle" class="body blue">fresh session continues with exact context</text>
+
+  <rect x="350" y="825" width="900" height="48" class="soft-purple"/>
+  <text x="800" y="857" text-anchor="middle" class="body purple">read-only local rescue: no cloud, no proxy, no telemetry</text>
+</svg>

@@ -118,11 +118,12 @@ func buildStaleProof(msgs []*connectors.Message) api.StaleProof {
 	files := make([]api.FileRelevanceProof, 0, len(v.Files))
 	for _, f := range v.Files {
 		files = append(files, api.FileRelevanceProof{
-			Path:     f.Path,
-			Basename: filepath.Base(f.Path),
-			Bytes:    f.Bytes,
-			Score:    f.Score,
-			Stale:    f.Stale,
+			Path:        f.Path,
+			Basename:    filepath.Base(f.Path),
+			Bytes:       f.Bytes,
+			Score:       f.Score,
+			Stale:       f.Stale,
+			LastTouchTs: f.LastTouchTs,
 		})
 	}
 	// Already sorted by bytes desc in ScoreFiles, but re-affirm
