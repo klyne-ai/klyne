@@ -104,6 +104,33 @@ Reads <project_root>/.code-review-graph/summary.json (produced by the upstream t
 Useful before starting a refactor or code review to learn which files the project has historically struggled with and who to ping.`,
 	}, HandleCodeReviewContext)
 
+	// --- decisions log -----------------------------------------------
+	// Mini persistent-memory surface: the AI (or the user via the CLI)
+	// pins short notes that survive across sessions. Written to klyne's
+	// SQLite store; survives daemon restarts and session deletion.
+	mcp.AddTool(srv, &mcp.Tool{
+		Name: "record_decision",
+		Description: `Persist a short, immutable decision so it survives across sessions.
+
+Use this when the user states a load-bearing choice that you want to remember in a future Claude Code or Codex run — "we picked Postgres over SQLite because the team already runs PG", "drop /api/v1 — v2 was rolled out 2026-04-12", etc.
+
+Inputs: text (required), optional project_path (defaults to cwd), optional session_id, optional tags. Returns the decision id so you can echo it back. Free-form text; keep it under ~300 chars for terminal readability.`,
+	}, HandleRecordDecision)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name: "list_decisions",
+		Description: `List recently recorded decisions, scoped by default to the current project.
+
+Use when the user asks "what did we decide about X?" or when you start a new task and want to recall prior choices. Returns up to `+"`limit`"+` rows sorted by recency. Pass all_projects=true to list across every project klyne has touched.`,
+	}, HandleListDecisions)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name: "search_decisions",
+		Description: `Substring-search recorded decisions by text. Case-insensitive.
+
+Use this when the user asks "did we decide anything about Y?" — returns the rows whose text contains the query. Scopes to the current project by default; pass all_projects=true for a cross-project search.`,
+	}, HandleSearchDecisions)
+
 	// Live MCP prompts. Each prompt parallels one of the tools above
 	// and surfaces in Claude Code's slash menu as /klyne:<name>
 	// (older Claude Code builds used /mcp__klyne__<name>; that form

@@ -56,6 +56,12 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newTopCmd())
 	root.AddCommand(newPatternsCmd())
 	root.AddCommand(newRoastCmd())
+	// v2 surfaces — statusline / files / decisions / subagents / otel.
+	root.AddCommand(newStatuslineCmd())
+	root.AddCommand(newFilesCmd())
+	root.AddCommand(newDecisionsCmd())
+	root.AddCommand(newSubagentsCmd())
+	root.AddCommand(newOtelCmd())
 	return root
 }
 
