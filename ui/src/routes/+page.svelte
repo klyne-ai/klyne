@@ -1,238 +1,197 @@
-<script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
-  import { goto } from '$app/navigation';
-  import { fetchCostSummary } from '$lib/api.js';
-  import { subscribe } from '$lib/sse.js';
-  import { projectsStore, refreshProjects } from '$lib/projects.svelte.js';
-  import { kfmt, relAgo } from '$lib/format.js';
-  import BarColumns from '$lib/ui/BarColumns.svelte';
-  import CliBadge from '$lib/ui/CliBadge.svelte';
-  import Kbd from '$lib/ui/Kbd.svelte';
+<!--
+  Work view — replaces Dashboard + Cockpit + Projects with one screen:
 
-  // Activity series (output tokens per day) from /cost/summary?group=day.
-  // We piggy-back on the cost-summary endpoint because it already buckets by
-  // day and returns tokens_out; the dollar-cost field is intentionally ignored
-  // — flat-subscription users don't care about provider compute prices.
-  let tokensByDay = $state<number[]>([]);
+    Left rail   : every project, with live dots, filter, pin star
+    Center      : 1-3 column terminal grid of pinned projects, streaming tail
+    Right panel : inspector for the currently-selected project
+
+  Pin selection is persisted in localStorage. The advisor modal
+  surfaces from each terminal's ⓘ button.
+-->
+<script lang="ts">
+  import { onMount } from 'svelte';
+  import { projectsStore } from '$lib/projects.svelte.js';
+  import type { ProjectAggregate } from '$lib/projects.svelte.js';
+  import ProjectRail from '$lib/ui/ProjectRail.svelte';
+  import Terminal from '$lib/ui/Terminal.svelte';
+  import Inspector from '$lib/ui/Inspector.svelte';
+  import AdvisorModal from '$lib/components/AdvisorModal.svelte';
+
+  const LS_PINS = 'klyne.work.pins';
+  const LS_COLS = 'klyne.work.cols';
+
+  function loadPins(): string[] {
+    if (typeof localStorage === 'undefined') return [];
+    try {
+      const raw = localStorage.getItem(LS_PINS);
+      if (!raw) return [];
+      const parsed: unknown = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : [];
+    } catch { return []; }
+  }
+  function savePins(p: string[]): void {
+    if (typeof localStorage === 'undefined') return;
+    localStorage.setItem(LS_PINS, JSON.stringify(p));
+  }
+  function loadCols(): 1 | 2 | 3 {
+    if (typeof localStorage === 'undefined') return 2;
+    const v = parseInt(localStorage.getItem(LS_COLS) ?? '2', 10);
+    return v === 1 || v === 3 ? v : 2;
+  }
+  function saveCols(c: number): void {
+    if (typeof localStorage === 'undefined') return;
+    localStorage.setItem(LS_COLS, String(c));
+  }
+
+  let pinnedPaths = $state<string[]>(loadPins());
+  let selectedPath = $state<string>('');
+  let inspectorOpen = $state(true);
+  let cols = $state<1 | 2 | 3>(loadCols());
+  let advisorSession = $state<string | null>(null);
+  let focusPath = $state<string | null>(null);
 
   const projects = $derived(projectsStore.items);
+  const liveCount = $derived(projects.filter((p) => p.lastMsAgo < 60_000).length);
 
-  const recent = $derived(
-    [...projects].sort((a, b) => a.lastMsAgo - b.lastMsAgo).slice(0, 6)
-  );
-
-  // Tick every 5s so 'active' status / 'last msg N seconds ago' stay live
-  // without depending on a fresh server fetch.
-  let tick = $state(Date.now());
-
-  const activeProjs = $derived(
-    projects
-      .filter((p) => tick - p.lastMsAt < 60_000)
-      .sort((a, b) => a.lastMsAt > b.lastMsAt ? -1 : 1)
-  );
-
-  const totals = $derived(
-    projects.reduce(
-      (acc, p) => ({
-        sessions: acc.sessions + p.sessions,
-        msgs: acc.msgs + p.msgs,
-        tokensIn: acc.tokensIn + p.tokensIn,
-        tokensOut: acc.tokensOut + p.tokensOut,
-      }),
-      { sessions: 0, msgs: 0, tokensIn: 0, tokensOut: 0 }
-    )
-  );
-
-  const totalTokens = $derived(tokensByDay.reduce((a, b) => a + b, 0));
-
-  async function loadActivityData(): Promise<void> {
-    try {
-      const since = Date.now() - 14 * 86_400_000;
-      const resp = await fetchCostSummary({ group: 'day', since });
-      tokensByDay = resp.buckets.map((b) => b.tokens_out);
-    } catch {
-      // chart is optional; silent ignore
+  // Auto-seed selected project from the most-recent one when none chosen.
+  $effect(() => {
+    if (!selectedPath && projects.length > 0) {
+      selectedPath = projects[0].project_path;
     }
-  }
-
-  let unsubscribe: (() => void) | null = null;
-  let tickHandle: ReturnType<typeof setInterval> | null = null;
-  let refreshHandle: ReturnType<typeof setTimeout> | null = null;
-
-  // Coalesce SSE bursts: a single live CLI session emits MsgNew at high
-  // frequency. Refreshing on every event hammers /sessions and flickers the
-  // list; debouncing to 800ms lands new sessions promptly without thrash.
-  function scheduleRefresh(): void {
-    if (refreshHandle !== null) return;
-    refreshHandle = setTimeout(() => {
-      refreshHandle = null;
-      void refreshProjects();
-    }, 800);
-  }
-
-  onMount(() => {
-    void loadActivityData();
-    if (projectsStore.items.length === 0) void refreshProjects();
-
-    unsubscribe = subscribe({
-      onMsgNew: () => scheduleRefresh(),
-      onSessionUpdate: () => scheduleRefresh(),
-    });
-
-    tickHandle = setInterval(() => { tick = Date.now(); }, 5_000);
   });
 
-  onDestroy(() => {
-    unsubscribe?.();
-    unsubscribe = null;
-    if (tickHandle !== null) { clearInterval(tickHandle); tickHandle = null; }
-    if (refreshHandle !== null) { clearTimeout(refreshHandle); refreshHandle = null; }
+  // Drop stale pins (deleted projects) once the list loads.
+  $effect(() => {
+    if (projects.length === 0) return;
+    const valid = new Set(projects.map((p) => p.project_path));
+    const next = pinnedPaths.filter((p) => valid.has(p));
+    if (next.length !== pinnedPaths.length) {
+      pinnedPaths = next;
+      savePins(next);
+    }
+  });
+
+  function selectProject(path: string): void {
+    selectedPath = path;
+    inspectorOpen = true;
+  }
+
+  function togglePin(path: string): void {
+    pinnedPaths = pinnedPaths.includes(path)
+      ? pinnedPaths.filter((p) => p !== path)
+      : [...pinnedPaths, path];
+    savePins(pinnedPaths);
+  }
+
+  function setCols(c: 1 | 2 | 3): void { cols = c; saveCols(c); }
+
+  const selectedProject: ProjectAggregate | null = $derived(
+    projects.find((p) => p.project_path === selectedPath) ?? null
+  );
+  const pinnedProjects = $derived(
+    pinnedPaths
+      .map((path) => projects.find((p) => p.project_path === path))
+      .filter((p): p is ProjectAggregate => p !== undefined)
+  );
+  const liveSuggestions = $derived(
+    projects.filter((p) => p.lastMsAgo < 60_000 && !pinnedPaths.includes(p.project_path)).slice(0, 5)
+  );
+
+  const focusProject: ProjectAggregate | null = $derived(
+    focusPath ? projects.find((p) => p.project_path === focusPath) ?? null : null
+  );
+
+  function onFocusModalKey(e: KeyboardEvent): void {
+    if (e.key === 'Escape') { e.preventDefault(); focusPath = null; }
+  }
+  onMount(() => {
+    window.addEventListener('keydown', onFocusModalKey);
+    return () => window.removeEventListener('keydown', onFocusModalKey);
   });
 </script>
 
-<svelte:head>
-  <title>klyne — Dashboard</title>
-</svelte:head>
+<svelte:head><title>klyne — Work</title></svelte:head>
 
-<div style="padding: 20px 24px 40px; max-width: 1280px;">
-  <!-- Header -->
-  <div style="display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 4px;">
-    <h1 style="font-size: var(--ad-fs-2xl); font-weight: 600; letter-spacing: -0.02em; margin: 0;">Dashboard</h1>
-    <span class="ad-mono" style="font-size: 12px; color: var(--ad-faint);">
-      {projects.length} projects · {totals.sessions} sessions · 35-day window
-    </span>
-  </div>
-  <p class="ad-muted" style="margin-top: 4px; margin-bottom: 24px; font-size: 13px;">
-    What you were working on, what's running now.
-  </p>
+<div class="work" class:inspector-collapsed={!inspectorOpen}>
+  <ProjectRail
+    projects={projects}
+    selectedPath={selectedPath}
+    pinnedPaths={pinnedPaths}
+    onSelect={selectProject}
+    onTogglePin={togglePin}
+  />
 
-  <!-- Active now -->
-  <section style="margin-bottom: 24px;">
-    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
-      <h2 class="ad-section-h" style="margin: 0;">Active now {#if activeProjs.length > 0}<span class="ad-faint" style="font-weight: 400;">· {activeProjs.length}</span>{/if}</h2>
-      <span class="ad-mono ad-faint" style="font-size: 11px;">via SSE · live · idle &gt; 60s</span>
+  <main class="center">
+    <div class="center-hd">
+      <h2>Terminals</h2>
+      <span class="sub">{pinnedPaths.length} pinned · {liveCount} live across all projects</span>
+      <div class="right">
+        <div class="seg" role="group" aria-label="Terminal columns">
+          <button class:active={cols === 1} onclick={() => setCols(1)}>1 col</button>
+          <button class:active={cols === 2} onclick={() => setCols(2)}>2 col</button>
+          <button class:active={cols === 3} onclick={() => setCols(3)}>3 col</button>
+        </div>
+        <button class="btn btn--ghost btn--sm" onclick={() => (inspectorOpen = !inspectorOpen)}>
+          {inspectorOpen ? 'hide inspector ›' : '‹ inspector'}
+        </button>
+      </div>
     </div>
-    {#if activeProjs.length > 0}
-      <div style="display: flex; flex-direction: column; gap: 8px;">
-        {#each activeProjs as p}
-          <div class="ad-card" style="padding: 16px; display: flex; align-items: center; gap: 16px;">
-            <span class="ad-dot ad-dot--active" style="width: 8px; height: 8px;"></span>
-            <div style="flex: 1; min-width: 0;">
-              <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
-                <button
-                  style="font-weight: 600; font-size: 15px; color: var(--ad-fg);"
-                  onclick={() => goto(`/projects/${encodeURIComponent(p.name)}`)}
-                >{p.name}</button>
-                {#each p.clis as c}
-                  <CliBadge cli={c} />
+
+    {#if pinnedProjects.length === 0}
+      <div class="term-grid cols-1" style="padding: 32px;">
+        <div class="term-empty">
+          <div>
+            <h3>No terminals pinned</h3>
+            <p>
+              Pin a project from the rail to watch its most recent thread here.<br />
+              Pin up to <strong>6</strong> and watch them stream side-by-side.
+            </p>
+            {#if liveSuggestions.length > 0}
+              <div class="hr" style="width: 200px; margin: 14px auto;"></div>
+              <div class="faint mono" style="margin-bottom: 8px; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em;">Live right now</div>
+              <div style="display: flex; gap: 6px; flex-wrap: wrap; justify-content: center;">
+                {#each liveSuggestions as p (p.project_path)}
+                  <button class="btn" onclick={() => togglePin(p.project_path)}>
+                    <span class="dot dot--live" style="margin-right: 6px;"></span>{p.name}
+                  </button>
                 {/each}
-                <span class="ad-badge ad-badge--ghost ad-mono" style="font-size: 11px;">{p.model}</span>
               </div>
-              <div style="display: flex; gap: 16px; font-size: 12px; color: var(--ad-muted);">
-                <span><span class="ad-mono ad-tnum">{p.msgs}</span> msgs</span>
-                <span>↑ <span class="ad-mono ad-tnum">{kfmt(p.tokensIn)}</span></span>
-                <span>↓ <span class="ad-mono ad-tnum">{kfmt(p.tokensOut)}</span></span>
-                <span>last msg <span style="color: var(--ad-active);">{relAgo(p.lastMsAgo)}</span></span>
-              </div>
-            </div>
-            <button
-              class="ad-btn ad-btn--primary"
-              onclick={() => goto(`/projects/${encodeURIComponent(p.name)}`)}
-            >Open project →</button>
+            {/if}
           </div>
+        </div>
+      </div>
+    {:else}
+      <div class="term-grid cols-{cols}">
+        {#each pinnedProjects as p (p.project_path)}
+          <Terminal
+            project={p}
+            onUnpin={togglePin}
+            onFocus={(path) => (focusPath = path)}
+            onInfo={(sid) => (advisorSession = sid)}
+          />
         {/each}
       </div>
-    {:else if projectsStore.loading}
-      <div class="ad-card" style="padding: 16px; color: var(--ad-muted); font-size: 13px;">Loading…</div>
-    {:else}
-      <div class="ad-card" style="padding: 16px 18px; display: flex; align-items: center; gap: 16px;">
-        <div style="flex: 1;">
-          <div style="font-size: 13px; color: var(--ad-fg-2); margin-bottom: 2px;">No active sessions right now.</div>
-          <div style="font-size: 12px; color: var(--ad-muted);">Start a Claude Code or Codex session in any project, or browse what you've already worked on.</div>
-        </div>
-        <button class="ad-btn" onclick={() => goto('/projects')}>Browse {projects.length || 'all'} projects →</button>
-      </div>
     {/if}
-  </section>
+  </main>
 
-  <!-- Recent projects -->
-  <section style="margin-bottom: 24px;">
-    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
-      <h2 class="ad-section-h" style="margin: 0;">Recent projects</h2>
-      <button class="ad-btn ad-btn--ghost" onclick={() => goto('/projects')}>view all {projects.length} →</button>
-    </div>
-    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;">
-      {#each recent as p}
-        <button
-          class="ad-card"
-          onclick={() => goto(`/projects/${encodeURIComponent(p.name)}`)}
-          style="padding: 14px; text-align: left; display: block; cursor: pointer; transition: background 80ms; width: 100%;"
-          onmouseenter={(e) => (e.currentTarget.style.background = 'var(--ad-panel-hi)')}
-          onmouseleave={(e) => (e.currentTarget.style.background = 'var(--ad-panel)')}
-        >
-          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
-            <span class="ad-dot ad-dot--{p.status}"></span>
-            <span style="font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{p.name}</span>
-            {#each p.clis as c}
-              <CliBadge cli={c} />
-            {/each}
-          </div>
-          <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px 12px; font-size: 12px;">
-            <div>
-              <div class="ad-mono ad-tnum" style="font-size: 14px; font-weight: 600; color: var(--ad-fg);">{p.sessions}</div>
-              <div style="font-size: 10px; color: var(--ad-faint); text-transform: uppercase; letter-spacing: 0.06em;">sessions</div>
-            </div>
-            <div>
-              <div class="ad-mono ad-tnum" style="font-size: 14px; font-weight: 600; color: var(--ad-fg);">{p.msgs}</div>
-              <div style="font-size: 10px; color: var(--ad-faint); text-transform: uppercase; letter-spacing: 0.06em;">msgs</div>
-            </div>
-            <div>
-              <div class="ad-mono ad-tnum" style="font-size: 14px; font-weight: 600; color: var(--ad-fg);">{kfmt(p.tokensOut)}</div>
-              <div style="font-size: 10px; color: var(--ad-faint); text-transform: uppercase; letter-spacing: 0.06em;">↓ tokens</div>
-            </div>
-          </div>
-          <div style="font-size: 11px; color: var(--ad-faint); margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--ad-border-soft);">
-            {relAgo(p.lastMsAgo)} · <span class="ad-mono">{p.model}</span>
-          </div>
-        </button>
-      {/each}
-    </div>
-  </section>
-
-  <!-- Activity (last 14 days) -->
-  <div class="ad-card" style="padding: 16px;">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-      <span class="ad-section-h">Activity · last 14 days</span>
-      <span class="ad-mono ad-faint" style="font-size: 11px;">output tokens</span>
-    </div>
-    <div style="display: flex; align-items: baseline; gap: 24px; margin-bottom: 16px; flex-wrap: wrap;">
-      <div>
-        <div style="font-size: 28px; font-weight: 600; font-family: var(--ad-font-mono);">
-          {kfmt(totalTokens || totals.tokensOut)}
-        </div>
-        <div class="ad-muted" style="font-size: 12px;">↓ tokens generated</div>
-      </div>
-      <div>
-        <div style="font-size: 22px; font-weight: 600; font-family: var(--ad-font-mono);">{totals.msgs}</div>
-        <div class="ad-muted" style="font-size: 12px;">messages</div>
-      </div>
-      <div>
-        <div style="font-size: 22px; font-weight: 600; font-family: var(--ad-font-mono);">{totals.sessions}</div>
-        <div class="ad-muted" style="font-size: 12px;">sessions</div>
-      </div>
-    </div>
-    {#if tokensByDay.length > 0}
-      <BarColumns data={tokensByDay} height={48} />
-    {:else}
-      <div style="height: 48px; background: var(--ad-bg-2); border-radius: 4px;"></div>
-    {/if}
-  </div>
-
-  <!-- Keyboard hints -->
-  <div style="display: flex; gap: 16px; margin-top: 24px; font-size: 11px; color: var(--ad-faint); flex-wrap: wrap;">
-    <span><Kbd>/</Kbd> focus search</span>
-    <span><Kbd>g</Kbd><Kbd>p</Kbd> projects</span>
-    <span><Kbd>g</Kbd><Kbd>s</Kbd> settings</span>
-    <span><Kbd>g</Kbd><Kbd>/</Kbd> search</span>
-  </div>
+  {#if inspectorOpen && selectedProject}
+    <Inspector project={selectedProject} onClose={() => (inspectorOpen = false)} />
+  {/if}
 </div>
+
+{#if focusProject}
+  <div class="overlay" onclick={() => (focusPath = null)} role="presentation">
+    <div class="search-modal" style="width: min(960px, 92vw); height: 78vh; display: flex; flex-direction: column;" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()} role="dialog" tabindex="-1" aria-modal="true" aria-label="Focused terminal">
+      <Terminal
+        project={focusProject}
+        onUnpin={() => (focusPath = null)}
+        onFocus={() => {}}
+        onInfo={(sid) => (advisorSession = sid)}
+      />
+    </div>
+  </div>
+{/if}
+
+{#if advisorSession}
+  <AdvisorModal sessionId={advisorSession} onClose={() => (advisorSession = null)} />
+{/if}
