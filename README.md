@@ -244,6 +244,11 @@ For Codex sessions, `pre_tokens` and `trigger` (manual/auto) fields are not expo
 | `klyne advise` | Hook entrypoint. You don't run this directly; Claude Code's hook runs it. |
 | `klyne config show / get / set <key>` | Read or update `~/.klyne/config.toml`. Two keys today: `plan` (`pro` / `max-5x` / `max-20x` / `team` / `custom --cap=N` — drives the 5-hour-window advisor's denominator) and `advisor` (`on` / `off` — kill switch for the UserPromptSubmit hook). |
 | `klyne tokens [--session=ID] [--window=DURATION]` | Per-turn token timeline for one session: sparkline, per-row `cached` / `uncached` columns, freshness anchor. **Spans the entire session by default**; pass `--window=30m` / `--window=5h` / `--window=2h30m` for a focused-lookback view. Same output as `/klyne:tokens` in chat. |
+| `klyne top [--project=PATH] [--since=24h] [--limit=N] [--json]` | Tool-usage rankings across sessions — most-called tool, share of total, error count, sessions seen in. |
+| `klyne patterns [--kind=tight_loop\|bash_overuse\|low_cache_reuse] [--json]` | Deterministic inefficiency detection: same-tool loops, Bash overuse, low cache reuse — with severity. |
+| `klyne roast [--max=N] [--json]` | Templated, deterministic zingers about your usage. No AI calls — every line is interpolated from real numbers in your local DB. |
+
+The three analytics commands (`top`, `patterns`, `roast`) are inspired by [claudestat](https://github.com/DeibyGS/claudestat). They re-use klyne's existing SQLite store — read-only, deterministic, zero network traffic.
 
 A 2026-05-10 review of every command's behaviour against a real Claude session and a real Codex session, with verdicts on what's useful and what isn't, lives at [docs/cli-review-2026-05-10.md](docs/cli-review-2026-05-10.md).
 
