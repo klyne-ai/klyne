@@ -1052,7 +1052,7 @@ $ curl http://127.0.0.1:7878/usage/stats?cli=claude&days=30
 |---|---|---|
 | G1 | Open a terminal in `/Users/mohitpatel/Desktop/Project/klyne` | `pwd` returns that path |
 | G2 | Run `./bin/klyne` (or `./bin/klyne start`) | Output line `INFO klyne listening addr=127.0.0.1:7878` |
-| G3 | Open browser tab to `http://127.0.0.1:7878` | Page renders, top nav shows Cockpit / Stats / Projects |
+| G3 | Open browser tab to `http://127.0.0.1:7878` | Page renders, top nav shows Work / Memory / Insights |
 | G4 | Open Claude Code and start a new chat inside `/Users/mohitpatel/Desktop/Project/klyne` (use `cd` first, then `claude`) | Claude Code prompt visible at the bottom of the terminal |
 | G5 | In another terminal pane, confirm MCP wiring exists: `cat ~/.claude.json \| grep -A2 klyne` | Returns a non-empty `mcpServers.klyne` block |
 

@@ -546,6 +546,101 @@ export interface HealthzResponse {
   schema_version: number;
 }
 
+// --- /memory/items ---
+
+/** Decision mirrors store.Decision — one user-recorded memory row. */
+export interface Decision {
+  id: string;
+  ts: number;
+  project_path?: string;
+  session_id?: string;
+  text: string;
+  tags?: string[];
+}
+
+/** MemoryProjectGroup is one bucket of memories under the same project. */
+export interface MemoryProjectGroup {
+  project_path: string;
+  name: string;
+  memories: Decision[];
+  count: number;
+}
+
+/** MemoryResponse is GET /memory/items. */
+export interface MemoryResponse {
+  global: Decision[];
+  by_project: MemoryProjectGroup[];
+  global_count: number;
+  project_count: number;
+  total: number;
+}
+
+// --- /insights/projects ---
+
+/** AgentSlice is one CLI's contribution within a project bucket. */
+export interface AgentSlice {
+  tokens: number;
+  tokens_in: number;
+  tokens_out: number;
+  messages: number;
+  sessions: number;
+}
+
+/** DailyPoint is one day-bucket on the per-project activity sparkline. */
+export interface DailyPoint {
+  day: string;
+  tokens: number;
+}
+
+/** TopSession is one of the heaviest sessions inside a project bucket. */
+export interface TopSession {
+  session_id: string;
+  cli: string;
+  model: string;
+  tokens: number;
+  messages: number;
+  last_msg_at: number;
+}
+
+/** ProjectInsight is one enriched row of the Insights dashboard. */
+export interface ProjectInsight {
+  project_path: string;
+  name: string;
+  tokens: number;
+  tokens_in: number;
+  tokens_out: number;
+  messages: number;
+  sessions: number;
+  last_msg_at: number;
+  claude: AgentSlice;
+  codex: AgentSlice;
+  cached_read_tokens: number;
+  cache_hit_pct: number;
+  tokens_per_message: number;
+  compact_count: number;
+  prior_tokens: number;
+  trend_pct: number;
+  daily: DailyPoint[];
+  top_sessions: TopSession[];
+}
+
+/** ProjectInsightsResponse is GET /insights/projects. */
+export interface ProjectInsightsResponse {
+  since: number;
+  until: number;
+  prior_since: number;
+  prior_until: number;
+  projects: ProjectInsight[];
+  totals: ProjectInsight;
+}
+
+/** InsightsQuery — query params for fetchProjectInsights. */
+export interface InsightsQuery {
+  since?: number;
+  until?: number;
+  top?: number;
+}
+
 // ---------------------------------------------------------------------------
 // api package — SSE event payloads (internal/api/sse_events.go)
 // ---------------------------------------------------------------------------

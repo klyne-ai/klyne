@@ -14,8 +14,11 @@ import type {
   CostSummaryQuery,
   CostSummaryResponse,
   HealthzResponse,
+  InsightsQuery,
+  MemoryResponse,
   MessageListQuery,
   MessageListResponse,
+  ProjectInsightsResponse,
   RestoreResponse,
   SearchResponse,
   SessionListQuery,
@@ -318,4 +321,38 @@ export async function fetchCockpitThreads(opts?: { since?: number; limit?: numbe
 /** GET /healthz — daemon liveness check. */
 export async function fetchHealthz(): Promise<HealthzResponse> {
   return get<HealthzResponse>('/healthz');
+}
+
+// ---------------------------------------------------------------------------
+// /memory/items
+// ---------------------------------------------------------------------------
+
+/** GET /memory/items — every memory grouped by global vs project. */
+export async function fetchMemory(): Promise<MemoryResponse> {
+  return get<MemoryResponse>('/memory/items');
+}
+
+/** DELETE /memory/items/{id} — remove a single memory row. */
+export async function deleteMemory(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/memory/items/${encodeURIComponent(id)}`, {
+    method: 'DELETE'
+  });
+  if (!res.ok && res.status !== 204) {
+    let body: unknown;
+    try { body = await res.json(); } catch { body = await res.text(); }
+    throw new ApiError(res.status, body);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// /insights/projects
+// ---------------------------------------------------------------------------
+
+/** GET /insights/projects — per-project rollup powering the Insights view. */
+export async function fetchProjectInsights(opts: InsightsQuery = {}): Promise<ProjectInsightsResponse> {
+  return get<ProjectInsightsResponse>('/insights/projects', {
+    since: opts.since,
+    until: opts.until,
+    top: opts.top
+  });
 }

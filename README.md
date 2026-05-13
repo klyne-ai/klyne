@@ -32,7 +32,7 @@ Four surfaces, one local engine:
 
 - **MCP server** — Claude Code & Codex CLI can call klyne mid-session.
 - **Proactive advisor** — Claude Code hook warns before the next prompt makes the session worse.
-- **Web cockpit** — `http://127.0.0.1:7878` for search, sessions, tokens, `/compact`, projects, and memory.
+- **Web cockpit** — `http://127.0.0.1:7878`. Three-tab shell — **Work** (live sessions, projects, compact), **Memory** (project/global runbooks), **Insights** (token spend, models, heatmap). `/` opens a global search overlay.
 - **Memory** — chat-first project/global runbooks stored locally and visible at `/memory`.
 
 > **Real maintainer machine, 30 days:** 222 sessions, 84,074 messages, 11.7B input tokens, 97 % cache reuse, $27.0K in priced model compute, and one `oms-service` compact event that shrank 793K tokens to 9K (88x). `klyne audit-sessions` checked stored stats against raw JSONL: **17/17 ✓ (100 %)**.
@@ -222,16 +222,15 @@ Installed as both MCP prompts AND Markdown slash commands under `~/.claude/comma
 
 ### Web cockpit at `http://127.0.0.1:7878`
 
-| Route | What you see |
-|---|---|
-| `/cockpit` | Live grid of running sessions — one tile per `session_id`, streaming via SSE. |
-| `/stats` | Overview, Models, Daily, Stats tabs — GitHub-style activity heatmap, models-by-cost, streaks. |
-| `/projects` · `/projects/[name]` | Project hub + per-project drill-down. |
-| `/sessions/[id]` | Full session detail — every message, every tool call, token timeline. |
-| `/search` | Full-text FTS5 search across every indexed session. |
-| `/memory` | Project + global memories grouped by service. Read/filter/delete from the browser; write via chat. |
-| `/settings` | Read / edit `~/.klyne/config.toml` from the browser. |
-| `/advisors` | Per-session advisor state — which triggers fired and when. |
+The shell is a 3-tab top nav. Search lives behind the `/` overlay, not as a route.
+
+| Tab | Primary view | Deep-link surfaces |
+|---|---|---|
+| **Work** | `/` — live operational view: running sessions, projects, recent activity. | `/cockpit` (SSE tile grid), `/projects` · `/projects/[name]`, `/sessions/[id]`, `/advisors`. |
+| **Memory** | `/memory` — project + global memories grouped by service. Read/filter/delete from the browser; write via chat. | — |
+| **Insights** | `/insights` — project-centric, subscription-aware metrics. | `/stats` (Overview / Models / Daily / Stats tabs, activity heatmap, models-by-cost, streaks). |
+
+Press `/` anywhere to open the search overlay (FTS5 across every indexed session).
 
 ---
 
