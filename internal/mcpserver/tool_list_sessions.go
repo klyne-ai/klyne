@@ -25,6 +25,10 @@ type ListSessionsOutput struct {
 	// Candidates is every session in the project, sorted by
 	// most-recently-modified first.
 	Candidates []CandidateRow `json:"candidates" jsonschema:"sessions found in this project, newest first"`
+	// Markdown is the slash-prompt-ready rendering, produced
+	// server-side so /klyne:sessions can echo verbatim without the
+	// host LLM re-rendering structured rows itself.
+	Markdown string `json:"markdown" jsonschema:"slash-prompt-ready markdown rendering (verbatim-echo target)"`
 }
 
 // HandleListSessions enumerates every Claude Code session in the
@@ -54,6 +58,7 @@ func HandleListSessions(_ context.Context, _ *mcp.CallToolRequest, in ListSessio
 		})
 	}
 	out := ListSessionsOutput{CWD: cwd, Candidates: rows}
+	out.Markdown = formatSessionsAsMarkdown(out)
 
 	var summary string
 	switch len(rows) {

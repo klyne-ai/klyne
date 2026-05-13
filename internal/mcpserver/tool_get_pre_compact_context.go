@@ -42,6 +42,10 @@ type PreCompactOutput struct {
 	Messages          []PreCompactMessageRow  `json:"messages,omitempty" jsonschema:"messages immediately preceding the last compact, oldest first"`
 	Ambiguous         bool                    `json:"ambiguous,omitempty" jsonschema:"true when multiple sessions in this cwd require explicit session_id disambiguation"`
 	Candidates        []CandidateRow          `json:"candidates,omitempty" jsonschema:"sessions to choose from when ambiguous"`
+	// Markdown is the slash-prompt-ready rendering, produced
+	// server-side so /klyne:precompact can echo verbatim without the
+	// host LLM re-rendering structured fields itself.
+	Markdown string `json:"markdown" jsonschema:"slash-prompt-ready markdown rendering (verbatim-echo target)"`
 }
 
 // preCompactRowPreviewBytes caps per-message body length in the
@@ -74,15 +78,17 @@ func HandleGetPreCompactContext(_ context.Context, _ *mcp.CallToolRequest, in Pr
 			})
 		}
 		const reason = "Multiple Claude Code sessions in this project. Pick one and call get_pre_compact_context again with session_id."
+		out := PreCompactOutput{Ambiguous: true, Candidates: rows}
+		out.Markdown = formatPreCompactAsMarkdown(out)
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{Text: reason}},
-		}, PreCompactOutput{Ambiguous: true, Candidates: rows}, nil
+		}, out, nil
 	}
 	if path == "" {
 		const reason = "No Claude Code session found for this working directory."
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{Text: reason}},
-		}, PreCompactOutput{}, nil
+		}, PreCompactOutput{Markdown: reason}, nil
 	}
 
 	bundle, err := LoadPreCompactMessages(path, in.Limit)
@@ -93,7 +99,7 @@ func HandleGetPreCompactContext(_ context.Context, _ *mcp.CallToolRequest, in Pr
 		const reason = "This session has not been /compact'd yet — nothing to recover."
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{Text: reason}},
-		}, PreCompactOutput{Path: path, FoundCompact: false}, nil
+		}, PreCompactOutput{Path: path, FoundCompact: false, Markdown: reason}, nil
 	}
 
 	// Build per-row Content from text + tool-call activity. The canonical
@@ -132,6 +138,7 @@ func HandleGetPreCompactContext(_ context.Context, _ *mcp.CallToolRequest, in Pr
 	if len(bundle.Messages) > 0 && bundle.Messages[0].SessionID != "" {
 		out.SessionID = bundle.Messages[0].SessionID
 	}
+	out.Markdown = formatPreCompactAsMarkdown(out)
 
 	summary := fmt.Sprintf(
 		"Recovered %d messages from before the last /compact event (trigger=%s, pre-compact size %d tokens).",

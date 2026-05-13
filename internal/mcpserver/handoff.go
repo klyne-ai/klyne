@@ -85,7 +85,7 @@ type HandoffOutput struct {
 	SessionID    string `json:"session_id,omitempty" jsonschema:"the session id the handoff was generated from"`
 	Path         string `json:"path,omitempty" jsonschema:"absolute path of the source transcript"`
 	ProjectPath  string `json:"project_path,omitempty" jsonschema:"absolute project directory the session ran in"`
-	Markdown     string `json:"markdown,omitempty" jsonschema:"the generated handoff prompt — paste into a fresh Claude Code session"`
+	Markdown     string `json:"markdown" jsonschema:"slash-prompt-ready markdown rendering (verbatim-echo target) — the generated handoff prompt, the ambiguous candidates list, or the no-session message"`
 	TokensSource int64  `json:"tokens_source,omitempty" jsonschema:"approximate cache-aware token size of the source session at the latest assistant turn"`
 	Ambiguous    bool   `json:"ambiguous,omitempty" jsonschema:"true when multiple sessions in this cwd require explicit session_id disambiguation"`
 	Candidates   []CandidateRow `json:"candidates,omitempty" jsonschema:"sessions to choose from when ambiguous"`

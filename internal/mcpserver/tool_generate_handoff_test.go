@@ -26,8 +26,14 @@ func TestHandleGenerateHandoff_AmbiguousReturnsCandidates(t *testing.T) {
 	if len(out.Candidates) != 2 {
 		t.Errorf("Candidates len = %d, want 2", len(out.Candidates))
 	}
-	if out.Markdown != "" {
-		t.Errorf("Markdown should be empty when ambiguous; got %d chars", len(out.Markdown))
+	// Markdown now carries the slash-prompt-ready ambiguous-candidate
+	// list so /klyne:handoff can echo it verbatim instead of having
+	// the host LLM re-render structured fields itself.
+	if out.Markdown == "" {
+		t.Errorf("Markdown should carry the ambiguous candidate list; got empty string")
+	}
+	if !strings.Contains(out.Markdown, "session_id") {
+		t.Errorf("Markdown should mention session_id retry instruction; got %q", out.Markdown)
 	}
 }
 

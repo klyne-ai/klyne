@@ -70,6 +70,12 @@ type TokenTimelineOutput struct {
 	PlanTier       string         `json:"plan_tier,omitempty" jsonschema:"the user's configured plan tier; empty when unset"`
 	Ambiguous      bool           `json:"ambiguous,omitempty" jsonschema:"true when multiple sessions in this cwd require explicit session_id disambiguation"`
 	Candidates     []CandidateRow `json:"candidates,omitempty" jsonschema:"sessions to choose from when ambiguous"`
+	// Markdown is the slash-prompt-ready rendering of this timeline,
+	// produced server-side so the host LLM can echo it verbatim
+	// instead of re-rendering structured fields itself. Covers the
+	// ambiguous-candidates list, no-session message, and the full
+	// trajectory + sparkline + table form. Always populated.
+	Markdown string `json:"markdown" jsonschema:"slash-prompt-ready markdown rendering of this timeline (verbatim-echo target)"`
 }
 
 // HandleGetTokenTimeline is the MCP entry point. Resolves the
@@ -96,15 +102,17 @@ func HandleGetTokenTimeline(ctx context.Context, _ *mcp.CallToolRequest, in Toke
 			})
 		}
 		const reason = "Multiple Claude Code sessions in this project. Pick one and call get_token_timeline again with session_id."
+		ambOut := TokenTimelineOutput{Ambiguous: true, Candidates: rows}
+		ambOut.Markdown = formatTokenTimelineAsMarkdown(ambOut)
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{Text: reason}},
-		}, TokenTimelineOutput{Ambiguous: true, Candidates: rows}, nil
+		}, ambOut, nil
 	}
 	if path == "" {
 		const reason = "No Claude Code session found for this working directory."
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{Text: reason}},
-		}, TokenTimelineOutput{}, nil
+		}, TokenTimelineOutput{Markdown: reason}, nil
 	}
 
 	snap, err := LoadSnapshot(path)
@@ -150,6 +158,7 @@ func HandleGetTokenTimeline(ctx context.Context, _ *mcp.CallToolRequest, in Toke
 		PctUsed:        tl.PctUsed(),
 		PlanTier:       tier,
 	}
+	out.Markdown = formatTokenTimelineAsMarkdown(out)
 	// The Content text is the AI-facing summary; keep it terse and
 	// led by the single-session axis the user actually asked for.
 	summary := fmt.Sprintf(
