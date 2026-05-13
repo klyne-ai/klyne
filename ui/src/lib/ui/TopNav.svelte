@@ -35,8 +35,6 @@
     if (pathname.startsWith('/projects')) return 'projects';
     if (pathname.startsWith('/advisors')) return 'advisors';
     if (pathname.startsWith('/search')) return 'search';
-    if (pathname.startsWith('/settings')) return 'settings';
-    if (pathname.startsWith('/wizard')) return 'wizard';
     return 'dashboard';
   }
 
@@ -124,8 +122,6 @@
   <!-- Right actions -->
   <div style="margin-left: auto; display: flex; gap: 4px; align-items: center;">
     <UsageBadge />
-    <button class="ad-btn ad-btn--ghost" onclick={() => goto('/wizard')}>Wizard</button>
-    <button class="ad-btn ad-btn--ghost" onclick={() => goto('/settings')}>⚙ Settings</button>
     <div style="width: 26px; height: 26px; border-radius: 50%; background: var(--ad-claude-bg); color: var(--ad-claude); display: grid; place-items: center; font-size: 11px; font-weight: 700; margin-left: 6px;">M</div>
   </div>
 </nav>

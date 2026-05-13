@@ -105,10 +105,6 @@ func (m *Mounter) Mount(r chi.Router) {
 	hAdvisorDetail := NewAdvisorDetailHandler(m.deps.DB)
 	r.Get(api.RouteSessionAdvisorDetail, hAdvisorDetail.Get)
 
-	hSettings := NewSettingsHandler(m.deps.Cfg, logger)
-	r.Get(api.RouteSettings, hSettings.Get)
-	r.Put(api.RouteSettings, hSettings.Put)
-
 	hHealth := NewHealthHandler(m.deps.DB)
 	r.Get(api.RouteHealthz, hHealth.Healthz)
 

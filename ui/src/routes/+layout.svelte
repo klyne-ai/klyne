@@ -16,9 +16,6 @@
 
   const { children }: Props = $props();
 
-  // Determine if sidebar should be hidden (wizard page)
-  const hideSidebar = $derived($page.url.pathname.startsWith('/wizard'));
-
   let unsubscribeSSE: (() => void) | null = null;
 
   // Keyboard shortcuts: g d, g p, g s, g /
@@ -36,7 +33,6 @@
 
     if (keyBuffer === 'gd') { void goto('/'); keyBuffer = ''; }
     else if (keyBuffer === 'gp') { void goto('/projects'); keyBuffer = ''; }
-    else if (keyBuffer === 'gs') { void goto('/settings'); keyBuffer = ''; }
     else if (keyBuffer === 'g/') { void goto('/search'); keyBuffer = ''; }
   }
 
@@ -74,9 +70,7 @@
 <div style="height: 100vh; display: flex; flex-direction: column;">
   <TopNav onsearch={() => goto('/search')} />
   <div style="flex: 1; display: flex; overflow: hidden;">
-    {#if !hideSidebar}
-      <Sidebar />
-    {/if}
+    <Sidebar />
     <main style="flex: 1; overflow-y: auto;">
       {@render children()}
     </main>

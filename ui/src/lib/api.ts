@@ -22,15 +22,12 @@ import type {
   SessionListResponse,
   SessionResponse,
   SessionUsageResponse,
-  SettingsResponse,
-  SettingsUpdateRequest,
   SummaryResponse,
   TokenTimelineQuery,
   TokenTimelineResponse,
   UsageResponse,
   UsageStatsQuery,
   UsageStatsResponse,
-  WizardDetectResponse
 } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -312,34 +309,6 @@ export async function fetchCockpitThreads(opts?: { since?: number; limit?: numbe
     since: opts?.since,
     limit: opts?.limit
   });
-}
-
-// ---------------------------------------------------------------------------
-// /settings
-// ---------------------------------------------------------------------------
-
-/** GET /settings — retrieve current AI model and provider settings. */
-export async function fetchSettings(): Promise<SettingsResponse> {
-  return get<SettingsResponse>('/settings');
-}
-
-/** PUT /settings — partial update; nil fields in the patch are left unchanged. */
-export async function updateSettings(patch: SettingsUpdateRequest): Promise<SettingsResponse> {
-  return put<SettingsResponse>('/settings', patch);
-}
-
-// ---------------------------------------------------------------------------
-// /wizard/*  (W15 — stubs provided for completeness)
-// ---------------------------------------------------------------------------
-
-/** GET /wizard/detect — first-run credential detection. */
-export async function fetchWizardDetect(): Promise<WizardDetectResponse> {
-  return get<WizardDetectResponse>('/wizard/detect');
-}
-
-/** POST /wizard/complete — finish onboarding; returns 204. */
-export async function postWizardComplete(): Promise<void> {
-  return post<void>('/wizard/complete');
 }
 
 // ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 # proactive session advisor
 
-> Spec date: 2026-05-09 · Status: design, not yet implemented
+> Spec date: 2026-05-09 · Status: shipped (Slice 7, 2026-05-09)
 
 klyne already detects when a Claude Code or Codex session is in trouble
 (`get_context_health` classifies `healthy / drifting / risky / rescue_now`).

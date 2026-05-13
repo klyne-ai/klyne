@@ -9,7 +9,7 @@
  *   currentSession   — the session currently being viewed
  *   searchResults    — latest search response (replaced on each new query)
  *   costSummary      — latest cost summary response
- *   settings         — daemon settings (AI model config, detected providers)
+ *   (settings removed — use `klyne config` CLI instead)
  */
 
 import type {
@@ -18,7 +18,6 @@ import type {
   SearchResponse,
   Session,
   SessionResponse,
-  SettingsResponse
 } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -121,21 +120,6 @@ export const costSummary = $state<{ data: CostSummaryResponse | null; loading: b
 /** Replace the cost summary with a fresh response. */
 export function setCostSummary(data: CostSummaryResponse): void {
   costSummary.data = data;
-}
-
-// ---------------------------------------------------------------------------
-// settings
-// ---------------------------------------------------------------------------
-
-/** Daemon settings (AI model config + detected providers). */
-export const settings = $state<{ data: SettingsResponse | null; loading: boolean }>({
-  data: null,
-  loading: false
-});
-
-/** Replace settings with a fresh response. */
-export function setSettings(data: SettingsResponse): void {
-  settings.data = data;
 }
 
 // ---------------------------------------------------------------------------

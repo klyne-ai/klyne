@@ -38,9 +38,9 @@ This makes klyne a workflow/recovery tool first, with analytics as support.
 | Compact-vs-restart savings delta (concrete % of 5h limit) | Yes, shipped | No | No | No |
 | AI recommendation: continue vs compact vs start fresh | Yes, shipped | Not core | No | Autopilot routing, different use case |
 | Live OAuth-driven 5h/7d utilization (Claude) | Yes, shipped | Cost analytics | Yes, core | Status/telemetry |
-| Per-turn cost waterfall + spike forensics | Planned, differentiator | No | No | No |
-| Tool-call bloat scorecard ("which tool ate your context") | Planned, differentiator | No | No | No |
-| Budget projection + soft alerts | Planned | Cost analytics | Quota glance, not projection | No |
+| Per-turn cost waterfall + spike forensics | Yes, shipped (`klyne tokens`) | No | No | No |
+| Tool-call bloat scorecard ("which tool ate your context") | Yes, shipped (`get_context_health` bloat) | No | No | No |
+| Budget projection + soft alerts | Yes, shipped (proactive advisor hook) | Cost analytics | Quota glance, not projection | No |
 | Team sharing / MCP over history | Not currently | Yes | Local HTTP API, not team history | Plugin/API focus |
 | Menu-bar / tray quota glance | No | No | Yes, core | No |
 | Real terminal panels / send messages | No, intentionally read-only | No | No | Yes, core |
@@ -95,30 +95,17 @@ These items were "planned/core" in earlier drafts of this doc and are now in
 
 Priority order for a credible public launch:
 
-1. **Launch README**  
-   Replace the pre-alpha README with the product promise, screenshots/GIF,
-   install steps, supported CLIs, privacy model, known limitations, and roadmap.
+1. ~~**Launch README**~~ **SHIPPED.** README rewritten with real examples, install steps, and screenshots.
 
-2. **Demo mode**  
-   Add `klyne demo` or `klyne start --demo` using bundled sample
-   Claude/Codex JSONL so people can see the cockpit/search/token flows in under
-   two minutes.
+2. **Demo mode** — still missing. `klyne demo` / `klyne start --demo` with bundled sample JSONL.
 
-3. **Release/install path**  
-   Ship GitHub Releases with macOS/Linux binaries, `go install`, and eventually
-   Homebrew. Competing tools have `npx`, desktop downloads, or global npm install.
+3. **Release/install path** — still missing. Need GitHub Releases with macOS/Linux binaries + `go install`.
 
-4. **Privacy/security documentation**  
-   Document exactly what is read, what is never uploaded, where SQLite lives,
-   whether API keys are needed, and how OAuth/usage credentials are handled.
+4. ~~**Privacy/security documentation**~~ **SHIPPED.** See `docs/SECURITY.md` — every claim cites code paths.
 
-5. **Context savings proof**  
-   Add a short explainer and/or benchmark showing how context fill maps to
-   next-turn cost and how `/compact` changes the estimate.
+5. ~~**Context savings proof**~~ **SHIPPED.** `klyne tokens` + proactive advisor + `docs/proof/`.
 
-6. **Compact recovery story**  
-   The launch demo should show a compacted session, restore bundle, resume
-   command, and "start fresh" decision. This is klyne's best differentiator.
+6. ~~**Compact recovery story**~~ **SHIPPED.** Pre-compact recovery, handoff, and advisor all live.
 
 7. **Project rollup API**  
    Add a backend `/projects` endpoint instead of relying only on client-side
@@ -143,27 +130,11 @@ These are the features that turn klyne from "another usage dashboard" into
 "the cost-forensics tool for AI coding." None of the three competitors above
 ship them today; together they make the cost-visibility wedge defensible.
 
-1. **Per-session cost waterfall + spike detector**
-   Horizontal time-series of cost-per-turn on the session detail page. Turns
-   that cost >2× the session average are flagged inline ("12% of session
-   total — likely a big tool result"). Click → jump to the turn. Pairs with
-   the shipped TokenSavings indicator: savings tells you future cost,
-   waterfall explains past cost. Pure aggregation over existing per-message
-   rows.
+1. ~~**Per-session cost waterfall + spike detector**~~ **SHIPPED.** `klyne tokens` renders per-turn timeline with cached/uncached split. `/klyne:tokens` slash command in Claude Code.
 
-2. **Tool-call bloat scorecard**
-   For each session, rank tools by input-tokens-into-next-turn. "Read tool
-   returned 38% of all your input tokens; top file: `package-lock.json`
-   (re-read 9 times)." Concretely actionable: users can switch reads to
-   greps, or compact sooner. `tool_calls`/`tool_results` rows already stored;
-   UI + SQL only.
+2. ~~**Tool-call bloat scorecard**~~ **SHIPPED.** `get_context_health` returns top-5 bloat sources with per-file Read/Edit attribution. `/klyne:health` slash command.
 
-3. **Budget projection + soft alerts**
-   Dashboard pane: rolling 7d/30d trend, projected month-end spend, "today
-   is 3× your average" banner. Optional desktop notification on threshold
-   cross. Reuses existing cost rows; no new ingestion. OpenUsage does
-   per-quota tracking globally; klyne does it per-project, which maps
-   to engineering work better.
+3. ~~**Budget projection + soft alerts**~~ **SHIPPED.** Proactive advisor hook with 4 deterministic triggers (stale-context, acceleration, 5-hour-window, hard ceiling). Fires inline in Claude Code.
 
 4. **Compaction trust signal**
    When `/compact` runs, retain the pre-image and run a small AI semantic

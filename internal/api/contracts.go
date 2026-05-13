@@ -45,9 +45,6 @@ const (
 	RouteCockpitThreads      = "/cockpit/threads"
 	RouteAdvisories          = "/advisories"
 	RouteSessionAdvisorDetail = "/sessions/{id}/advisor-detail"
-	RouteSettings            = "/settings"
-	RouteWizardDetect        = "/wizard/detect"
-	RouteWizardComplete      = "/wizard/complete"
 	RouteEvents              = "/events"
 	RouteHealthz             = "/healthz"
 	RouteCodeReviewContext   = "/code-review-context"
@@ -83,9 +80,6 @@ func AllRoutes() []string {
 		RouteCockpitThreads,
 		RouteAdvisories,
 		RouteSessionAdvisorDetail,
-		RouteSettings,
-		RouteWizardDetect,
-		RouteWizardComplete,
 		RouteEvents,
 		RouteHealthz,
 		RouteCodeReviewContext,
@@ -457,76 +451,6 @@ type UsageResponse struct {
 	Now    int64    `json:"now"`     // epoch-ms server clock at calc time
 	Claude UsageCLI `json:"claude"`
 	Codex  UsageCLI `json:"codex"`
-}
-
-// ---------------------------------------------------------------------------
-// /settings
-// ---------------------------------------------------------------------------
-
-// TaskModel is the per-internal-task model selection (spec §8 BYOK matrix).
-// Provider is one of "anthropic", "openai", "gemini", "ollama"; Model is
-// the provider-native model id.
-type TaskModel struct {
-	Provider string `json:"provider"`
-	Model    string `json:"model"`
-}
-
-// SettingsAI mirrors config.AIConfig as exposed over HTTP.
-type SettingsAI struct {
-	SummaryModel TaskModel `json:"summary_model"`
-	TitleModel   TaskModel `json:"title_model"`
-	EmbedModel   TaskModel `json:"embed_model"`
-}
-
-// SettingsResponse is GET /settings.
-type SettingsResponse struct {
-	AI       SettingsAI `json:"ai"`
-	Detected DetectedProviders `json:"detected"`
-}
-
-// DetectedProviders is the wizard / settings view of what credentials
-// the daemon currently sees. Booleans only — never echo the keys.
-type DetectedProviders struct {
-	Anthropic bool `json:"anthropic"`
-	OpenAI    bool `json:"openai"`
-	Gemini    bool `json:"gemini"`
-	Ollama    bool `json:"ollama"`
-}
-
-// SettingsUpdateRequest is PUT /settings — partial updates allowed; nil
-// pointers mean "leave unchanged".
-type SettingsUpdateRequest struct {
-	AI *SettingsAI `json:"ai,omitempty"`
-}
-
-// ---------------------------------------------------------------------------
-// /wizard/*
-// ---------------------------------------------------------------------------
-
-// WizardDetectResponse is GET /wizard/detect — first-run welcome screen
-// telemetry. It echoes which CLI source dirs and which BYOK creds are
-// present, with no key material returned.
-type WizardDetectResponse struct {
-	Connectors WizardConnectors  `json:"connectors"`
-	Providers  DetectedProviders `json:"providers"`
-	// Recommendations is the "auto-selected model for each task" list
-	// shown on the wizard's smart-picker screen (spec §8).
-	Recommendations []WizardRecommendation `json:"recommendations"`
-}
-
-// WizardConnectors reports whether the v1 source directories exist.
-type WizardConnectors struct {
-	ClaudeRoot string `json:"claude_root"`
-	ClaudeOK   bool   `json:"claude_ok"`
-	CodexRoot  string `json:"codex_root"`
-	CodexOK    bool   `json:"codex_ok"`
-}
-
-// WizardRecommendation is one row of the smart-model-picker screen.
-type WizardRecommendation struct {
-	Task     string    `json:"task"`     // "summary" | "title" | "embed"
-	Selected TaskModel `json:"selected"`
-	Reason   string    `json:"reason"`
 }
 
 // ---------------------------------------------------------------------------

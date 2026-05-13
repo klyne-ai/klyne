@@ -460,11 +460,8 @@ deliberately and is worth understanding before changing.
 
 ### Limitations of the v1 product (will surprise users)
 
-1. **Claude Code only.** The four MCP tools work against
-   `~/.claude/projects/*.jsonl` exclusively. Codex sessions
-   (`~/.codex/sessions/**`) are NOT covered. If the user's session is
-   a Codex one, every tool returns "no session found." Closing this
-   gap is slice 4.
+1. ~~**Claude Code only.**~~ **RESOLVED in Slice 4.** All MCP tools
+   now support both Claude Code and Codex sessions.
 
 2. **No way to authoritatively know "which session am I in."**
    Claude Code does not pass session id to MCP subprocesses. The
@@ -617,59 +614,22 @@ clinikk-codebase, excalidraw, linear-server intact).
 
 ---
 
-## Next-slice candidates (NOT shipped)
+## Next-slice candidates (status as of 2026-05-12)
 
-Listed in dependency order, not priority order:
-
-1. **Codex parity for all 4 MCP tools.** Single biggest unit of work
-   remaining. Different JSONL schema (envelope-based), different
-   storage model in klyne, different compact event format.
-2. **Real-world integration smoke test.** Run klyne inside live
-   Claude Code, ask the AI to call the tools mid-conversation, find
-   the protocol-edge bugs synthetic tests miss. THIS IS WHAT YOU ARE
-   ABOUT TO DO BY USING IT TODAY.
-3. **Eval harness against labelled fixtures.** Captures 20 real
-   sessions, hand-labels their state, runs the classifier, computes
-   precision/recall/false-rescue rate. Requires the labelling work
-   first.
-4. **Per-call caching by (path, mtime).** Halves latency on repeated
-   calls within a session.
-5. **Pre-compact recovery for earlier-than-last events.** Currently
-   only recovers the most recent compact; full history is in the
-   JSONL but not exposed.
-6. **Web UI as audit/inspection surface.** Reposition the existing
-   Svelte UI as "see what the MCP tools see" rather than the primary
-   product. Lowest priority but useful for trust building.
+1. ~~**Codex parity for all 4 MCP tools.**~~ **SHIPPED** (Slice 4).
+2. ~~**Real-world integration smoke test.**~~ **SHIPPED** (Slice 6+).
+3. **Eval harness against labelled fixtures.** Not yet started.
+4. **Per-call caching by (path, mtime).** Not yet started.
+5. **Pre-compact recovery for earlier-than-last events.** Not yet started.
+6. ~~**Web UI as audit/inspection surface.**~~ **SHIPPED** (Slice 6 — `/stats`, `/cockpit`, `/sessions/[id]`).
 
 ---
 
-## What you can test today (after install)
+## Quick-start (after install)
 
-When the install step below completes, restart Claude Code and try
-these prompts inside any conversation about a project under
-`~/.claude/projects`:
+```bash
+klyne mcp install   # registers MCP + advisor hook + slash commands
+klyne               # starts daemon at 127.0.0.1:7878
+```
 
-- "Use the klyne MCP server's `list_sessions` tool to show me
-  every session in this project."
-- "Call `get_context_health` on this session and tell me what state
-  it's in."
-- "Generate a handoff prompt for this session — I want to start fresh
-  but keep the context."
-- "Has this session been `/compact`'d? If yes, use
-  `get_pre_compact_context` to show me what was lost."
-
-Watch for:
-- Does the AI find the right session without me telling it the id?
-  (Tests disambiguation in the wild.)
-- Does the bloat scorecard surface the files that genuinely matter?
-- Does the handoff Markdown read like something you would actually
-  paste into a fresh session?
-- Does `get_pre_compact_context` actually help recover what
-  `/compact` ate, when you've compacted before?
-
-When you have feedback, the file paths to look at are:
-
-- Tool implementations: `internal/mcpserver/tool_*.go`
-- Classifier rules: `internal/contexthealth/classifier.go`
-- Disambiguation: `internal/mcpserver/sessions.go`
-- Trust audit: `internal/audit/`
+Then in Claude Code, try: `/klyne:health`, `/klyne:tokens`, `/klyne:handoff`, `/klyne:precompact`.

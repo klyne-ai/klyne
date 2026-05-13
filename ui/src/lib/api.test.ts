@@ -13,8 +13,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { ApiError, fetchSessions, search, fetchSession, fetchMessages, fetchHealthz, updateSettings, fetchCostSummary } from './api.js';
-import type { SessionListResponse, SessionResponse, MessageListResponse, HealthzResponse, SettingsResponse, CostSummaryResponse } from './types.js';
+import { ApiError, fetchSessions, search, fetchSession, fetchMessages, fetchHealthz, fetchCostSummary } from './api.js';
+import type { SessionListResponse, SessionResponse, MessageListResponse, HealthzResponse, CostSummaryResponse } from './types.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -259,37 +259,6 @@ describe('TestFetchHealthz_HappyPath', () => {
 });
 
 // ---------------------------------------------------------------------------
-// TestUpdateSettings_HappyPath
-// ---------------------------------------------------------------------------
-
-describe('TestUpdateSettings_HappyPath', () => {
-  afterEach(() => vi.unstubAllGlobals());
-
-  it('sends a PUT request with JSON body', async () => {
-    const returned: SettingsResponse = {
-      ai: {
-        summary_model: { provider: 'anthropic', model: 'claude-sonnet-4.5' },
-        title_model: { provider: 'anthropic', model: 'claude-haiku-4' },
-        embed_model: { provider: 'openai', model: 'text-embedding-3-small' }
-      },
-      detected: { anthropic: true, openai: false, gemini: false, ollama: false }
-    };
-    mockFetch(200, returned);
-    const result = await updateSettings({
-      ai: {
-        summary_model: { provider: 'anthropic', model: 'claude-sonnet-4.5' },
-        title_model: { provider: 'anthropic', model: 'claude-haiku-4' },
-        embed_model: { provider: 'openai', model: 'text-embedding-3-small' }
-      }
-    });
-    expect(result.ai.summary_model.provider).toBe('anthropic');
-    const [, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
-    expect(init.method).toBe('PUT');
-    expect(init.headers).toMatchObject({ 'Content-Type': 'application/json' });
-  });
-});
-
-// ---------------------------------------------------------------------------
 // TestFetchCostSummary_HappyPath
 // ---------------------------------------------------------------------------
 
@@ -317,8 +286,8 @@ describe('TestFetchCostSummary_HappyPath', () => {
 // TestFetchRestore_HappyPath
 // ---------------------------------------------------------------------------
 
-import { fetchRestore, fetchSummary, fetchWizardDetect, postWizardComplete } from './api.js';
-import type { RestoreResponse, SummaryResponse, WizardDetectResponse } from './types.js';
+import { fetchRestore, fetchSummary } from './api.js';
+import type { RestoreResponse, SummaryResponse } from './types.js';
 
 describe('TestFetchRestore_HappyPath', () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -362,43 +331,3 @@ describe('TestFetchSummary_HappyPath', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// TestFetchWizardDetect_HappyPath
-// ---------------------------------------------------------------------------
-
-describe('TestFetchWizardDetect_HappyPath', () => {
-  afterEach(() => vi.unstubAllGlobals());
-
-  it('returns a typed WizardDetectResponse', async () => {
-    const payload: WizardDetectResponse = {
-      connectors: {
-        claude_root: '~/.claude/projects',
-        claude_ok: true,
-        codex_root: '~/.codex/sessions',
-        codex_ok: false
-      },
-      providers: { anthropic: true, openai: false, gemini: false, ollama: false },
-      recommendations: [{ task: 'summary', selected: { provider: 'anthropic', model: 'claude-haiku-4' }, reason: 'fastest' }]
-    };
-    mockFetch(200, payload);
-    const result = await fetchWizardDetect();
-    expect(result.providers.anthropic).toBe(true);
-    expect(result.connectors.claude_ok).toBe(true);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// TestPostWizardComplete_HappyPath
-// ---------------------------------------------------------------------------
-
-describe('TestPostWizardComplete_HappyPath', () => {
-  afterEach(() => vi.unstubAllGlobals());
-
-  it('sends a POST request to /wizard/complete', async () => {
-    mockFetch(204, null);
-    await postWizardComplete();
-    const [url, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
-    expect(url).toContain('/wizard/complete');
-    expect(init.method).toBe('POST');
-  });
-});

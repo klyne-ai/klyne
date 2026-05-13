@@ -7,7 +7,7 @@
  *   TestSessions_AppendAndSet               — pagination helpers
  *   TestCurrentSession_SetAndClear          — setCurrentSession / setCurrentSession(null)
  *   TestCostSummary_Set                     — setCostSummary replaces data
- *   TestSettings_Set                        — setSettings replaces data
+ *   (TestSettings_Set removed — settings feature deleted)
  *   TestPatchSession_UpdatesList            — patchSession updates matching entry
  */
 
@@ -17,19 +17,17 @@ import {
   currentSession,
   searchResults,
   costSummary,
-  settings,
   appendSessions,
   setSessions,
   setCurrentSession,
   setSearchResults,
   clearSearchResults,
   setCostSummary,
-  setSettings,
   patchSession,
   onMsgNew,
   prependSession
 } from './stores.svelte.js';
-import type { Session, SessionResponse, SearchResponse, CostSummaryResponse, SettingsResponse, MsgNew } from './types.js';
+import type { Session, SessionResponse, SearchResponse, CostSummaryResponse, MsgNew } from './types.js';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -78,11 +76,9 @@ beforeEach(() => {
   setSessions([], 0);
   setCurrentSession(null);
   clearSearchResults();
-  // Reset costSummary and settings to initial state
+  // Reset costSummary to initial state
   costSummary.data = null;
   costSummary.loading = false;
-  settings.data = null;
-  settings.loading = false;
   sessions.loading = false;
   currentSession.loading = false;
   searchResults.loading = false;
@@ -235,26 +231,6 @@ describe('TestCostSummary_Set', () => {
     setCostSummary(data);
     expect(costSummary.data).not.toBeNull();
     expect(costSummary.data!.total.cost_usd).toBeCloseTo(0.1);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// TestSettings_Set
-// ---------------------------------------------------------------------------
-
-describe('TestSettings_Set', () => {
-  it('setSettings stores the response', () => {
-    const data: SettingsResponse = {
-      ai: {
-        summary_model: { provider: 'anthropic', model: 'claude-sonnet-4.5' },
-        title_model: { provider: 'anthropic', model: 'claude-haiku-4' },
-        embed_model: { provider: 'openai', model: 'text-embedding-3-small' }
-      },
-      detected: { anthropic: true, openai: true, gemini: false, ollama: false }
-    };
-    setSettings(data);
-    expect(settings.data).not.toBeNull();
-    expect(settings.data!.detected.anthropic).toBe(true);
   });
 });
 

@@ -537,64 +537,6 @@ export interface CockpitThreadsResponse {
   threads: CockpitThread[];
 }
 
-// --- /settings ---
-
-/** TaskModel is the per-internal-task model selection. */
-export interface TaskModel {
-  provider: string;
-  model: string;
-}
-
-/** SettingsAI mirrors config.AIConfig as exposed over HTTP. */
-export interface SettingsAI {
-  summary_model: TaskModel;
-  title_model: TaskModel;
-  embed_model: TaskModel;
-}
-
-/** DetectedProviders reports which credentials the daemon currently sees. */
-export interface DetectedProviders {
-  anthropic: boolean;
-  openai: boolean;
-  gemini: boolean;
-  ollama: boolean;
-}
-
-/** SettingsResponse is GET /settings. */
-export interface SettingsResponse {
-  ai: SettingsAI;
-  detected: DetectedProviders;
-}
-
-/** SettingsUpdateRequest is PUT /settings. */
-export interface SettingsUpdateRequest {
-  ai?: SettingsAI;
-}
-
-// --- /wizard/* ---
-
-/** WizardConnectors reports whether the v1 source directories exist. */
-export interface WizardConnectors {
-  claude_root: string;
-  claude_ok: boolean;
-  codex_root: string;
-  codex_ok: boolean;
-}
-
-/** WizardRecommendation is one row of the smart-model-picker screen. */
-export interface WizardRecommendation {
-  task: string;
-  selected: TaskModel;
-  reason: string;
-}
-
-/** WizardDetectResponse is GET /wizard/detect. */
-export interface WizardDetectResponse {
-  connectors: WizardConnectors;
-  providers: DetectedProviders;
-  recommendations: WizardRecommendation[];
-}
-
 // --- /healthz ---
 
 /** HealthzResponse is GET /healthz. */

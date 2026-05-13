@@ -228,11 +228,6 @@ func BuildOnly(cfg *config.Config) (*App, error) {
 			AIFactory: aiFactory,
 		}),
 		&handlers.EventsMounter{Hub: hub},
-		handlers.NewWizardMounter(handlers.WizardMounterDeps{
-			DB:     db,
-			Cfg:    cfg,
-			Logger: logger,
-		}),
 	}
 
 	app := &App{

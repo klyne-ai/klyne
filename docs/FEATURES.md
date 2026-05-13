@@ -88,7 +88,7 @@ Top projects by token usage:
 
 ## Feature 1 — The MCP server
 
-> **What it is.** A subprocess that Claude Code and Codex CLI spawn over stdio. The AI itself calls these tools mid-session. **All ten are live and tested below against your real data.**
+> **What it is.** A subprocess that Claude Code and Codex CLI spawn over stdio. The AI itself calls these tools mid-session. **All twelve are live and tested below against your real data.**
 
 ### A1 · `list_sessions` — disambiguate parallel sessions
 
@@ -401,6 +401,35 @@ See A7 above — both confirmed working. Decisions are project-scoped by default
 Only fires when `<project_root>/.code-review-graph/` exists (from the upstream [tirth8205/code-review-graph](https://github.com/tirth8205/code-review-graph) project). Gracefully no-ops when absent — returns `detected: false`. **Not currently installed on any of your repos**, so this is a "ready when you adopt the upstream tool" surface.
 
 **Useful for you?** Only if you decide to install the upstream code-review-graph in your active repos. Not required.
+
+---
+
+### A11 · `remember` — store a persistent memory
+
+Stores a project-scoped or global memory (same underlying `decisions` table). Supports multi-line text and runbooks. See [Feature 4.5](#feature-45--klyne-remember-this---refer-klyne--memory-flow) for the full flow.
+
+```json
+$ mcp__klyne__remember text="RUNBOOK: add-secret-to-bucket ..." scope="project" tags=["runbook","secrets"]
+{"id": "d-71e776ba02137f79", "ts": 1778573193093, "scope": "project", "project_path": "/Users/.../auth-service"}
+```
+
+---
+
+### A12 · `recall` — retrieve project + global memories
+
+Returns both project-scoped and global memories in one call. Supports optional `query` (substring filter) and `tag` filter.
+
+```json
+$ mcp__klyne__recall query="secret"
+{
+  "project_path": "/Users/.../auth-service",
+  "project_memories": [/* project-scoped matches */],
+  "global_memories": [/* global matches */],
+  "total": 4
+}
+```
+
+**Useful for you?** The killer flow is runbooks — multi-line scripted procedures the AI can re-execute with new arguments. See [Feature 4.5](#feature-45--klyne-remember-this---refer-klyne--memory-flow) for a real walkthrough.
 
 ---
 
@@ -985,7 +1014,7 @@ $ curl http://127.0.0.1:7878/usage/stats?cli=claude&days=30
 ]
 ```
 
-### The seven routes and what each one shows
+### Web routes
 
 | Route | Data source | Headline numbers on your machine |
 |---|---|---|
@@ -998,8 +1027,8 @@ $ curl http://127.0.0.1:7878/usage/stats?cli=claude&days=30
 | `/projects/[name]` | drill-down on one project | All sessions, files, decisions for one repo |
 | `/sessions/[id]` | `/sessions/:id` + `/sessions/:id/messages` | Full transcript, every tool call, token timeline, resume command |
 | `/search` | `/search?q=…` (FTS5) | Searched `jointLedgerController` above — 3 hits in 4 ms |
-| `/settings` | `/settings`, `/wizard/detect` | Edit `~/.klyne/config.toml` from browser; provider detection |
 | `/advisors` | `/advisors` | Per-session advisor state — which triggers fired and when |
+| `/memory` | `/memory/items` | Persistent memories grouped by project — runbooks, decisions, global notes |
 
 **Useful for you?** The web UI is where most users will spend most of their time. The Stats page is the killer — **30-day streak / $26K / 11.5B input / 80K messages** is the kind of single-screen summary that you can't get from any CLI.
 
@@ -1405,7 +1434,7 @@ Active recording prep:
 | Read the design doc for analytics commands | [`docs/features/analytics-commands.md`](./features/analytics-commands.md) |
 | Read the design doc for v2 surfaces | [`docs/features/v2-statusline-files-decisions-subagents-otel.md`](./features/v2-statusline-files-decisions-subagents-otel.md) |
 | Read the design doc for the v3 stats dashboard | [`docs/features/v3-stats-dashboard.md`](./features/v3-stats-dashboard.md) |
-| See every CLI command tested against real Claude + Codex sessions | [`docs/cli-review-2026-05-10.md`](./cli-review-2026-05-10.md) |
+| See the MCP server build log | [`docs/MCP-SHIP-LOG.md`](./MCP-SHIP-LOG.md) |
 | Trace what shipped in which slice | [`docs/MCP-SHIP-LOG.md`](./MCP-SHIP-LOG.md) |
 | Read the security model | [`docs/SECURITY.md`](./SECURITY.md) |
 | Compare klyne against neighbours | [`docs/marketing/comparison-and-gaps.md`](./marketing/comparison-and-gaps.md) |
