@@ -42,13 +42,17 @@ func HandleGenerateHandoff(ctx context.Context, _ *mcp.CallToolRequest, in Hando
 		const reason = "Multiple Claude Code sessions in this project. Pick one and call generate_handoff again with session_id."
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{Text: reason}},
-		}, HandoffOutput{Ambiguous: true, Candidates: rows}, nil
+		}, HandoffOutput{
+			Ambiguous:  true,
+			Candidates: rows,
+			Markdown:   formatAmbiguousAsMarkdown("generate_handoff", rows),
+		}, nil
 	}
 	if path == "" {
 		const reason = "No Claude Code session found for this working directory."
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{Text: reason}},
-		}, HandoffOutput{}, nil
+		}, HandoffOutput{Markdown: reason}, nil
 	}
 
 	snap, err := LoadSnapshot(ctx, path)

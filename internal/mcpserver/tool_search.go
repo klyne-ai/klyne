@@ -95,6 +95,10 @@ type SearchOutput struct {
 	// daemon was unreachable. The AI uses this to suggest restarting
 	// klyne rather than reformulating the query.
 	DaemonDown bool `json:"daemon_down,omitempty" jsonschema:"true when the daemon could not be reached"`
+	// Markdown is the slash-prompt-ready rendering, produced
+	// server-side so /klyne:search can echo verbatim without the host
+	// LLM re-rendering structured hits itself.
+	Markdown string `json:"markdown" jsonschema:"slash-prompt-ready markdown rendering (verbatim-echo target)"`
 }
 
 // daemonBaseURL returns the URL the search tool will hit. Honours the
@@ -115,7 +119,7 @@ func HandleSearchMessages(ctx context.Context, _ *mcp.CallToolRequest, in Search
 		const reason = "Empty query — pass a non-empty `query` to search messages."
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{Text: reason}},
-		}, SearchOutput{Reason: reason}, nil
+		}, SearchOutput{Reason: reason, Markdown: reason}, nil
 	}
 
 	limit := in.Limit
@@ -157,7 +161,7 @@ func HandleSearchMessages(ctx context.Context, _ *mcp.CallToolRequest, in Search
 			reason := fmt.Sprintf("Could not reach the klyne daemon at %s — start it with `klyne` and try again.", base)
 			return &mcp.CallToolResult{
 				Content: []mcp.Content{&mcp.TextContent{Text: reason}},
-			}, SearchOutput{Query: q, Reason: reason, DaemonDown: true}, nil
+			}, SearchOutput{Query: q, Reason: reason, DaemonDown: true, Markdown: reason}, nil
 		}
 		return nil, SearchOutput{Query: q}, fmt.Errorf("call daemon: %w", err)
 	}
@@ -198,6 +202,7 @@ func HandleSearchMessages(ctx context.Context, _ *mcp.CallToolRequest, in Search
 	if len(hits) == 0 {
 		out.Reason = fmt.Sprintf("No matches for %q.", q)
 	}
+	out.Markdown = formatSearchAsMarkdown(out)
 
 	summary := fmt.Sprintf("Found %d hit(s) for %q (%dms).", out.Total, q, out.TookMs)
 	if len(hits) == 0 {

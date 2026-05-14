@@ -73,6 +73,12 @@ type GetContextHealthOutput struct {
 	// Candidates is the list of sessions the resolver found in the
 	// cwd. Populated only when Ambiguous is true.
 	Candidates []CandidateRow `json:"candidates,omitempty" jsonschema:"sessions to choose from when ambiguous"`
+	// Markdown is the slash-prompt-ready rendering produced server-side
+	// so the host LLM can echo it verbatim instead of re-rendering
+	// structured fields itself. Covers ambiguous candidate lists, the
+	// no-session message, and the full verdict + bloat report. Always
+	// populated.
+	Markdown string `json:"markdown" jsonschema:"slash-prompt-ready markdown rendering (verbatim-echo target)"`
 }
 
 // CandidateRow is the JSON shape exposed for one disambiguation
@@ -119,12 +125,14 @@ func HandleGetContextHealth(ctx context.Context, _ *mcp.CallToolRequest, in GetC
 		// Surfacing an empty result is more useful to the AI than an
 		// error — it can tell the user "no session found in this
 		// directory" without retry.
+		const msg = "No Claude Code session found for this working directory."
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{
-				&mcp.TextContent{Text: "No Claude Code session found for this working directory."},
+				&mcp.TextContent{Text: msg},
 			},
 		}, GetContextHealthOutput{
-			Reason: "No Claude Code session found for this working directory.",
+			Reason:   msg,
+			Markdown: msg,
 		}, nil
 	}
 
@@ -157,6 +165,7 @@ func HandleGetContextHealth(ctx context.Context, _ *mcp.CallToolRequest, in GetC
 		Bloat:          res.Bloat,
 		Signals:        res.Signals,
 	}
+	out.Markdown = formatHealthAsMarkdown(out)
 	// The Content text is what the AI reads first when deciding how to
 	// summarise the call to the user. Keep it terse — one sentence.
 	return &mcp.CallToolResult{
@@ -251,13 +260,15 @@ func ambiguousResult(cands []SessionCandidate) (*mcp.CallToolResult, GetContextH
 		})
 	}
 	const reason = "Multiple Claude Code sessions in this project. Pick one and call again with session_id."
-	return &mcp.CallToolResult{
-		Content: []mcp.Content{&mcp.TextContent{Text: reason}},
-	}, GetContextHealthOutput{
+	out := GetContextHealthOutput{
 		Reason:     reason,
 		Ambiguous:  true,
 		Candidates: rows,
-	}, nil
+	}
+	out.Markdown = formatAmbiguousAsMarkdown("get_context_health", rows)
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{&mcp.TextContent{Text: reason}},
+	}, out, nil
 }
 
 // timeRFC3339 is the format the candidate rows expose. Stays in one
