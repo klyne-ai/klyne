@@ -379,16 +379,18 @@ body.klyne-fullscreen .work,
 body.klyne-fullscreen .work.work-fullscreen { height: 100vh; }
 .work-fullscreen { grid-template-columns: 0px 1fr 0px !important; }
 
-/* Safety net for the OS-level Fullscreen API (F11 or any future
-   caller of requestFullscreen): paint our app background instead
-   of the browser's default black, and override the fixed-
-   attachment gradients that some browsers fail to render in
-   fullscreen. Without this rule, html:fullscreen briefly flashes
-   black before content paints. */
-:fullscreen, ::backdrop {
-  background: var(--ad-bg) !important;
+/* OS-level fullscreen: requestFullscreen is called on the .work
+   element (not <html>) so the body's fixed-attachment gradients
+   keep working. The :fullscreen pseudo on .work paints our app
+   background directly. ::backdrop is what the browser renders
+   behind a fullscreen element; default is black, so we override. */
+.work:fullscreen,
+.work:-webkit-full-screen {
+  background: var(--ad-bg);
+  width: 100vw;
+  height: 100vh;
 }
-html:fullscreen body { background: var(--ad-bg) !important; background-attachment: scroll !important; }
+::backdrop { background: var(--ad-bg); }
 
 .rail {
   border-right: 1px solid var(--ad-border-soft);

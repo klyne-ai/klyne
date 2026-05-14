@@ -113,14 +113,18 @@
     inspectorOpen = !inspectorOpen;
     saveBool(LS_INSP, inspectorOpen);
   }
-  // toggleFullscreen hides both rails and the top app nav so the
-  // terminal grid fills the entire browser window. We deliberately
-  // do NOT call the OS-level requestFullscreen API — that targets
-  // <html> and conflicts with the body's background-attachment:
-  // fixed gradients, rendering a black screen on some browsers.
-  // App-level "hide chrome" already gives the user maximum terminal
-  // area; pressing F11 separately enters true OS fullscreen if
-  // wanted. Going in: capture rail state so it survives the exit.
+  // toggleFullscreen hides both rails, the top app nav, AND requests
+  // OS-level fullscreen on the .work element so the terminal grid
+  // covers the entire monitor — past the browser's tab bar and any
+  // pinned extension sidebars (e.g. Brave's vertical sidebar).
+  //
+  // We request fullscreen on .work (a div) rather than
+  // document.documentElement because the body uses
+  // background-attachment: fixed radial gradients that fail to
+  // render under <html>:fullscreen on some browsers, producing a
+  // black screen. Putting the fullscreen on a child div keeps the
+  // body's painted background intact and gives .work its own
+  // background via the :fullscreen pseudo.
   function toggleFullscreen(): void {
     if (!fullscreen) {
       savedRailOpen = railOpen;
@@ -128,7 +132,33 @@
       railOpen = false;
       inspectorOpen = false;
       fullscreen = true;
+      if (typeof document !== 'undefined') {
+        const el = document.querySelector('.work') as HTMLElement | null;
+        if (el?.requestFullscreen) {
+          el.requestFullscreen().catch(() => {
+            // Browser refused (no user gesture, blocked by policy,
+            // etc.). The app-level body class still gives the user
+            // a maximised layout within the browser viewport.
+          });
+        }
+      }
     } else {
+      railOpen = savedRailOpen;
+      inspectorOpen = savedInspectorOpen;
+      fullscreen = false;
+      if (typeof document !== 'undefined' && document.fullscreenElement && document.exitFullscreen) {
+        document.exitFullscreen().catch(() => { /* already exited */ });
+      }
+    }
+  }
+
+  // Keep the local fullscreen flag in sync with the browser. When
+  // the user dismisses OS fullscreen via Esc / the browser's UI, we
+  // also restore the rails and nav to avoid a half-state where
+  // chrome is hidden but the user is back in a normal window.
+  function onFullscreenChange(): void {
+    if (typeof document === 'undefined') return;
+    if (!document.fullscreenElement && fullscreen) {
       railOpen = savedRailOpen;
       inspectorOpen = savedInspectorOpen;
       fullscreen = false;
@@ -188,7 +218,15 @@
   }
   onMount(() => {
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    if (typeof document !== 'undefined') {
+      document.addEventListener('fullscreenchange', onFullscreenChange);
+    }
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('fullscreenchange', onFullscreenChange);
+      }
+    };
   });
 </script>
 
