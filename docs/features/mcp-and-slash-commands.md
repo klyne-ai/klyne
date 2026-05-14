@@ -2,7 +2,7 @@
 
 > Status: shipped. The core rescue-layer surface — every klyne capability the AI can call mid-session.
 
-`klyne mcp install` wires klyne as an MCP server in Claude Code and Codex CLI, drops six markdown slash commands into `~/.claude/commands/klyne/`, and registers the `UserPromptSubmit` advisor hook. Idempotent.
+`klyne mcp install` wires klyne as an MCP server in Claude Code and Codex CLI, drops six markdown slash commands into `~/.claude/commands/klyne/`, registers the `UserPromptSubmit` advisor hook, and unpacks the agent-driven Skill bundles into `~/.claude/skills/`. Idempotent.
 
 ```bash
 klyne mcp install            # install MCP server + slash commands + advisor hook
@@ -21,6 +21,20 @@ Each slash command calls one MCP tool and prints the tool's `markdown` field byt
 | `/klyne:search <query>` | `search_messages` | FTS5 search across every indexed session | [search.md](./search.md) |
 | `/klyne:sessions` | `list_sessions` | Every Claude Code + Codex session in the current project | [sessions-list.md](./sessions-list.md) |
 | `/klyne:tokens` | `get_token_timeline` | Per-turn token usage with sparkline + heatmap | [token-timeline.md](./token-timeline.md) |
+
+## Skills — the agent-invoked path
+
+Slash commands are user-typed (`/klyne:health`). Skills are Claude-invoked — the agent reads each bundled `SKILL.md` description and auto-invokes when the description matches the current situation. No `/klyne:` typing required.
+
+Skill bundles live under `~/.claude/skills/<skill-name>/SKILL.md` (Claude Code's standard skill directory format). `klyne mcp install` unpacks them; new versions overwrite on re-install (idempotent).
+
+| Skill | Wraps MCP tool | Auto-invokes when |
+|---|---|---|
+| `klyne-health` | `get_context_health` | An advisory mentions context fill / drift / acceleration / 5-hour window, user asks about token usage, after a `/compact` event, or before loading a >5K-token file |
+
+Why both surfaces: slash commands are deterministic and user-controlled — the right path when you know what you want. Skills close the gap when you *don't* know — they let the agent reach for the rescue tool before the user notices the session is degrading.
+
+The skill body itself defers all heuristics to the deterministic klyne advisor and the MCP tool's `action` field; the agent never invents thresholds. Suppression / cooldown rules live in the skill body for v1 — a `healthy` verdict followed by re-invocation within 10 turns is treated as poll-spam and skipped.
 
 ## MCP tools
 

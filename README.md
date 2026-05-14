@@ -190,6 +190,16 @@ flowchart LR
 
 Installed as Markdown slash commands under `~/.claude/commands/klyne/*.md` — each command file calls the matching MCP tool above. Single surface, no `(MCP)` duplicates in the slash menu.
 
+### Skills — agent-triggered when the description matches
+
+Skills are the auto-invoked counterpart to slash commands. The agent reads each `SKILL.md`'s description and invokes the skill when it matches the current situation — no `/klyne:` typing required.
+
+| Skill | Wraps | Auto-invokes when |
+|---|---|---|
+| `klyne-health` | `get_context_health` | An advisory mentions context fill / drift / acceleration / 5-hour window, the user asks about token usage, after a `/compact` event, or before loading a >5K-token file |
+
+Installed under `~/.claude/skills/<skill>/SKILL.md` by `klyne mcp install`. More skills land here as klyne grows; the install is idempotent and overwrites on upgrade. See [`docs/features/mcp-and-slash-commands.md`](docs/features/mcp-and-slash-commands.md#skills--the-agent-invoked-path) for the full rationale.
+
 ### CLI commands — for your terminal
 
 **Setup + daemon**
@@ -403,6 +413,7 @@ The `mcp install` command auto-detects host configs:
 | Codex CLI | `~/.codex/config.toml` | `[mcp_servers.klyne]` |
 | Claude Code (advisor hook) | `~/.claude/settings.json` | `hooks.UserPromptSubmit[].klyne` (idempotent merge) |
 | Claude Code (slash commands) | `~/.claude/commands/klyne/*.md` | Six Markdown files |
+| Claude Code (skills) | `~/.claude/skills/<skill>/SKILL.md` | One bundle per agent-invoked skill (currently `klyne-health`) |
 
 Pass `--platform claude` or `--platform codex` to scope the install.
 
