@@ -7,7 +7,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { goto } from '$app/navigation';
   import { fetchSessions, fetchMessages } from '$lib/api.js';
-  import { subscribe } from '$lib/sse.js';
+  import { subscribeShared } from '$lib/sse.js';
   import { renderMarkdown } from '$lib/markdown.js';
   import type { Message, Session, ToolCall } from '$lib/types.js';
   import type { ProjectAggregate } from '$lib/projects.svelte.js';
@@ -59,7 +59,7 @@
 
   onMount(() => {
     void load();
-    unsub = subscribe({
+    unsub = subscribeShared({
       onMsgNew: (p) => {
         if (session && p.session_id === session.id) scheduleReload();
       },

@@ -9,7 +9,7 @@
   surfaces from each terminal's ⓘ button.
 -->
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import { projectsStore } from '$lib/projects.svelte.js';
   import type { ProjectAggregate } from '$lib/projects.svelte.js';
   import ProjectRail from '$lib/ui/ProjectRail.svelte';
@@ -71,8 +71,15 @@
   let savedRailOpen = $state(true);
   let savedInspectorOpen = $state(true);
 
+  // Live = active within the last minute (shown as "N live" in the header).
+  // Recent = active within the last 30 minutes — these auto-appear in the
+  // grid so the user can keep an eye on parallel tasks they're switching
+  // between, not just the one terminal that's actively streaming right now.
+  const LIVE_THRESHOLD_MS = 60_000;
+  const RECENT_THRESHOLD_MS = 30 * 60 * 1000;
+
   const projects = $derived(projectsStore.items);
-  const liveCount = $derived(projects.filter((p) => p.lastMsAgo < 60_000).length);
+  const liveCount = $derived(projects.filter((p) => p.lastMsAgo < LIVE_THRESHOLD_MS).length);
 
   // Auto-seed selected project from the most-recent one when none chosen.
   $effect(() => {
@@ -187,14 +194,40 @@
       .map((path) => projects.find((p) => p.project_path === path))
       .filter((p): p is ProjectAggregate => p !== undefined)
   );
-  // Auto-include currently-live projects that aren't already pinned, so a
-  // running session shows up in the grid without an explicit pin. Pinned
-  // projects keep their user-defined order first; live-but-unpinned trail
-  // sorted by most-recent activity.
+  // Insertion-ordered list of unpinned recent project_paths. Stays stable
+  // across refreshes so cards don't jump positions when a tool call on
+  // terminal B updates its lastMsAgo — without this, a recency-sorted list
+  // would shuffle the grid on every SSE update, which is the irritating
+  // flicker users notice when watching 3-4 parallel tasks. Once a card
+  // joins this list it keeps its slot until it drops out of the 30-min
+  // window or gets pinned.
+  let recentOrder = $state<string[]>([]);
+
+  $effect(() => {
+    if (projects.length === 0) return;
+    const validPaths = new Set(projects.map((p) => p.project_path));
+    const pinnedSet = new Set(pinnedPaths);
+    const newlyRecent = projects
+      .filter((p) => p.lastMsAgo < RECENT_THRESHOLD_MS && !pinnedSet.has(p.project_path))
+      .map((p) => p.project_path);
+    untrack(() => {
+      let next = recentOrder.filter((path) => validPaths.has(path) && !pinnedSet.has(path));
+      for (const path of newlyRecent) {
+        if (!next.includes(path)) next = next.concat(path);
+      }
+      const changed = next.length !== recentOrder.length || next.some((p, i) => p !== recentOrder[i]);
+      if (changed) recentOrder = next;
+    });
+  });
+
+  // Live-unpinned in stable insertion order. Drops cards that have gone
+  // past the recency window; their slot doesn't get preserved (so a card
+  // that comes back to life appears at the end, where the user notices
+  // the new activity).
   const liveUnpinned = $derived(
-    projects
-      .filter((p) => p.lastMsAgo < 60_000 && !pinnedPaths.includes(p.project_path))
-      .sort((a, b) => a.lastMsAgo - b.lastMsAgo)
+    recentOrder
+      .map((path) => projects.find((p) => p.project_path === path))
+      .filter((p): p is ProjectAggregate => p !== undefined && p.lastMsAgo < RECENT_THRESHOLD_MS)
   );
   const visibleProjects = $derived([...pinnedProjects, ...liveUnpinned]);
 

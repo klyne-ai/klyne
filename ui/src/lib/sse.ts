@@ -164,3 +164,41 @@ export function subscribe(handlers: SSEHandlers, url: string = SSE_URL): () => v
     }
   };
 }
+
+// ---------------------------------------------------------------------------
+// Shared subscriber — multiplexes one EventSource across many callers
+// ---------------------------------------------------------------------------
+
+// Components like Terminal can mount many copies on a single page. Each
+// `subscribe()` call opens its own EventSource, and browsers cap HTTP/1.1
+// at 6 connections per origin — so N Terminals + the layout's global
+// subscriber quickly starve fetch() calls (Loading… stuck on every tile).
+// `subscribeShared` routes every caller through one EventSource and
+// closes it only when the last subscriber unsubscribes.
+
+const sharedHandlerSet = new Set<SSEHandlers>();
+let sharedUnsub: (() => void) | null = null;
+
+export function subscribeShared(handlers: SSEHandlers, url: string = SSE_URL): () => void {
+  sharedHandlerSet.add(handlers);
+  if (!sharedUnsub) {
+    const fanout: SSEHandlers = {
+      onMsgNew: (p) => sharedHandlerSet.forEach((h) => h.onMsgNew?.(p)),
+      onSummaryReady: (p) => sharedHandlerSet.forEach((h) => h.onSummaryReady?.(p)),
+      onSessionUpdate: (p) => sharedHandlerSet.forEach((h) => h.onSessionUpdate?.(p)),
+      onCostTick: (p) => sharedHandlerSet.forEach((h) => h.onCostTick?.(p)),
+      onThreadRebuild: (p) => sharedHandlerSet.forEach((h) => h.onThreadRebuild?.(p)),
+      onCompactDetected: (p) => sharedHandlerSet.forEach((h) => h.onCompactDetected?.(p)),
+      onOpen: () => sharedHandlerSet.forEach((h) => h.onOpen?.()),
+      onParseError: (e, err) => sharedHandlerSet.forEach((h) => h.onParseError?.(e, err))
+    };
+    sharedUnsub = subscribe(fanout, url);
+  }
+  return function unsubscribeShared(): void {
+    sharedHandlerSet.delete(handlers);
+    if (sharedHandlerSet.size === 0 && sharedUnsub) {
+      sharedUnsub();
+      sharedUnsub = null;
+    }
+  };
+}
