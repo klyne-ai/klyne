@@ -367,14 +367,28 @@ a { color: inherit; text-decoration: none; }
 /* Both rails hidden — give the terminal grid the full width. */
 .work.rail-collapsed.inspector-collapsed { grid-template-columns: 0px 1fr 0px; }
 
-/* Fullscreen mode: hides the top app nav (via body class) and the
-   rails so the terminal grid covers the entire viewport. Esc or F
-   toggles it. The OS-level fullscreen API is requested in parallel
-   so the browser chrome also disappears when the user gesture allows. */
+/* App-level fullscreen mode: hides the top nav (via body class)
+   and both rails so the terminal grid covers the entire browser
+   window. Esc or F toggles it. We deliberately do NOT trigger the
+   OS-level Fullscreen API — that targets <html> and on some
+   browsers conflicts with body's background-attachment: fixed
+   gradients, producing a black screen. Users who want monitor-
+   level fullscreen can still press F11. */
 body.klyne-fullscreen .nav { display: none !important; }
 body.klyne-fullscreen .work,
 body.klyne-fullscreen .work.work-fullscreen { height: 100vh; }
 .work-fullscreen { grid-template-columns: 0px 1fr 0px !important; }
+
+/* Safety net for the OS-level Fullscreen API (F11 or any future
+   caller of requestFullscreen): paint our app background instead
+   of the browser's default black, and override the fixed-
+   attachment gradients that some browsers fail to render in
+   fullscreen. Without this rule, html:fullscreen briefly flashes
+   black before content paints. */
+:fullscreen, ::backdrop {
+  background: var(--ad-bg) !important;
+}
+html:fullscreen body { background: var(--ad-bg) !important; background-attachment: scroll !important; }
 
 .rail {
   border-right: 1px solid var(--ad-border-soft);

@@ -113,10 +113,14 @@
     inspectorOpen = !inspectorOpen;
     saveBool(LS_INSP, inspectorOpen);
   }
-  // toggleFullscreen flips between three things at once: both rails,
-  // the top app nav (hidden via body class), and the OS-level
-  // browser fullscreen. Going in: capture current rail state so the
-  // user's preferences survive the exit. Going out: restore them.
+  // toggleFullscreen hides both rails and the top app nav so the
+  // terminal grid fills the entire browser window. We deliberately
+  // do NOT call the OS-level requestFullscreen API — that targets
+  // <html> and conflicts with the body's background-attachment:
+  // fixed gradients, rendering a black screen on some browsers.
+  // App-level "hide chrome" already gives the user maximum terminal
+  // area; pressing F11 separately enters true OS fullscreen if
+  // wanted. Going in: capture rail state so it survives the exit.
   function toggleFullscreen(): void {
     if (!fullscreen) {
       savedRailOpen = railOpen;
@@ -124,28 +128,7 @@
       railOpen = false;
       inspectorOpen = false;
       fullscreen = true;
-      if (typeof document !== 'undefined' && document.documentElement.requestFullscreen) {
-        document.documentElement.requestFullscreen().catch(() => {
-          // Browser refused (no user gesture, etc.) — keep the app-
-          // level fullscreen layout active anyway since the body
-          // class is what actually hides the chrome.
-        });
-      }
     } else {
-      railOpen = savedRailOpen;
-      inspectorOpen = savedInspectorOpen;
-      fullscreen = false;
-      if (typeof document !== 'undefined' && document.fullscreenElement && document.exitFullscreen) {
-        document.exitFullscreen().catch(() => { /* already exited */ });
-      }
-    }
-  }
-  // Keep the local fullscreen flag in sync with the browser's view —
-  // if the user hits Esc to leave OS fullscreen, we should still
-  // re-show the rails and the top nav.
-  function onFullscreenChange(): void {
-    if (typeof document === 'undefined') return;
-    if (!document.fullscreenElement && fullscreen) {
       railOpen = savedRailOpen;
       inspectorOpen = savedInspectorOpen;
       fullscreen = false;
@@ -205,15 +188,7 @@
   }
   onMount(() => {
     window.addEventListener('keydown', onKey);
-    if (typeof document !== 'undefined') {
-      document.addEventListener('fullscreenchange', onFullscreenChange);
-    }
-    return () => {
-      window.removeEventListener('keydown', onKey);
-      if (typeof document !== 'undefined') {
-        document.removeEventListener('fullscreenchange', onFullscreenChange);
-      }
-    };
+    return () => window.removeEventListener('keydown', onKey);
   });
 </script>
 
