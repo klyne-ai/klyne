@@ -197,6 +197,28 @@ type Message struct {
 	// the user ran the CLI from a subdirectory. Used together with
 	// GitBranch to split parallel terminals into separate cockpit tiles.
 	Cwd string `json:"cwd,omitempty"`
+	// CompactBoundary is non-nil only on the synthetic system message
+	// the Claude parser emits for `subtype:"compact_boundary"` lines
+	// (Claude Code v2.1+). Carries the explicit before/after token
+	// counts and trigger reason from the CLI's `compactMetadata`
+	// block — modern transcripts no longer require heuristic
+	// detection. The writer goroutine reads this to populate the
+	// compact_events table; downstream consumers (SSE, store) ignore
+	// it. Never set for Codex messages.
+	CompactBoundary *CompactBoundary `json:"compact_boundary,omitempty"`
+}
+
+// CompactBoundary carries the per-event metadata Claude Code emits on
+// its `subtype:"compact_boundary"` system lines. PreTokens and
+// PostTokens are the prompt-token totals immediately before and after
+// the compact, sourced directly from the CLI rather than inferred
+// from a token-drop heuristic. Trigger is "manual" (user typed
+// /compact) or "auto" (Claude Code auto-compacted on context-fill
+// pressure).
+type CompactBoundary struct {
+	Trigger    string `json:"trigger,omitempty"`
+	PreTokens  int64  `json:"pre_tokens,omitempty"`
+	PostTokens int64  `json:"post_tokens,omitempty"`
 }
 
 // Session is the canonical session row, mirroring the `sessions` SQL

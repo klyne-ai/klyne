@@ -50,6 +50,47 @@ func TestParse_System(t *testing.T) {
 	}
 }
 
+// TestParse_System_CompactBoundary asserts the parser surfaces the
+// CLI's compactMetadata block on a v2.1+ compact_boundary line so the
+// writer goroutine can persist the explicit pre/post token counts
+// without re-parsing the JSONL.
+func TestParse_System_CompactBoundary(t *testing.T) {
+	line := `{"parentUuid":null,"logicalParentUuid":"0a9fdba3-0f79-4cb8-b95b-5de7981fc624","isSidechain":false,"type":"system","subtype":"compact_boundary","content":"Conversation compacted","isMeta":false,"timestamp":"2026-05-14T09:58:43.804Z","uuid":"14f7f60d-d269-4a59-a10c-9657c5d46202","compactMetadata":{"trigger":"manual","preTokens":381202,"postTokens":5834,"durationMs":95120},"cwd":"/repo","sessionId":"a1b2c3d4-0001-0001-0001-000000000001","version":"2.1.116"}`
+	msg := mustParse(t, line)
+
+	if msg.Role != connectors.RoleSystem {
+		t.Fatalf("role = %q; want %q", msg.Role, connectors.RoleSystem)
+	}
+	if msg.CompactBoundary == nil {
+		t.Fatal("CompactBoundary is nil; expected populated metadata for compact_boundary line")
+	}
+	if got := msg.CompactBoundary.Trigger; got != "manual" {
+		t.Errorf("Trigger = %q; want %q", got, "manual")
+	}
+	if got := msg.CompactBoundary.PreTokens; got != 381202 {
+		t.Errorf("PreTokens = %d; want %d", got, 381202)
+	}
+	if got := msg.CompactBoundary.PostTokens; got != 5834 {
+		t.Errorf("PostTokens = %d; want %d", got, 5834)
+	}
+	if msg.Content == "" {
+		t.Error("Content should default to a human-readable string when message field is absent")
+	}
+}
+
+// TestParse_System_NonCompactBoundary asserts plain system lines do NOT
+// pick up a CompactBoundary value. Without this guard, a regression
+// that always-populates the field would silently insert compact_events
+// rows for every system line.
+func TestParse_System_NonCompactBoundary(t *testing.T) {
+	// turn_duration line (the most common system-subtype in modern logs)
+	line := `{"cwd":"/repo","durationMs":42,"messageCount":3,"parentUuid":"0a9fdba3-0f79-4cb8-b95b-5de7981fc624","sessionId":"a1b2c3d4-0001-0001-0001-000000000001","subtype":"turn_duration","timestamp":"2026-05-14T10:00:00.000Z","type":"system","uuid":"sys-x"}`
+	msg := mustParse(t, line)
+	if msg.CompactBoundary != nil {
+		t.Errorf("CompactBoundary should be nil for subtype=turn_duration; got %+v", msg.CompactBoundary)
+	}
+}
+
 func TestParse_UserText(t *testing.T) {
 	line := `{"cwd":"/Users/dev/projects/webhookservice","message":{"content":"I'm seeing 500 errors on our webhook endpoint.","role":"user"},"parentUuid":"null","sessionId":"a1b2c3d4-0001-0001-0001-000000000001","timestamp":"2026-05-06T10:00:05.000Z","type":"user","uuid":"usr-0001-0002-0002-0002-000000000002","version":"1.0.0"}`
 	msg := mustParse(t, line)

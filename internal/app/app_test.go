@@ -434,6 +434,55 @@ func TestApp_ProcessRawEvent_BadJSON(t *testing.T) {
 	}, byName)
 }
 
+// TestApp_ProcessRawEvent_CompactBoundaryLineWritesEvent feeds a single
+// Claude Code v2.1+ compact_boundary line through processRawEvent and
+// asserts compact_events gains a row with the CLI-reported pre/post
+// token counts. This is the regression test that pins the bug we hit
+// on real user data: the heuristic detector never fires on modern
+// transcripts because parentUuid is null, so the count stayed at 0
+// until the parser surfaced the explicit metadata.
+func TestApp_ProcessRawEvent_CompactBoundaryLineWritesEvent(t *testing.T) {
+	cfg := newTestConfig(t)
+	a, err := BuildOnly(cfg)
+	if err != nil {
+		t.Fatalf("BuildOnly: %v", err)
+	}
+	defer func() { _ = a.Stop(context.Background()) }()
+
+	byName := make(map[string]connectors.Connector, len(a.connectors))
+	for _, c := range a.connectors {
+		byName[c.Name()] = c
+	}
+
+	// Real-shape compact_boundary line. parentUuid=null, type=system,
+	// subtype=compact_boundary, and the compactMetadata block carries
+	// the values that should land in the table.
+	line := []byte(`{"parentUuid":null,"isSidechain":false,"type":"system","subtype":"compact_boundary","content":"Conversation compacted","isMeta":false,"timestamp":"2026-05-14T09:58:43.804Z","uuid":"compact-1","compactMetadata":{"trigger":"manual","preTokens":381202,"postTokens":5834,"durationMs":95120},"cwd":"/repo","sessionId":"sess-compact","version":"2.1.116"}`)
+	a.processRawEvent(context.Background(), connectors.RawEvent{
+		Path: "/tmp/.claude/projects/-repo/sess-compact.jsonl",
+		Line: line,
+		Ts:   time.Now().UnixMilli(),
+	}, byName)
+
+	var rowCount int
+	var before, after int64
+	err = a.db.Read().QueryRowContext(context.Background(),
+		`SELECT COUNT(*), COALESCE(MAX(before_token_count), 0), COALESCE(MAX(after_token_count), 0)
+		 FROM compact_events WHERE session_id = ?`, "sess-compact").Scan(&rowCount, &before, &after)
+	if err != nil {
+		t.Fatalf("query compact_events: %v", err)
+	}
+	if rowCount != 1 {
+		t.Fatalf("compact_events rows = %d, want 1", rowCount)
+	}
+	if before != 381202 {
+		t.Errorf("before_token_count = %d, want 381202 (CLI-reported preTokens)", before)
+	}
+	if after != 5834 {
+		t.Errorf("after_token_count = %d, want 5834 (CLI-reported postTokens)", after)
+	}
+}
+
 // TestApp_ProcessRawEvent_RecordsClaudeCompactEvent feeds every line of the
 // session-003-with-compact.jsonl fixture through processRawEvent and asserts
 // that exactly one row lands in compact_events for that session. This is

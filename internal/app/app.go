@@ -608,18 +608,23 @@ func (a *App) processRawEvent(ctx context.Context, ev connectors.RawEvent, byNam
 		return
 	}
 
+	// Compact-event detection runs BEFORE InsertMessage so that
+	// warm-up replay still records compactions even when the message
+	// itself is a duplicate (UUID already in the messages table from
+	// a previous run). Without this ordering, every daemon restart
+	// would silently skip compact-event recording for the entire
+	// history. InsertCompactEvent is independently idempotent via
+	// INSERT OR IGNORE on its own PK, so running it on every replay
+	// is safe.
+	if conn.Name() == "claude" {
+		a.observeClaudeCompact(ctx, msg)
+	}
+
 	if err := store.InsertMessage(ctx, a.db, msg); err != nil {
 		a.logger.Debug("insert message failed (likely duplicate)",
 			slog.String("message_id", msg.ID),
 			slog.Any("error", err))
 		return
-	}
-
-	// Compact-event detection (Claude only). Codex has no equivalent
-	// summary marker so the detector does not apply. The detector is
-	// stateful per session — we keep one instance keyed by session_id.
-	if conn.Name() == "claude" {
-		a.observeClaudeCompact(ctx, msg)
 	}
 
 	a.hub.Publish(api.MsgNewEvent(api.MsgNew{
@@ -634,19 +639,35 @@ func (a *App) processRawEvent(ctx context.Context, ev connectors.RawEvent, byNam
 	}))
 }
 
-// observeClaudeCompact feeds a parsed Claude message through the per-session
-// CompactDetector and, when detection fires, records a row in compact_events.
+// observeClaudeCompact records a compact_events row for Claude messages
+// that signal a compaction. Two paths:
 //
-// Only called from the single writer goroutine (processRawEvent) so the
-// claudeCompactBySession map is touched serially without a mutex. The
-// detector instance must persist across messages within a session — the
-// two-signal mode pairs a summary marker with a subsequent assistant
-// message — so we keep one detector per session for the lifetime of the
-// daemon.
+//  1. Modern transcripts (Claude Code v2.1+) emit a system line with
+//     subtype="compact_boundary" plus an explicit compactMetadata
+//     block. The parser surfaces this via msg.CompactBoundary; we
+//     insert directly using the CLI-reported preTokens/postTokens —
+//     no heuristic required.
+//  2. Legacy transcripts had a separate type="summary" line and the
+//     post-compact assistant message dropped sharply in TokensIn.
+//     For those we keep the original CompactDetector heuristic per
+//     session so older histories still backfill correctly.
 //
-// InsertCompactEvent uses INSERT OR IGNORE on PRIMARY KEY (session_id, ts)
-// so re-replays of the same JSONL line (warm-up, daemon restart) are safe.
+// Only called from the single writer goroutine so the per-session
+// detector map needs no mutex. InsertCompactEvent's INSERT OR IGNORE
+// makes re-replays (warm-up, daemon restart) idempotent.
 func (a *App) observeClaudeCompact(ctx context.Context, msg *connectors.Message) {
+	// Path 1 — explicit compact_boundary metadata. This is the
+	// authoritative source for any session recorded by Claude Code
+	// v2.1+; the heuristic detector below cannot fire on these lines
+	// because parentUuid is null and there is no preceding type=summary.
+	if cb := msg.CompactBoundary; cb != nil {
+		a.insertCompactEvent(ctx, msg.SessionID, msg.Ts, cb.PreTokens, cb.PostTokens, "boundary")
+		return
+	}
+
+	// Path 2 — legacy heuristic. Detector state must persist across
+	// messages within a session (two-signal mode pairs the summary
+	// marker with the next assistant turn).
 	det, ok := a.claudeCompactBySession[msg.SessionID]
 	if !ok {
 		det = claude.NewCompactDetector()
@@ -656,20 +677,28 @@ func (a *App) observeClaudeCompact(ctx context.Context, msg *connectors.Message)
 	if !detected {
 		return
 	}
-	inserted, err := store.InsertCompactEvent(ctx, a.db, msg.SessionID, ts, det.BeforeTokensIn, det.AfterTokensIn)
+	a.insertCompactEvent(ctx, msg.SessionID, ts, det.BeforeTokensIn, det.AfterTokensIn, "heuristic")
+}
+
+// insertCompactEvent persists one row and logs the outcome. Extracted so
+// both detection paths share the same error handling.
+func (a *App) insertCompactEvent(ctx context.Context, sessionID string, ts, before, after int64, source string) {
+	inserted, err := store.InsertCompactEvent(ctx, a.db, sessionID, ts, before, after)
 	if err != nil {
 		a.logger.Warn("compact event insert failed",
-			slog.String("session_id", msg.SessionID),
+			slog.String("session_id", sessionID),
+			slog.String("source", source),
 			slog.Int64("ts", ts),
 			slog.Any("error", err))
 		return
 	}
 	if inserted {
 		a.logger.Debug("compact event recorded",
-			slog.String("session_id", msg.SessionID),
+			slog.String("session_id", sessionID),
+			slog.String("source", source),
 			slog.Int64("ts", ts),
-			slog.Int64("before", det.BeforeTokensIn),
-			slog.Int64("after", det.AfterTokensIn))
+			slog.Int64("before", before),
+			slog.Int64("after", after))
 	}
 }
 

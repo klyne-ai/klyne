@@ -63,6 +63,20 @@ type rawLine struct {
 	// hook injections); other attachment.type values are silently
 	// skipped so we stay tolerant of future shapes.
 	Attachment *rawAttachment `json:"attachment,omitempty"`
+	// CompactMetadata is present on type="system" subtype="compact_boundary"
+	// lines (Claude Code v2.1+). Carries the trigger reason and the
+	// before/after token counts the CLI reports for the compaction.
+	CompactMetadata *rawCompactMetadata `json:"compactMetadata,omitempty"`
+}
+
+// rawCompactMetadata mirrors the compactMetadata block Claude Code
+// attaches to compact_boundary lines. Only the fields klyne consumes
+// are typed; the CLI also emits durationMs and preCompactDiscoveredTools
+// which we ignore for now.
+type rawCompactMetadata struct {
+	Trigger    string `json:"trigger"`
+	PreTokens  int64  `json:"preTokens"`
+	PostTokens int64  `json:"postTokens"`
 }
 
 // rawAttachment captures the inline payload Claude Code stores for
@@ -188,6 +202,32 @@ func parseSystem(msg *connectors.Message, raw rawLine) *connectors.Message {
 	var txt string
 	_ = json.Unmarshal(raw.Message, &txt)
 	msg.Content = txt
+
+	// Claude Code v2.1+ emits compact events as system lines with
+	// subtype="compact_boundary" and a compactMetadata block carrying
+	// the explicit before/after token counts. We surface the block on
+	// the Message so the writer goroutine can write to compact_events
+	// without re-parsing or relying on the legacy token-drop heuristic
+	// (which never fires for modern transcripts because parentUuid is
+	// null and there is no separate type="summary" line).
+	//
+	// `content` on the compact_boundary line is a literal "Conversation
+	// compacted" string in the CLI's top-level field, not under a
+	// `message` object. Fall back to that when the message field was
+	// empty so the row still has a human-readable body.
+	if raw.Subtype == "compact_boundary" && raw.CompactMetadata != nil {
+		msg.CompactBoundary = &connectors.CompactBoundary{
+			Trigger:    raw.CompactMetadata.Trigger,
+			PreTokens:  raw.CompactMetadata.PreTokens,
+			PostTokens: raw.CompactMetadata.PostTokens,
+		}
+		if msg.Content == "" {
+			// The CLI also emits a top-level `content` field on these
+			// lines ("Conversation compacted"). Use it so the row body
+			// is non-empty when displayed in the cockpit terminal.
+			msg.Content = "Conversation compacted"
+		}
+	}
 	return msg
 }
 
