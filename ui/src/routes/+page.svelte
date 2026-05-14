@@ -93,9 +93,16 @@
       .map((path) => projects.find((p) => p.project_path === path))
       .filter((p): p is ProjectAggregate => p !== undefined)
   );
-  const liveSuggestions = $derived(
-    projects.filter((p) => p.lastMsAgo < 60_000 && !pinnedPaths.includes(p.project_path)).slice(0, 5)
+  // Auto-include currently-live projects that aren't already pinned, so a
+  // running session shows up in the grid without an explicit pin. Pinned
+  // projects keep their user-defined order first; live-but-unpinned trail
+  // sorted by most-recent activity.
+  const liveUnpinned = $derived(
+    projects
+      .filter((p) => p.lastMsAgo < 60_000 && !pinnedPaths.includes(p.project_path))
+      .sort((a, b) => a.lastMsAgo - b.lastMsAgo)
   );
+  const visibleProjects = $derived([...pinnedProjects, ...liveUnpinned]);
 
   const focusProject: ProjectAggregate | null = $derived(
     focusPath ? projects.find((p) => p.project_path === focusPath) ?? null : null
@@ -124,7 +131,9 @@
   <main class="center">
     <div class="center-hd">
       <h2>Terminals</h2>
-      <span class="sub">{pinnedPaths.length} pinned · {liveCount} live across all projects</span>
+      <span class="sub">
+        {visibleProjects.length} shown · {pinnedPaths.length} pinned · {liveCount} live
+      </span>
       <div class="right">
         <div class="seg" role="group" aria-label="Terminal columns">
           <button class:active={cols === 1} onclick={() => setCols(1)}>1 col</button>
@@ -137,35 +146,25 @@
       </div>
     </div>
 
-    {#if pinnedProjects.length === 0}
+    {#if visibleProjects.length === 0}
       <div class="term-grid cols-1" style="padding: 32px;">
         <div class="term-empty">
           <div>
-            <h3>No terminals pinned</h3>
+            <h3>No active terminals</h3>
             <p>
-              Pin a project from the rail to watch its most recent thread here.<br />
-              Pin up to <strong>6</strong> and watch them stream side-by-side.
+              Nothing is live right now. Pin a project from the rail to watch its
+              most recent thread, or start a session and it will appear here.
             </p>
-            {#if liveSuggestions.length > 0}
-              <div class="hr" style="width: 200px; margin: 14px auto;"></div>
-              <div class="faint mono" style="margin-bottom: 8px; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em;">Live right now</div>
-              <div style="display: flex; gap: 6px; flex-wrap: wrap; justify-content: center;">
-                {#each liveSuggestions as p (p.project_path)}
-                  <button class="btn" onclick={() => togglePin(p.project_path)}>
-                    <span class="dot dot--live" style="margin-right: 6px;"></span>{p.name}
-                  </button>
-                {/each}
-              </div>
-            {/if}
           </div>
         </div>
       </div>
     {:else}
       <div class="term-grid cols-{cols}">
-        {#each pinnedProjects as p (p.project_path)}
+        {#each visibleProjects as p (p.project_path)}
           <Terminal
             project={p}
-            onUnpin={togglePin}
+            pinned={pinnedPaths.includes(p.project_path)}
+            onTogglePin={togglePin}
             onFocus={(path) => (focusPath = path)}
             onInfo={(sid) => (advisorSession = sid)}
           />
@@ -184,7 +183,8 @@
     <div class="search-modal" style="width: min(960px, 92vw); height: 78vh; display: flex; flex-direction: column;" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()} role="dialog" tabindex="-1" aria-modal="true" aria-label="Focused terminal">
       <Terminal
         project={focusProject}
-        onUnpin={() => (focusPath = null)}
+        pinned={pinnedPaths.includes(focusProject.project_path)}
+        onTogglePin={() => (focusPath = null)}
         onFocus={() => {}}
         onInfo={(sid) => (advisorSession = sid)}
       />

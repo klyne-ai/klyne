@@ -15,11 +15,12 @@
 
   interface Props {
     project: ProjectAggregate;
-    onUnpin: (path: string) => void;
+    pinned: boolean;
+    onTogglePin: (path: string) => void;
     onFocus: (path: string) => void;
     onInfo: (sessionId: string) => void;
   }
-  const { project, onUnpin, onFocus, onInfo }: Props = $props();
+  const { project, pinned, onTogglePin, onFocus, onInfo }: Props = $props();
 
   let session = $state<Session | null>(null);
   let messages = $state<Message[]>([]);
@@ -220,7 +221,11 @@
     <div class="actions">
       <button class="btn btn--ghost btn--sm btn--icon" title="Advisor detail" disabled={!session} onclick={() => session && onInfo(session.id)}>ⓘ</button>
       <button class="btn btn--ghost btn--sm btn--icon" title="Focus this terminal" onclick={() => onFocus(project.project_path)}>⤢</button>
-      <button class="btn btn--ghost btn--sm btn--icon" title="Unpin" onclick={() => onUnpin(project.project_path)}>✕</button>
+      <button
+        class="btn btn--ghost btn--sm btn--icon"
+        title={pinned ? 'Unpin' : 'Pin to keep when idle'}
+        onclick={() => onTogglePin(project.project_path)}
+      >{pinned ? '✕' : '★'}</button>
     </div>
   </div>
   <div class="term-thread" bind:this={scrollEl}>
