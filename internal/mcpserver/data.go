@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
 
@@ -11,6 +12,13 @@ import (
 	codexparse "github.com/klyne-ai/klyne/internal/connectors/codex"
 	"github.com/klyne-ai/klyne/internal/usage"
 )
+
+// scanCtxCheckInterval is how often (in scanned lines) we test ctx.Done()
+// during a JSONL streaming pass. Cheap per-iteration ctx polls would
+// dominate the inner loop on small lines; checking every 64 lines keeps
+// cancellation latency well under a second even for fast scanners while
+// adding negligible overhead.
+const scanCtxCheckInterval = 64
 
 // SessionSnapshot is everything a tool needs to call contexthealth.Classify
 // for a session, computed by reading the JSONL directly.
@@ -42,18 +50,33 @@ type SessionSnapshot struct {
 // crashes). When the path lives outside both ~/.claude/projects and
 // ~/.codex/sessions, falls back to the Claude parser; this preserves
 // pre-Codex test fixtures that drop transcripts in arbitrary tempdirs.
-func LoadSnapshot(path string) (*SessionSnapshot, error) {
+func LoadSnapshot(ctx context.Context, path string) (*SessionSnapshot, error) {
 	switch CLIForPath(path) {
 	case connectors.CLICodex:
-		return loadCodexSnapshot(path)
+		return loadCodexSnapshot(ctx, path)
 	default:
-		return loadClaudeSnapshot(path)
+		return loadClaudeSnapshot(ctx, path)
 	}
 }
 
 // loadClaudeSnapshot parses path as a Claude Code transcript and
 // computes ContextFillPct via the cache-aware audit extractor.
-func loadClaudeSnapshot(path string) (*SessionSnapshot, error) {
+//
+// Honours ctx cancellation by polling ctx.Done() periodically during
+// the file scan — large transcripts (hundreds of MB after long
+// compacted sessions) used to leave the slash command spinning with
+// no recourse; the host's deadline now reliably aborts the work and
+// returns a clean error.
+//
+// Previously this function read the file twice: once to build the
+// Messages slice, then a second time via audit.LatestAssistantTokens
+// to compute the cache-aware token total. The audit call is now
+// folded into the same scan: every parsed assistant message already
+// carries the raw token fields the audit extractor would read, and
+// taking the latest-by-ts non-zero usage row produces the same
+// SourceTokens semantics. This roughly halves the I/O cost on a
+// cold cache.
+func loadClaudeSnapshot(ctx context.Context, path string) (*SessionSnapshot, error) {
 	f, err := os.Open(path) //nolint:gosec
 	if err != nil {
 		return nil, fmt.Errorf("open transcript: %w", err)
@@ -68,7 +91,23 @@ func loadClaudeSnapshot(path string) (*SessionSnapshot, error) {
 	sc := bufio.NewScanner(f)
 	sc.Buffer(scanBuf, maxScanToken)
 
+	// Track the latest-by-timestamp assistant message that carries a
+	// non-zero usage block. Mirrors audit.LatestAssistantTokens
+	// semantics so we don't need a second file pass to compute fill %.
+	var (
+		bestTs      int64
+		bestSet     bool
+		bestTokens  int64
+		bestModel   string
+		linesScanned int
+	)
 	for sc.Scan() {
+		linesScanned++
+		if linesScanned%scanCtxCheckInterval == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
 		line := sc.Bytes()
 		if len(line) == 0 {
 			continue
@@ -81,17 +120,37 @@ func loadClaudeSnapshot(path string) (*SessionSnapshot, error) {
 			snap.SessionID = msg.SessionID
 		}
 		snap.Messages = append(snap.Messages, msg)
+
+		// Latest-assistant token tracking, in-pass. Equivalent to
+		// audit.LatestAssistantTokens. The Claude parser already
+		// populates msg.TokensIn as the cache-aware total —
+		// input_tokens + cache_read_input_tokens + cache_creation_input_tokens
+		// — so we use it directly rather than re-summing the
+		// CachedReadTokens / CachedWriteTokens fields (which are
+		// independent copies of the same values exposed for the cost
+		// engine).
+		if msg.Role == connectors.RoleAssistant {
+			if msg.TokensIn > 0 && (!bestSet || msg.Ts > bestTs) {
+				bestSet = true
+				bestTs = msg.Ts
+				bestTokens = msg.TokensIn
+				bestModel = msg.Model
+			}
+		}
+	}
+	if err := sc.Err(); err != nil {
+		// A scanner error after a partial scan is best surfaced —
+		// callers can still classify what was read, but they should
+		// know the picture may be truncated.
+		return nil, fmt.Errorf("scan transcript: %w", err)
 	}
 	snap.MsgCount = len(snap.Messages)
 
-	// Fill % comes from the cache-aware audit extractor — same code
-	// path the user just verified at 100% accuracy across 188 sessions.
-	tokens, err := audit.LatestAssistantTokens(path)
-	if err == nil && tokens.Tokens > 0 {
-		snap.Model = tokens.Model
-		window := usage.ContextWindowForModel(tokens.Model)
+	if bestSet && bestTokens > 0 {
+		snap.Model = bestModel
+		window := usage.ContextWindowForModel(bestModel)
 		if window > 0 {
-			snap.ContextFillPct = float64(tokens.Tokens) / float64(window) * 100.0
+			snap.ContextFillPct = float64(bestTokens) / float64(window) * 100.0
 		}
 	}
 	return snap, nil
@@ -115,7 +174,7 @@ func loadClaudeSnapshot(path string) (*SessionSnapshot, error) {
 // The post-pass does NOT remove the system-role messages — leaving them
 // in place keeps the classifier's hidden-message-ratio signal honest and
 // preserves the audit's view of the file.
-func loadCodexSnapshot(path string) (*SessionSnapshot, error) {
+func loadCodexSnapshot(ctx context.Context, path string) (*SessionSnapshot, error) {
 	f, err := os.Open(path) //nolint:gosec
 	if err != nil {
 		return nil, fmt.Errorf("open transcript: %w", err)
@@ -132,7 +191,14 @@ func loadCodexSnapshot(path string) (*SessionSnapshot, error) {
 	sc := bufio.NewScanner(f)
 	sc.Buffer(scanBuf, maxScanToken)
 
+	linesScanned := 0
 	for sc.Scan() {
+		linesScanned++
+		if linesScanned%scanCtxCheckInterval == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
 		line := sc.Bytes()
 		if len(line) == 0 {
 			continue
@@ -146,9 +212,17 @@ func loadCodexSnapshot(path string) (*SessionSnapshot, error) {
 		}
 		snap.Messages = append(snap.Messages, msg)
 	}
+	if err := sc.Err(); err != nil {
+		return nil, fmt.Errorf("scan transcript: %w", err)
+	}
 	snap.MsgCount = len(snap.Messages)
 	projectCodexTokensOntoAssistants(snap.Messages)
 
+	// Codex's token computation lives in audit.LatestCodexTokens because
+	// it depends on the streaming parser's per-path state in a way the
+	// snapshot's per-line view does not. This is the one remaining
+	// double-read on the Codex path; the cost is acceptable because
+	// Codex transcripts are typically much smaller than Claude's.
 	tokens, err := audit.LatestCodexTokens(path)
 	if err == nil && tokens.Tokens > 0 {
 		snap.Model = tokens.Model

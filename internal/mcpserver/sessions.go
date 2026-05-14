@@ -13,6 +13,7 @@ package mcpserver
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -148,11 +149,24 @@ func LatestSessionForCWD(cwd string) (string, error) {
 // in /tmp/proj will see both surfaces from /tmp/proj/sub/anywhere —
 // the AI uses single-active disambiguation to pick.
 func ListSessionsForCWD(cwd string) ([]SessionCandidate, error) {
+	return ListSessionsForCWDCtx(context.Background(), cwd)
+}
+
+// ListSessionsForCWDCtx is the ctx-aware variant of ListSessionsForCWD.
+// The disambiguation step reads JSONL files end-to-end to extract
+// session metadata; for large transcripts that scan is the dominant
+// cost of the slash command. A cancelled context aborts the scan and
+// returns ctx.Err() so the MCP handler can surface a clean timeout
+// instead of leaving the host hanging.
+func ListSessionsForCWDCtx(ctx context.Context, cwd string) ([]SessionCandidate, error) {
 	if cwd == "" {
 		return nil, nil
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	cwd = filepath.Clean(cwd)
-	claudeCands, err := claudeListSessionsForCWD(cwd)
+	claudeCands, err := claudeListSessionsForCWD(ctx, cwd)
 	if err != nil {
 		return nil, err
 	}
@@ -172,18 +186,21 @@ func ListSessionsForCWD(cwd string) ([]SessionCandidate, error) {
 // claudeListSessionsForCWD is the original Claude-only walk-up logic,
 // unchanged in semantics. Extracted from the public ListSessionsForCWD
 // so the multi-CLI merge stays readable.
-func claudeListSessionsForCWD(cwd string) ([]SessionCandidate, error) {
+func claudeListSessionsForCWD(ctx context.Context, cwd string) ([]SessionCandidate, error) {
 	projectsDir, err := claudeProjectsDir()
 	if err != nil {
 		return nil, err
 	}
 	current := cwd
 	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		encoded := EncodeCWD(current)
 		if encoded != "" {
 			candidate := filepath.Join(projectsDir, encoded)
 			if info, statErr := os.Stat(candidate); statErr == nil && info.IsDir() {
-				cands, err := candidatesInDir(candidate)
+				cands, err := candidatesInDir(ctx, candidate)
 				if err != nil {
 					return nil, err
 				}
@@ -222,7 +239,7 @@ func CLIForPath(path string) connectors.CLI {
 // candidatesInDir builds the SessionCandidate slice for one project
 // directory. Each .jsonl file becomes one row; preview + msg_count
 // require a single bounded scan of the file.
-func candidatesInDir(dir string) ([]SessionCandidate, error) {
+func candidatesInDir(ctx context.Context, dir string) ([]SessionCandidate, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, fmt.Errorf("read project dir %s: %w", dir, err)
@@ -230,6 +247,9 @@ func candidatesInDir(dir string) ([]SessionCandidate, error) {
 	now := time.Now()
 	var cands []SessionCandidate
 	for _, e := range entries {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if e.IsDir() || filepath.Ext(e.Name()) != ".jsonl" {
 			continue
 		}
@@ -238,7 +258,7 @@ func candidatesInDir(dir string) ([]SessionCandidate, error) {
 			continue
 		}
 		path := filepath.Join(dir, e.Name())
-		sessionID, preview, msgCount := readCandidateMetadata(path)
+		sessionID, preview, msgCount := readCandidateMetadata(ctx, path)
 		// Fall back to the filename's UUID when the JSONL itself does
 		// not yet carry a session id (very fresh sessions).
 		if sessionID == "" {
@@ -265,7 +285,7 @@ func candidatesInDir(dir string) ([]SessionCandidate, error) {
 // sessionId field), the first user message preview, and the total
 // line count. Bounds the scan token at 16 MiB to match the audit
 // extractor; tolerates malformed lines silently.
-func readCandidateMetadata(path string) (sessionID, preview string, msgCount int) {
+func readCandidateMetadata(ctx context.Context, path string) (sessionID, preview string, msgCount int) {
 	f, err := os.Open(path) //nolint:gosec
 	if err != nil {
 		return "", "", 0
@@ -278,6 +298,14 @@ func readCandidateMetadata(path string) (sessionID, preview string, msgCount int
 	sc.Buffer(scanBuf, maxScanToken)
 
 	for sc.Scan() {
+		// Polling ctx every 64 lines keeps cancellation latency well
+		// under a second even on fast scanners while adding negligible
+		// overhead vs polling every line.
+		if msgCount%scanCtxCheckInterval == 0 {
+			if err := ctx.Err(); err != nil {
+				return sessionID, preview, msgCount
+			}
+		}
 		line := sc.Bytes()
 		if len(line) == 0 {
 			continue

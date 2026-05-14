@@ -15,8 +15,13 @@ import (
 // No AI dependency. No call to any provider. The handoff is built
 // entirely from JSONL ground truth so it works in air-gapped
 // environments and in fresh klyne installs that have no BYOK key.
-func HandleGenerateHandoff(_ context.Context, _ *mcp.CallToolRequest, in HandoffInput) (*mcp.CallToolResult, HandoffOutput, error) {
-	path, ambiguous, cands, err := resolveSession(GetContextHealthInput{
+func HandleGenerateHandoff(ctx context.Context, _ *mcp.CallToolRequest, in HandoffInput) (*mcp.CallToolResult, HandoffOutput, error) {
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, contextHealthDefaultDeadline)
+		defer cancel()
+	}
+	path, ambiguous, cands, err := resolveSession(ctx, GetContextHealthInput{
 		SessionID: in.SessionID,
 		CWD:       in.CWD,
 	})
@@ -46,7 +51,7 @@ func HandleGenerateHandoff(_ context.Context, _ *mcp.CallToolRequest, in Handoff
 		}, HandoffOutput{}, nil
 	}
 
-	snap, err := LoadSnapshot(path)
+	snap, err := LoadSnapshot(ctx, path)
 	if err != nil {
 		return nil, HandoffOutput{}, fmt.Errorf("load snapshot: %w", err)
 	}

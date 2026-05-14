@@ -1,6 +1,7 @@
 package mcpserver
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -31,7 +32,7 @@ func TestLoadSnapshot_DispatchesToCodexParser(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	snap, err := LoadSnapshot(path)
+	snap, err := LoadSnapshot(context.Background(), path)
 	if err != nil {
 		t.Fatalf("LoadSnapshot err = %v", err)
 	}
@@ -73,7 +74,7 @@ func TestLoadSnapshot_ClaudePathStillWorks(t *testing.T) {
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	snap, err := LoadSnapshot(path)
+	snap, err := LoadSnapshot(context.Background(), path)
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}

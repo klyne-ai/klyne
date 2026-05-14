@@ -106,3 +106,40 @@ func mustCall(t *testing.T, in GetContextHealthInput) GetContextHealthOutput {
 	}
 	return out
 }
+
+// TestHandleGetContextHealth_CancelledContextReturnsTimeoutResult exercises
+// the new ctx-cancellation path. Prior to wiring ctx through, a large
+// JSONL transcript would leave the /klyne:health slash command spinning
+// indefinitely because the file-scan loops never checked for
+// cancellation. This test feeds an already-cancelled context and asserts
+// the handler returns a clean "timed out" structured result rather than
+// re-surfacing the raw context.Canceled error or hanging.
+func TestHandleGetContextHealth_CancelledContextReturnsTimeoutResult(t *testing.T) {
+	home := withFakeHome(t)
+
+	// Seed enough lines that the scan loop has a chance to observe
+	// cancellation between ctx checks (every scanCtxCheckInterval=64
+	// lines). 128 short lines is plenty.
+	dir := filepath.Join(home, ".claude", "projects", EncodeCWD("/tmp/cancel"))
+	lines := make([]string, 0, 200)
+	for i := 0; i < 200; i++ {
+		lines = append(lines, `{"type":"user","sessionId":"cancel-sess","timestamp":"2026-05-13T10:00:00.000Z","cwd":"/tmp/cancel","message":{"role":"user","content":[{"type":"text","text":"x"}]}}`)
+	}
+	_ = writeJSONL(t, dir, "cancel.jsonl", lines...)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel before the call so the very first ctx check trips.
+
+	_, out, err := HandleGetContextHealth(ctx, nil, GetContextHealthInput{CWD: "/tmp/cancel"})
+	if err != nil {
+		t.Fatalf("expected nil err on cancellation (handler converts to timeout result), got %v", err)
+	}
+	if out.Reason == "" {
+		t.Fatal("expected non-empty Reason explaining the timeout")
+	}
+	// State must NOT be populated — we did not classify anything. The
+	// handler should be returning the timeout-result envelope.
+	if out.State != "" {
+		t.Errorf("State = %q, want empty on timeout", out.State)
+	}
+}

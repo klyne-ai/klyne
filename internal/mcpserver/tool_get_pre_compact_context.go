@@ -54,8 +54,13 @@ const preCompactRowPreviewBytes = 600
 // v1 surface that exposes information the AI literally cannot get on
 // its own — once /compact runs, the original messages are gone from
 // the AI's context, and only the JSONL still has them.
-func HandleGetPreCompactContext(_ context.Context, _ *mcp.CallToolRequest, in PreCompactInput) (*mcp.CallToolResult, PreCompactOutput, error) {
-	path, ambiguous, cands, err := resolveSession(GetContextHealthInput{
+func HandleGetPreCompactContext(ctx context.Context, _ *mcp.CallToolRequest, in PreCompactInput) (*mcp.CallToolResult, PreCompactOutput, error) {
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, contextHealthDefaultDeadline)
+		defer cancel()
+	}
+	path, ambiguous, cands, err := resolveSession(ctx, GetContextHealthInput{
 		SessionID: in.SessionID,
 		CWD:       in.CWD,
 	})

@@ -77,7 +77,12 @@ type TokenTimelineOutput struct {
 // loads the snapshot, and computes the timeline against the
 // configured plan cap.
 func HandleGetTokenTimeline(ctx context.Context, _ *mcp.CallToolRequest, in TokenTimelineInput) (*mcp.CallToolResult, TokenTimelineOutput, error) {
-	path, ambiguous, cands, err := resolveSession(GetContextHealthInput{
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, contextHealthDefaultDeadline)
+		defer cancel()
+	}
+	path, ambiguous, cands, err := resolveSession(ctx, GetContextHealthInput{
 		SessionID: in.SessionID,
 		CWD:       in.CWD,
 	})
@@ -107,7 +112,7 @@ func HandleGetTokenTimeline(ctx context.Context, _ *mcp.CallToolRequest, in Toke
 		}, TokenTimelineOutput{}, nil
 	}
 
-	snap, err := LoadSnapshot(path)
+	snap, err := LoadSnapshot(ctx, path)
 	if err != nil {
 		return nil, TokenTimelineOutput{}, fmt.Errorf("load snapshot: %w", err)
 	}

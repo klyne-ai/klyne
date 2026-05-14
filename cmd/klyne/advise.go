@@ -165,7 +165,7 @@ func computeAdvisory(ctx context.Context, stdin io.Reader) (string, error) {
 		return "", nil
 	}
 
-	snap, err := mcpserver.LoadSnapshot(path)
+	snap, err := mcpserver.LoadSnapshot(ctx, path)
 	if err != nil {
 		return "", fmt.Errorf("load snapshot: %w", err)
 	}
@@ -321,7 +321,7 @@ func runAdviseExplain(cmd *cobra.Command, explicitSession string) error {
 		return nil
 	}
 
-	snap, err := mcpserver.LoadSnapshot(path)
+	snap, err := mcpserver.LoadSnapshot(cmd.Context(), path)
 	if err != nil {
 		fmt.Fprintf(stdout, "klyne advise --explain: load snapshot: %v\n", err)
 		return nil

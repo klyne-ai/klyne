@@ -11,6 +11,7 @@
 package handoffequivalence_test
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,7 +29,7 @@ import (
 // If this fails, the README's "deterministic, paste-ready handoff"
 // claim is broken.
 func TestProof_HandoffStructurallyComplete(t *testing.T) {
-	snap, err := mcpserver.LoadSnapshot(fixturePath(t, "fixture.jsonl"))
+	snap, err := mcpserver.LoadSnapshot(context.Background(), fixturePath(t, "fixture.jsonl"))
 	if err != nil {
 		t.Fatalf("LoadSnapshot: %v", err)
 	}
@@ -77,11 +78,11 @@ func TestProof_HandoffStructurallyComplete(t *testing.T) {
 func TestProof_HandoffIsDeterministic(t *testing.T) {
 	path := fixturePath(t, "fixture.jsonl")
 
-	first, err := mcpserver.LoadSnapshot(path)
+	first, err := mcpserver.LoadSnapshot(context.Background(), path)
 	if err != nil {
 		t.Fatalf("first LoadSnapshot: %v", err)
 	}
-	second, err := mcpserver.LoadSnapshot(path)
+	second, err := mcpserver.LoadSnapshot(context.Background(), path)
 	if err != nil {
 		t.Fatalf("second LoadSnapshot: %v", err)
 	}
@@ -108,7 +109,7 @@ func TestProof_HandoffIsDeterministic(t *testing.T) {
 // touches dispatcher.ts more than once (read + multiple edits); the
 // handoff's "Files touched" must surface that.
 func TestProof_HandoffSurfacesIterativeReuseHonestly(t *testing.T) {
-	snap, err := mcpserver.LoadSnapshot(fixturePath(t, "fixture.jsonl"))
+	snap, err := mcpserver.LoadSnapshot(context.Background(), fixturePath(t, "fixture.jsonl"))
 	if err != nil {
 		t.Fatalf("LoadSnapshot: %v", err)
 	}

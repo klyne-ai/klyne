@@ -5,12 +5,22 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/klyne-ai/klyne/internal/connectors"
 	"github.com/klyne-ai/klyne/internal/contexthealth"
 )
+
+// contextHealthDefaultDeadline caps how long a single get_context_health
+// call may run when the inbound MCP context has no deadline of its own.
+// Without this, a very large JSONL transcript (multi-hundred-MB sessions
+// after long-running compactions) could leave the slash command spinning
+// indefinitely on the Claude Code side with no diagnostic. 60s is roughly
+// the host-side timeout MCP clients tend to apply, so this lines up with
+// the user-visible failure mode rather than silently extending it.
+const contextHealthDefaultDeadline = 60 * time.Second
 
 // GetContextHealthInput is the JSON-Schema input for the
 // get_context_health MCP tool. All fields are optional; sensible
@@ -83,9 +93,23 @@ type CandidateRow struct {
 // exist in the cwd's project directory, the handler returns an
 // Ambiguous result with the candidate list rather than guessing. The
 // AI is expected to call again with an explicit session_id.
-func HandleGetContextHealth(_ context.Context, _ *mcp.CallToolRequest, in GetContextHealthInput) (*mcp.CallToolResult, GetContextHealthOutput, error) {
-	path, ambiguous, cands, err := resolveSession(in)
+func HandleGetContextHealth(ctx context.Context, _ *mcp.CallToolRequest, in GetContextHealthInput) (*mcp.CallToolResult, GetContextHealthOutput, error) {
+	// Ensure cancellation has a horizon — the MCP host may pass a
+	// context with no deadline (e.g. slash-command invocation). Without
+	// a deadline, a multi-hundred-MB JSONL parse could leave the slash
+	// command spinning forever on the host side. The work below checks
+	// ctx.Done() between file lines so this deadline is enforced.
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, contextHealthDefaultDeadline)
+		defer cancel()
+	}
+
+	path, ambiguous, cands, err := resolveSession(ctx, in)
 	if err != nil {
+		if isContextTimeout(ctx, err) {
+			return timeoutResult("session resolution")
+		}
 		return nil, GetContextHealthOutput{}, err
 	}
 	if ambiguous {
@@ -104,8 +128,11 @@ func HandleGetContextHealth(_ context.Context, _ *mcp.CallToolRequest, in GetCon
 		}, nil
 	}
 
-	snap, err := LoadSnapshot(path)
+	snap, err := LoadSnapshot(ctx, path)
 	if err != nil {
+		if isContextTimeout(ctx, err) {
+			return timeoutResult("transcript load")
+		}
 		return nil, GetContextHealthOutput{}, fmt.Errorf("load snapshot: %w", err)
 	}
 
@@ -149,7 +176,7 @@ func HandleGetContextHealth(_ context.Context, _ *mcp.CallToolRequest, in GetCon
 //  2. Otherwise list candidates in the cwd's project tree. If
 //     PickActiveSession can choose unambiguously, return that; else
 //     surface the ambiguity.
-func resolveSession(in GetContextHealthInput) (path string, ambiguous bool, cands []SessionCandidate, err error) {
+func resolveSession(ctx context.Context, in GetContextHealthInput) (path string, ambiguous bool, cands []SessionCandidate, err error) {
 	if in.SessionID != "" {
 		path, err = FindSessionByID(in.SessionID)
 		return path, false, nil, err
@@ -162,7 +189,7 @@ func resolveSession(in GetContextHealthInput) (path string, ambiguous bool, cand
 		}
 		cwd = w
 	}
-	cands, err = ListSessionsForCWD(cwd)
+	cands, err = ListSessionsForCWDCtx(ctx, cwd)
 	if err != nil {
 		return "", false, nil, err
 	}
@@ -173,6 +200,39 @@ func resolveSession(in GetContextHealthInput) (path string, ambiguous bool, cand
 		return "", false, nil, nil
 	}
 	return "", true, cands, nil
+}
+
+// isContextTimeout reports whether err signals that the supplied ctx was
+// cancelled or deadlined. We treat both as "we hit a wall" — the caller
+// returns a user-facing timeout message rather than re-surfacing the
+// raw error, which would force the AI to interpret it.
+func isContextTimeout(ctx context.Context, err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return true
+	}
+	if ctx.Err() != nil {
+		return true
+	}
+	return false
+}
+
+// timeoutResult is the canonical response shape when the context-health
+// pipeline runs out of time. The Reason names the stage that timed out
+// so the user can decide whether the transcript is genuinely too large
+// or whether the host is misconfigured.
+func timeoutResult(stage string) (*mcp.CallToolResult, GetContextHealthOutput, error) {
+	msg := fmt.Sprintf(
+		"Context-health analysis timed out during %s. The transcript may be unusually large; try `/klyne:health` after `/compact`, or pass an explicit `session_id` to analyse a smaller transcript.",
+		stage,
+	)
+	return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: msg}},
+		}, GetContextHealthOutput{
+			Reason: msg,
+		}, nil
 }
 
 // ambiguousResult constructs the response that asks the AI to retry

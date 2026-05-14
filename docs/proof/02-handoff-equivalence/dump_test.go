@@ -1,6 +1,7 @@
 package handoffequivalence_test
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -20,7 +21,7 @@ func TestDumpHandoff(t *testing.T) {
 		t.Skip("set KLYNE_DUMP_HANDOFF=1 to print the rendered handoff for claim.md")
 	}
 	wd, _ := os.Getwd()
-	snap, err := mcpserver.LoadSnapshot(filepath.Join(wd, "fixture.jsonl"))
+	snap, err := mcpserver.LoadSnapshot(context.Background(), filepath.Join(wd, "fixture.jsonl"))
 	if err != nil {
 		t.Fatalf("LoadSnapshot: %v", err)
 	}
