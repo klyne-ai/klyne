@@ -15,6 +15,7 @@ Each slash command calls one MCP tool and prints the tool's `markdown` field byt
 
 | Slash command | MCP tool | What it does | Detail |
 |---|---|---|---|
+| `/klyne:bootstrap` | `bootstrap` | Day-1 session brief: recent sessions, project + global memories, latest session's context-health verdict | [bootstrap.md](./bootstrap.md) |
 | `/klyne:handoff` | `generate_handoff` | Deterministic handoff prompt for a fresh session | [handoff.md](./handoff.md) |
 | `/klyne:health` | `get_context_health` | Verdict (healthy / drifting / risky / rescue_now) + top bloat sources | [context-health.md](./context-health.md) |
 | `/klyne:precompact` | `get_pre_compact_context` | Messages from immediately before the last `/compact` | [pre-compact-recovery.md](./pre-compact-recovery.md) |
@@ -30,6 +31,7 @@ Skill bundles live under `~/.claude/skills/<skill-name>/SKILL.md` (Claude Code's
 
 | Skill | Wraps MCP tool | Auto-invokes when |
 |---|---|---|
+| `klyne-bootstrap` | `bootstrap` | Session start in a project the agent has no prior context for, the user asks "what was I working on?" / "where did I leave off?", or before the agent's first major action in an unfamiliar codebase |
 | `klyne-health` | `get_context_health` | An advisory mentions context fill / drift / acceleration / 5-hour window, user asks about token usage, after a `/compact` event, or before loading a >5K-token file |
 
 Why both surfaces: slash commands are deterministic and user-controlled — the right path when you know what you want. Skills close the gap when you *don't* know — they let the agent reach for the rescue tool before the user notices the session is degrading.
@@ -43,6 +45,7 @@ In addition to the six tools backing the slash commands above, the following MCP
 | Tool | Purpose | Detail |
 |---|---|---|
 | `remember` / `recall` | Persistent project/global memory | [memory.md](./memory.md) |
+| `update_memory` / `delete_memory` / `list_memories` | Memory CRUD parity: edit, delete, browse by id with derived display names | [memory.md](./memory.md#mcp-tools-new) |
 | `record_decision` / `list_decisions` / `search_decisions` | Pinned project facts | [decisions-log.md](./decisions-log.md) |
 | `code_review_context` | Surfaces decisions, hot files, and recent activity scoped to a code-review prompt | — |
 

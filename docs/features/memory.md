@@ -53,6 +53,18 @@ Two trigger phrases the user types in Claude Code:
 
 ## MCP tools (new)
 
+The chat-first verbs (`remember` / `recall`) are the primary path. As of 2026-05-15, klyne also exposes Serena-style CRUD verbs over the same `decisions` table:
+
+| Verb | Direction | When to call |
+|---|---|---|
+| `remember` | write | "klyne remember this …" — primary capture path |
+| `recall` | query (project ∪ global, with query filter) | "refer klyne …" — primary read path |
+| `list_memories` | browse (project ∪ global, no query filter, derived `name`) | "klyne list memories" — pick an id for update/delete |
+| `update_memory` | edit text and/or tags by id | "klyne edit memory `<id>` …" — id known |
+| `delete_memory` | remove by id | "klyne delete memory `<id>`" — id known |
+
+All five operate on the same `~/.klyne/klyne.db` `decisions` table; no migration was added for the CRUD verbs.
+
 ### `remember`
 
 ```jsonc
@@ -94,6 +106,44 @@ Returns:
 ```
 
 The two lists are returned separately so Claude can reason about scope. Project memories beat global memories when they conflict.
+
+### `list_memories`
+
+The explicit-browse counterpart to `recall`. Returns both lists without a query filter, ordered newest first, with a derived `name` per row (first non-empty line, ≤ 60 runes, `…` when truncated) so the agent can present them Serena-style.
+
+```jsonc
+{
+  "cwd": "/Users/.../auth-service",       // optional — used to default project_path
+  "project_path": "...",                    // optional explicit override
+  "scope": "all",                           // "all" (default) | "project" | "global"
+  "tag": "runbook",                         // optional single-tag filter, applies to both lists
+  "limit": 50                               // per scope; default 50, max 500
+}
+```
+
+Returns `project_memories` and `global_memories`, each row a `Decision` plus a derived `name`. Use this BEFORE `update_memory` / `delete_memory` so the agent has the id to pass.
+
+### `update_memory`
+
+Patches text and/or tags on an existing memory by id. Scope, project_path, and session_id are immutable — pass-through to the existing row.
+
+```jsonc
+{
+  "id": "d-71e776ba02137f79",     // required
+  "text": "new memory body",      // optional pointer: omit to leave unchanged
+  "tags": ["runbook","rotated"]   // optional pointer: omit to leave unchanged. Pass [] to clear
+}
+```
+
+Pointer-semantics distinguish "omitted" (no change) from "empty" (clear): omitting `text` leaves the body untouched; omitting `tags` leaves tags untouched; passing `[]` clears the tag set entirely. At least one of `text` / `tags` must be supplied. Unknown ids return `memory "<id>" not found`.
+
+### `delete_memory`
+
+```jsonc
+{ "id": "d-71e776ba02137f79" }
+```
+
+Permanent. The CLAUDE.md rule expects the agent to confirm the id back to the user before calling. Unknown ids return `memory "<id>" not found` so the user can `list_memories` first.
 
 ## Dashboard
 
@@ -198,7 +248,7 @@ The runbook lives in `~/.klyne/klyne.db`. It survives `klyne stop`, daemon resta
 ## Limitations + future work
 
 - **Substring search only**, not FTS. For runbook recall this is fine (single-word tag-aligned queries like `secret`, `openbao`, `migration` hit reliably). Multi-word queries are treated as one literal string. Use `tag` filter for precision.
-- **Immutable** — amending a memory is delete-then-add. Aligned with the underlying schema header: "One row per decision; immutable once written." When/if you want versioned runbooks, that's a v0.2 feature: new `runbooks` table with a `version` column.
+- **Editable as of 2026-05-15** — `update_memory` patches text or tags by id. The underlying `decisions` schema still says "One row per decision", but the user-facing memory verbs treat the row as mutable. Versioned runbooks (full history per id) remain a follow-up.
 - **No CLI alias yet** — the chat flow (`"klyne remember this …"`) is the primary path. Use `klyne decisions add/list/search/delete` from the terminal if you need it. A `klyne memory` CLI alias is a small follow-up.
 
 ## Files touched in this slice

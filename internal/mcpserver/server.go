@@ -15,7 +15,9 @@ import (
 // (older builds: `/mcp__klyne__*`, retired).
 // v0.4.0 — slice 5: search_messages tool + /klyne:search prompt
 // for cross-session full-text search.
-const version = "v0.4.0"
+// v0.5.0 — slice 6 (Serena-inspired): bootstrap session brief +
+// memory CRUD (update_memory, delete_memory, list_memories).
+const version = "v0.5.0"
 
 // New constructs the klyne MCP server with every v1 tool
 // registered. The returned server is ready for Run.
@@ -96,6 +98,13 @@ When the user has configured a plan tier (klyne config set plan <tier>), the res
 	}, HandleGetTokenTimeline)
 
 	mcp.AddTool(srv, &mcp.Tool{
+		Name: "bootstrap",
+		Description: `Day-1 session briefing: recent sessions, project + global memories, and the latest session's context-health verdict, all in one call.
+
+Call at session start when you have no prior context for this project, or when the user asks "what was I working on?" / "where did I leave off?". Pure JSONL + SQLite reads — no AI calls. Render the response's markdown field verbatim.`,
+	}, HandleBootstrap)
+
+	mcp.AddTool(srv, &mcp.Tool{
 		Name: "code_review_context",
 		Description: `Surface the optional code-review-graph enrichment for a repository.
 
@@ -171,12 +180,50 @@ If a memory looks like a runbook (multi-line with numbered steps), follow it ver
 Optional filters: query (substring), tag (single tag like "runbook"), project_path / cwd override.`,
 	}, HandleRecallMemory)
 
+	mcp.AddTool(srv, &mcp.Tool{
+		Name: "update_memory",
+		Description: `Edit an existing memory (text and/or tags) by id without changing scope, project_path, or session_id.
+
+Fire this tool when the user says "klyne update memory <id> …" / "klyne edit that memory …" / "klyne retag this memory …" and you already know the id (typically returned by a prior remember or list_memories call).
+
+Inputs: id (required). At least one of text (new body — must be non-empty when provided) or tags (new full tag set; pass an empty array to clear all tags) must be supplied. Omitted fields are left untouched.
+
+Returns the patched id. If the id is unknown the call errors with "memory <id> not found" so you can tell the user to call list_memories first.`,
+	}, HandleUpdateMemory)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name: "delete_memory",
+		Description: `Delete one memory permanently by id.
+
+Fire this tool when the user says "klyne delete memory <id>" / "klyne forget that <id>" / "klyne remove the runbook with id <id>". Confirm the id back to the user BEFORE calling — deletes are immediate and not undoable.
+
+Inputs: id (required). Returns the deleted id. If the id is unknown the call errors with "memory <id> not found" so you can ask the user to call list_memories first.`,
+	}, HandleDeleteMemory)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name: "list_memories",
+		Description: `Enumerate memories without applying a query filter — the explicit "show me everything klyne remembers" surface.
+
+Fire this tool when the user says "klyne list memories" / "klyne what do you remember?" / "klyne show me my runbooks". Use it BEFORE update_memory or delete_memory so you can surface ids the user can pick from.
+
+Returns two labelled lists (project_memories and global_memories), newest first. Each row carries a derived ` + "`name`" + ` field (first non-empty line of text, ≤ 60 chars, with ` + "`…`" + ` when truncated) so you can present them Serena-style as a named list. Scope: "all" (default — both lists) | "project" | "global". Optional tag filter applies to both lists. Default limit 50 per scope, max 500.`,
+	}, HandleListMemories)
+
 	// Live MCP prompts. Each prompt parallels one of the tools above
 	// and surfaces in Claude Code's slash menu as /klyne:<name>
 	// (older Claude Code builds used /mcp__klyne__<name>; that form
 	// has been retired). Handlers run server-side and return the
 	// result as injected user-message content — no AI roundtrip
 	// needed for the fetch.
+	srv.AddPrompt(&mcp.Prompt{
+		Name:        "bootstrap",
+		Title:       "Session bootstrap brief",
+		Description: "Day-1 briefing for the current project: recent sessions, project + global memories, and the latest session's context-health verdict.",
+		Arguments: []*mcp.PromptArgument{
+			{Name: "cwd", Description: "Override the working directory used to resolve the project."},
+		},
+	}, PromptBootstrapHandler)
+
 	srv.AddPrompt(&mcp.Prompt{
 		Name:        "health",
 		Title:       "Context health",

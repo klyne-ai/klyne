@@ -88,7 +88,7 @@ Top projects by token usage:
 
 ## Feature 1 — The MCP server
 
-> **What it is.** A subprocess that Claude Code and Codex CLI spawn over stdio. The AI itself calls these tools mid-session. **All twelve are live and tested below against your real data.**
+> **What it is.** A subprocess that Claude Code and Codex CLI spawn over stdio. The AI itself calls these tools mid-session. **All sixteen are live and tested below against your real data.**
 
 ### A1 · `list_sessions` — disambiguate parallel sessions
 
@@ -430,6 +430,89 @@ $ mcp__klyne__recall query="secret"
 ```
 
 **Useful for you?** The killer flow is runbooks — multi-line scripted procedures the AI can re-execute with new arguments. See [Feature 4.5](#feature-45--klyne-remember-this---refer-klyne--memory-flow) for a real walkthrough.
+
+---
+
+### A13 · `bootstrap` — Day-1 session brief (Serena-inspired)
+
+The agent-side equivalent of "what was I working on?". One call synthesises four cross-session signals klyne already owns into a single briefing the agent can fetch on turn 1 of a fresh session: recent sessions in this project, project-scoped memories, a preview of global memories (with the remaining count), and the latest active session's context-health verdict. Pure JSONL + SQLite — no AI calls.
+
+```json
+$ mcp__klyne__bootstrap
+{
+  "cwd": "/Users/mohitpatel/Desktop/Project/klyne",
+  "sessions": [
+    {"session_id": "336f4d9b-…", "is_active": true,  "mod_time": "2026-05-15T08:05:53Z", "msg_count": 159, "preview": "I want to create a video for 5 min describing…"},
+    {"session_id": "1f50cf33-…", "is_active": false, "mod_time": "2026-05-15T06:58:39Z", "msg_count": 1266, "preview": "https://github.com/DeibyGS/claudestat can you…"},
+    {"session_id": "0a3c25b1-…", "is_active": false, "mod_time": "2026-05-14T22:11:02Z", "msg_count":  402, "preview": "explore serena and see what we can borrow…"}
+  ],
+  "project_memories": [/* up to 5 project-scoped memories, newest first */],
+  "global_memory_count": 7,
+  "global_memories_preview": [/* up to 3 most-recent globals */],
+  "latest_health": {
+    "session_id": "336f4d9b-…",
+    "state": "healthy",
+    "action": "continue",
+    "context_fill_pct": 15
+  },
+  "markdown": "# klyne bootstrap\n\nProject: `/Users/.../klyne`\n\n## Recent sessions\n…"
+}
+```
+
+The `klyne-bootstrap` SKILL.md fires this tool automatically when the agent has no prior context in a project — Serena's `initial_instructions`/`check_onboarding_performed`/`read_me` pattern, but synthesized from klyne's own audit data instead of LSP symbols. `/klyne:bootstrap` is the explicit user-driven equivalent.
+
+**Real-world story.** Imagine you re-open Claude Code in the klyne directory next Monday. Instead of the agent asking "what would you like to work on?", the skill matches the empty-context situation, calls `bootstrap`, and prints: *"Three sessions in this project this week, four pinned memories, latest session is healthy at 15% fill, last topic was the Serena-inspired bootstrap tool."* That's Day-1 onboarding without you typing anything.
+
+**Useful for you?** This is the agent-facing companion to `list_sessions` + `recall` + `get_context_health`. Without it, the agent doesn't know what happened in the project before it spawned. With it, every fresh session starts informed.
+
+---
+
+### A14 · `update_memory` — edit text or tags by id
+
+Patches an existing memory row without changing scope, project path, or session id. Text and tags are independently editable; omitting both is an error.
+
+```json
+$ mcp__klyne__update_memory id="d-71e776ba02137f79" tags=["runbook","secrets","openbao","rotated"]
+{"id": "d-71e776ba02137f79", "updated": true}
+```
+
+`text` overwrites the body when supplied; `tags` overwrites the FULL tag set when supplied (pass `[]` to clear). Unknown ids return `memory "<id>" not found` so the agent can prompt the user to call `list_memories` first.
+
+---
+
+### A15 · `delete_memory` — permanent removal by id
+
+```json
+$ mcp__klyne__delete_memory id="d-71e776ba02137f79"
+{"id": "d-71e776ba02137f79", "deleted": true}
+```
+
+Immediate and not undoable. The CLAUDE.md rule expects the agent to confirm the id back to the user before calling.
+
+---
+
+### A16 · `list_memories` — explicit browse with derived names
+
+The "show me everything klyne remembers" surface. Unlike `recall`, this takes no query — its job is to enumerate so the user (or the agent) can pick an id for `update_memory` / `delete_memory`. Each row carries a derived `name` (first non-empty line of the text, truncated to 60 runes with `…`) so the output renders as a Serena-style named list.
+
+```json
+$ mcp__klyne__list_memories scope="all"
+{
+  "project_path": "/Users/.../auth-service",
+  "project_memories": [
+    {"id": "d-71e776ba…", "name": "RUNBOOK: add-secret-to-bucket", "tags": ["runbook","secrets"], "text": "…"},
+    {"id": "d-9a31bc14…", "name": "drop /api/v1 — v2 rolled out 2026-04-12", "tags": ["decision"], "text": "…"}
+  ],
+  "global_memories": [
+    {"id": "d-aa12fe33…", "name": "Always run go test before `git push`", "tags": ["runbook"], "text": "…"}
+  ],
+  "total": 3
+}
+```
+
+Scope: `all` (default — both lists), `project`, or `global`. Optional `tag` filter applies to both lists. Default limit 50 per scope, max 500.
+
+**Useful for you?** Three places: agent-driven CRUD (update/delete needs the id), audit ("what does klyne remember globally?"), and demos (one call returns the whole memory inventory). Together with `update_memory` and `delete_memory` this closes Serena's memory-CRUD parity gap without giving up klyne's chat-first remember/recall ergonomics.
 
 ---
 
