@@ -54,6 +54,18 @@ type CompactDetector struct {
 	// preSummaryTokensIn captures lastAssistantTokensIn at the moment we
 	// see the summary marker, so we can compare against the next assistant.
 	preSummaryTokensIn int64
+
+	// BeforeTokensIn is the assistant TokensIn immediately before the most
+	// recently-fired compaction event. 0 when single-signal mode fired
+	// with no prior assistant context to measure. Callers read this right
+	// after Observe returns detected=true to persist the "before" count
+	// in compact_events.
+	BeforeTokensIn int64
+
+	// AfterTokensIn is the assistant TokensIn of the first message after
+	// the most recently-fired compaction event. 0 when single-signal mode
+	// fired on the summary marker itself (no post-message yet).
+	AfterTokensIn int64
 }
 
 // NewCompactDetector allocates and returns a ready-to-use CompactDetector.
@@ -85,6 +97,8 @@ func (d *CompactDetector) Observe(m *connectors.Message) (detected bool, ts int6
 			// Single-signal mode: if we have no prior assistant context, fire now.
 			if d.lastAssistantTokensIn == 0 {
 				d.pendingSummary = false
+				d.BeforeTokensIn = 0
+				d.AfterTokensIn = 0
 				return true, m.Ts
 			}
 		}
@@ -97,6 +111,8 @@ func (d *CompactDetector) Observe(m *connectors.Message) (detected bool, ts int6
 				if ratio < tokenDropThreshold {
 					d.pendingSummary = false
 					fireTs := d.summaryTs
+					d.BeforeTokensIn = d.preSummaryTokensIn
+					d.AfterTokensIn = m.TokensIn
 					// Update lastAssistantTokensIn to the new message.
 					d.lastAssistantTokensIn = m.TokensIn
 					return true, fireTs
@@ -107,6 +123,8 @@ func (d *CompactDetector) Observe(m *connectors.Message) (detected bool, ts int6
 			if m.TokensIn == 0 {
 				d.pendingSummary = false
 				fireTs := d.summaryTs
+				d.BeforeTokensIn = d.preSummaryTokensIn
+				d.AfterTokensIn = 0
 				return true, fireTs
 			}
 			// Token drop insufficient — cancel pending, do not fire.

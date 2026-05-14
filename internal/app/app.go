@@ -143,6 +143,14 @@ type App struct {
 	ingestWG sync.WaitGroup
 	cancel   context.CancelFunc
 
+	// claudeCompactBySession holds one CompactDetector per Claude session.
+	// It is touched ONLY from the writer goroutine (see processRawEvent),
+	// which is the single consumer of RawEvents, so no mutex is required.
+	// The detector is stateful across messages within a session — it sees
+	// a summary marker and waits for the next assistant message before
+	// firing — so we must keep one instance per session, not per call.
+	claudeCompactBySession map[string]*claude.CompactDetector
+
 	// runnerStarted is true once Start has booted the AI runner. Stop
 	// should NOT call runner.Stop unless Start ran — runner.Stop blocks
 	// on its internal done channel which is only closed by Start.
@@ -231,15 +239,16 @@ func BuildOnly(cfg *config.Config) (*App, error) {
 	}
 
 	app := &App{
-		cfg:             cfg,
-		logger:          logger,
-		db:              db,
-		cost:            costEngine,
-		hub:             hub,
-		runner:          runner,
-		connectors:      conns,
-		mounters:        mounters,
-		OpenBrowserFunc: DefaultOpenBrowser,
+		cfg:                    cfg,
+		logger:                 logger,
+		db:                     db,
+		cost:                   costEngine,
+		hub:                    hub,
+		runner:                 runner,
+		connectors:             conns,
+		mounters:               mounters,
+		OpenBrowserFunc:        DefaultOpenBrowser,
+		claudeCompactBySession: make(map[string]*claude.CompactDetector),
 	}
 	return app, nil
 }
@@ -606,6 +615,13 @@ func (a *App) processRawEvent(ctx context.Context, ev connectors.RawEvent, byNam
 		return
 	}
 
+	// Compact-event detection (Claude only). Codex has no equivalent
+	// summary marker so the detector does not apply. The detector is
+	// stateful per session — we keep one instance keyed by session_id.
+	if conn.Name() == "claude" {
+		a.observeClaudeCompact(ctx, msg)
+	}
+
 	a.hub.Publish(api.MsgNewEvent(api.MsgNew{
 		SessionID: msg.SessionID,
 		MessageID: msg.ID,
@@ -616,6 +632,53 @@ func (a *App) processRawEvent(ctx context.Context, ev connectors.RawEvent, byNam
 		TokensOut: msg.TokensOut,
 		CostUSD:   msg.CostUSD,
 	}))
+}
+
+// observeClaudeCompact feeds a parsed Claude message through the per-session
+// CompactDetector and, when detection fires, records a row in compact_events.
+//
+// Only called from the single writer goroutine (processRawEvent) so the
+// claudeCompactBySession map is touched serially without a mutex. The
+// detector instance must persist across messages within a session — the
+// two-signal mode pairs a summary marker with a subsequent assistant
+// message — so we keep one detector per session for the lifetime of the
+// daemon.
+//
+// InsertCompactEvent uses INSERT OR IGNORE on PRIMARY KEY (session_id, ts)
+// so re-replays of the same JSONL line (warm-up, daemon restart) are safe.
+func (a *App) observeClaudeCompact(ctx context.Context, msg *connectors.Message) {
+	det, ok := a.claudeCompactBySession[msg.SessionID]
+	if !ok {
+		det = claude.NewCompactDetector()
+		a.claudeCompactBySession[msg.SessionID] = det
+	}
+	detected, ts := det.Observe(msg)
+	if !detected {
+		return
+	}
+	inserted, err := store.InsertCompactEvent(ctx, a.db, msg.SessionID, ts, det.BeforeTokensIn, det.AfterTokensIn)
+	if err != nil {
+		a.logger.Warn("compact event insert failed",
+			slog.String("session_id", msg.SessionID),
+			slog.Int64("ts", ts),
+			slog.Any("error", err))
+		return
+	}
+	if inserted {
+		a.logger.Debug("compact event recorded",
+			slog.String("session_id", msg.SessionID),
+			slog.Int64("ts", ts),
+			slog.Int64("before", det.BeforeTokensIn),
+			slog.Int64("after", det.AfterTokensIn))
+	}
+}
+
+// resetClaudeCompactStateForTest clears the per-session detector cache so
+// tests can simulate a daemon restart (where the in-memory map is empty
+// but the on-disk compact_events rows persist). Production code never
+// touches this; the writer goroutine is the sole consumer of the map.
+func (a *App) resetClaudeCompactStateForTest() {
+	a.claudeCompactBySession = make(map[string]*claude.CompactDetector)
 }
 
 // buildRouter constructs the chi router with every mounter attached and

@@ -1,10 +1,12 @@
 package app
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"io"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -430,6 +432,128 @@ func TestApp_ProcessRawEvent_BadJSON(t *testing.T) {
 		Path: "/tmp/.claude/projects/x/foo.jsonl",
 		Line: []byte(`{not json`),
 	}, byName)
+}
+
+// TestApp_ProcessRawEvent_RecordsClaudeCompactEvent feeds every line of the
+// session-003-with-compact.jsonl fixture through processRawEvent and asserts
+// that exactly one row lands in compact_events for that session. This is
+// the regression test for the dashboard showing 0 /compact events: prior
+// to wiring CompactDetector into the writer, compact_events was never
+// written to and the insights query always returned 0.
+func TestApp_ProcessRawEvent_RecordsClaudeCompactEvent(t *testing.T) {
+	cfg := newTestConfig(t)
+	a, err := BuildOnly(cfg)
+	if err != nil {
+		t.Fatalf("BuildOnly: %v", err)
+	}
+	defer func() { _ = a.Stop(context.Background()) }()
+
+	byName := make(map[string]connectors.Connector, len(a.connectors))
+	for _, c := range a.connectors {
+		byName[c.Name()] = c
+	}
+
+	fixturePath := filepath.Join("..", "..", "examples", "sample-jsonl", "claude", "session-003-with-compact.jsonl")
+	f, err := os.Open(fixturePath)
+	if err != nil {
+		t.Fatalf("open fixture: %v", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	// processRawEvent uses path-substring routing to pick the connector,
+	// so the synthetic path must contain "/.claude/" to be recognised.
+	syntheticPath := "/tmp/.claude/projects/-proj/session-003.jsonl"
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
+	ctx := context.Background()
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		dup := make([]byte, len(line))
+		copy(dup, line)
+		a.processRawEvent(ctx, connectors.RawEvent{
+			Path: syntheticPath,
+			Line: dup,
+			Ts:   time.Now().UnixMilli(),
+		}, byName)
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("scan fixture: %v", err)
+	}
+
+	var compactCount int
+	err = a.db.Read().QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM compact_events`).Scan(&compactCount)
+	if err != nil {
+		t.Fatalf("count compact_events: %v", err)
+	}
+	if compactCount != 1 {
+		t.Fatalf("compact_events rows = %d, want 1", compactCount)
+	}
+}
+
+// TestApp_ProcessRawEvent_CompactReplayIsIdempotent verifies that feeding
+// the same compact-bearing line set through the writer twice (simulating
+// daemon restart + warm-up replay) does not produce a second row. The
+// INSERT OR IGNORE clause on (session_id, ts) is the safety net.
+func TestApp_ProcessRawEvent_CompactReplayIsIdempotent(t *testing.T) {
+	cfg := newTestConfig(t)
+	a, err := BuildOnly(cfg)
+	if err != nil {
+		t.Fatalf("BuildOnly: %v", err)
+	}
+	defer func() { _ = a.Stop(context.Background()) }()
+
+	byName := make(map[string]connectors.Connector, len(a.connectors))
+	for _, c := range a.connectors {
+		byName[c.Name()] = c
+	}
+
+	fixturePath := filepath.Join("..", "..", "examples", "sample-jsonl", "claude", "session-003-with-compact.jsonl")
+	raw, err := os.ReadFile(fixturePath)
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	syntheticPath := "/tmp/.claude/projects/-proj/session-003.jsonl"
+
+	feedLines := func() {
+		scanner := bufio.NewScanner(strings.NewReader(string(raw)))
+		scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
+		for scanner.Scan() {
+			line := scanner.Bytes()
+			if len(line) == 0 {
+				continue
+			}
+			dup := make([]byte, len(line))
+			copy(dup, line)
+			a.processRawEvent(context.Background(), connectors.RawEvent{
+				Path: syntheticPath,
+				Line: dup,
+				Ts:   time.Now().UnixMilli(),
+			}, byName)
+		}
+		if err := scanner.Err(); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+	}
+
+	feedLines()
+	// Reset the in-memory detector state to simulate a daemon restart;
+	// the on-disk compact_events row must prevent re-insertion.
+	a.resetClaudeCompactStateForTest()
+	feedLines()
+
+	var compactCount int
+	err = a.db.Read().QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM compact_events`).Scan(&compactCount)
+	if err != nil {
+		t.Fatalf("count compact_events: %v", err)
+	}
+	if compactCount != 1 {
+		t.Fatalf("compact_events rows after replay = %d, want 1 (idempotent on PK)", compactCount)
+	}
 }
 
 func TestApp_AccessorsExposeFields(t *testing.T) {
