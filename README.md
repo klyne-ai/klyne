@@ -74,7 +74,7 @@ make build
 ./bin/klyne audit-sessions --limit 20
 ```
 
-Then **restart Claude Code** so it picks up the new MCP server, slash prompts, and advisor hook. Existing MCP subprocesses keep their old binary in memory — restart is required for upgrades to take effect.
+Then **restart Claude Code** so it picks up the new MCP server, slash commands, and advisor hook. Existing MCP subprocesses keep their old binary in memory — restart is required for upgrades to take effect.
 
 > **Release status (May 2026):** the Homebrew tap, install script, and binary downloads light up with the first tagged release via [goreleaser](.github/workflows/release.yml). Until v0.1 ships, **build-from-source above is the only path that works today.** The release paths are documented in [§ Install — full reference](#install--full-reference) below.
 
@@ -188,7 +188,7 @@ flowchart LR
 | `/klyne:precompact` | `get_pre_compact_context` |
 | `/klyne:tokens` | `get_token_timeline` |
 
-Installed as both MCP prompts AND Markdown slash commands under `~/.claude/commands/klyne/*.md` — works regardless of which path your Claude Code version exercises.
+Installed as Markdown slash commands under `~/.claude/commands/klyne/*.md` — each command file calls the matching MCP tool above. Single surface, no `(MCP)` duplicates in the slash menu.
 
 ### CLI commands — for your terminal
 

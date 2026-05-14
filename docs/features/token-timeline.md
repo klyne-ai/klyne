@@ -1,32 +1,25 @@
-# token savings
+# Token timeline & savings
+
+> Status: shipped across three surfaces — CLI (`klyne tokens`), MCP (`get_token_timeline` / `/klyne:tokens`), and the web session-detail page (context-fill bar, compact CTA, on-demand break advisor).
 
 Every additional CLI turn re-sends the entire conversation history as input.
 The bigger the session, the more each next turn drains the user's 5-hour
 rate-limit cap — and that drain compounds silently. Users typically don't
 notice until things slow to a crawl, the cap is hit, or the bill arrives.
-This feature makes the cost of doing nothing visible inside the session view,
-and makes the two actions that actually save tokens — `/compact` and starting
-a fresh session — one click away.
+This feature makes per-turn cost visible everywhere the user looks, and
+makes the two actions that actually save tokens — `/compact` and starting
+a fresh session — one keystroke away.
 
-> **Companion CLI surfaces (shipped after this doc was written):**
->
-> - `klyne tokens [--session=ID] [--window=Xh]` renders the same per-turn
->   token-cost data this page describes, but on the terminal, with an
->   ASCII sparkline and a row-per-turn table. See
->   [docs/features/proactive-session-advisor.md](proactive-session-advisor.md)
->   for the engine. The CLI is the primary surface today; the UI elements
->   below are still planned.
-> - `klyne advise` is the Claude Code `UserPromptSubmit` hook that
->   replaces the "click the break advisor button" flow with an inline
->   one-line advisory injected when one of four deterministic triggers
->   crosses its threshold. No AI calls. Toggle with
->   `klyne config set advisor on|off`.
-> - Both Claude and Codex transcripts now produce a per-turn timeline.
->   The Codex parser was extended (commit `a587bea`) to project
->   `event_msg.token_count` records onto the nearest-preceding
->   assistant message at snapshot-build time. See
->   [docs/cli-review-2026-05-10.md](../cli-review-2026-05-10.md) for the
->   pre-fix repro and the post-fix verification.
+## Surfaces
+
+| Surface | Invocation | What you see |
+|---|---|---|
+| **CLI** | `klyne tokens [--session=ID] [--window=Xh]` | Per-turn ASCII sparkline + row-per-turn table + per-session activity heatmap (see [stats-dashboard.md](./stats-dashboard.md) for the heatmap details) |
+| **MCP / slash command** | `/klyne:tokens` | Same content as the CLI, rendered server-side and echoed verbatim by the host LLM ([mcp-and-slash-commands.md](./mcp-and-slash-commands.md)) |
+| **Web session detail** | `http://127.0.0.1:7878/sessions/[id]` | Context-fill bar with per-turn cost projection · compact CTA at 50 % · on-demand AI break advisor at 60 % |
+| **Proactive advisor hook** | `klyne advise` (auto-fired by Claude Code's `UserPromptSubmit`) | One-line inline advisory when one of four deterministic triggers crosses threshold ([proactive-session-advisor.md](./proactive-session-advisor.md)) |
+
+Both Claude and Codex transcripts produce a per-turn timeline. The Codex parser projects `event_msg.token_count` records onto the nearest-preceding assistant message at snapshot-build time.
 
 ## what ships
 

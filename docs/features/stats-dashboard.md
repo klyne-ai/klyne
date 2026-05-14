@@ -1,9 +1,6 @@
-# v3 — `/stats` dashboard + per-session heatmap
+# `/stats` dashboard + per-session heatmap
 
-> Status: implemented on `worktree-v3-tokscale-stats-daily-overview`.
-> Adds a new SvelteKit page, a new backend endpoint, and a Unicode
-> hour-by-hour heatmap to the existing `klyne tokens` CLI surface.
-> Inspired by [junhoyeo/tokscale](https://github.com/junhoyeo/tokscale).
+> Status: shipped. SvelteKit page at `/stats`, backed by `internal/usagestats`. CLI heatmap appended to `klyne tokens` and `/klyne:tokens`. Inspired by [junhoyeo/tokscale](https://github.com/junhoyeo/tokscale).
 
 ## Web dashboard — `/stats`
 
@@ -33,7 +30,7 @@ Filters: CLI (claude / codex / both), window (7d / 30d / 90d / 1y).
 
 - `ui/src/routes/stats/+page.svelte` — single-file page using Svelte 5
   runes (`$state`, `$derived`, `$effect`).
-- New top-nav entry between **Cockpit** and **Projects**.
+- Reached from the **Insights** tab in the 3-route web shell (see [web-cockpit.md](./web-cockpit.md)).
 - Reuses existing `kfmt` / `costFmt` / `ad-card` / `ad-mono` helpers so
   the visual language matches the rest of the app.
 
@@ -63,7 +60,7 @@ peak hour May 12 8:00 — 139 turn(s), 1.1M effective tokens · 4 active hour(s)
 Implementation: `internal/mcpserver/token_timeline_heatmap.go` +
 `token_timeline_heatmap_test.go`. The renderer is appended inside the
 existing `formatTokenTimelineAsMarkdown` so both `klyne tokens` and
-`/klyne:tokens` (the MCP slash prompt) pick it up.
+`/klyne:tokens` (the markdown slash command) pick it up.
 
 ## What we intentionally did NOT add
 
