@@ -58,6 +58,26 @@ func userPromptResult(description, text string) *mcp.GetPromptResult {
 	}
 }
 
+// PromptBootstrapHandler implements the /klyne:bootstrap prompt.
+// Live: invokes bootstrap and returns the synthesized Day-1 brief
+// (recent sessions, project + global memories, latest context-health
+// verdict) as Markdown — the same view the klyne-bootstrap skill
+// auto-fetches when the agent enters an unfamiliar project.
+func PromptBootstrapHandler(ctx context.Context, req *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+	cwd, err := promptCWD(req)
+	if err != nil {
+		return nil, err
+	}
+	_, out, err := HandleBootstrap(ctx, nil, BootstrapInput{CWD: cwd})
+	if err != nil {
+		return nil, err
+	}
+	return userPromptResult(
+		"Session bootstrap brief for the current project",
+		out.Markdown,
+	), nil
+}
+
 // PromptHealthHandler implements the /klyne:health prompt.
 // Live: invokes get_context_health and returns its verdict + bloat
 // scorecard as Markdown. Equivalent to the AI calling the tool but

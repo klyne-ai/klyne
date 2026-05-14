@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // Decision is one row in the `decisions` table (migration 009).
@@ -145,6 +146,61 @@ func SearchDecisions(ctx context.Context, db *DB, q, projectPath string, limit i
 		return nil, fmt.Errorf("store: search decisions rows: %w", err)
 	}
 	return out, nil
+}
+
+// UpdateDecision patches one or both of text / tags on an existing
+// decision row. updateText / updateTags act as presence flags so the
+// caller can distinguish "leave unchanged" from "set to empty".
+//
+// Behavior:
+//   - updateText=true with whitespace-only text → error (mirrors
+//     InsertDecision's text-required contract).
+//   - updateTags=true with a nil slice writes `[]` (clear tags).
+//   - Neither flag set → error: at least one field must be patched.
+//   - Returns sql.ErrNoRows (wrapped) when no row matches the id.
+func UpdateDecision(ctx context.Context, db *DB, id string, text string, tags []string, updateText, updateTags bool) error {
+	if id == "" {
+		return errors.New("store: decision id required")
+	}
+	if !updateText && !updateTags {
+		return errors.New("store: update decision: at least one of text or tags must be set")
+	}
+
+	sets := make([]string, 0, 2)
+	args := make([]any, 0, 3)
+	if updateText {
+		if strings.TrimSpace(text) == "" {
+			return errors.New("store: decision text required")
+		}
+		sets = append(sets, "text = ?")
+		args = append(args, text)
+	}
+	if updateTags {
+		if tags == nil {
+			tags = []string{}
+		}
+		raw, err := json.Marshal(tags)
+		if err != nil {
+			return fmt.Errorf("store: marshal tags for decision %q: %w", id, err)
+		}
+		sets = append(sets, "tags_json = ?")
+		args = append(args, string(raw))
+	}
+	args = append(args, id)
+
+	q := "UPDATE decisions SET " + strings.Join(sets, ", ") + " WHERE id = ?"
+	res, err := db.Write().ExecContext(ctx, q, args...)
+	if err != nil {
+		return fmt.Errorf("store: update decision %q: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("store: update decision %q rows: %w", id, err)
+	}
+	if n == 0 {
+		return fmt.Errorf("store: decision %q: %w", id, sql.ErrNoRows)
+	}
+	return nil
 }
 
 // DeleteDecision removes one decision by id. Returns sql.ErrNoRows

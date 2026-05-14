@@ -167,6 +167,7 @@ flowchart LR
 
 | Tool | What it solves |
 |---|---|
+| `bootstrap` | Day-1 session brief: last 3 sessions + last 5 project memories + global preview + latest context-health verdict — synthesized in one call so a fresh session has cross-session context on turn 1 |
 | `list_sessions` | Enumerate Claude + Codex sessions in this project |
 | `get_context_health` | Classify a session as `healthy` / `drifting` / `risky` / `rescue_now` + bloat scorecard |
 | `search_messages` | Full-text search across every indexed session (requires daemon) |
@@ -175,12 +176,14 @@ flowchart LR
 | `get_token_timeline` | Per-turn token usage — sparkline + table + heatmap, cached vs uncached split |
 | `record_decision` / `list_decisions` / `search_decisions` | Project-scoped immutable decisions log |
 | `remember` / `recall` | Chat-first memory: project/global notes and runbooks that survive across fresh sessions |
+| `update_memory` / `delete_memory` / `list_memories` | Edit, delete, and browse memories by id — full CRUD parity with derived display names |
 | `code_review_context` | Optional `.code-review-graph/` enrichment when present |
 
 ### Slash commands — user-triggered via `/` in Claude Code
 
 | Slash | Calls |
 |---|---|
+| `/klyne:bootstrap` | `bootstrap` |
 | `/klyne:health` | `get_context_health` |
 | `/klyne:sessions` | `list_sessions` |
 | `/klyne:search <query>` | `search_messages` |
@@ -196,6 +199,7 @@ Skills are the auto-invoked counterpart to slash commands. The agent reads each 
 
 | Skill | Wraps | Auto-invokes when |
 |---|---|---|
+| `klyne-bootstrap` | `bootstrap` | Session start in a project the agent has no prior context for, the user asks "what was I working on?" / "where did I leave off?", or before the agent's first major action in an unfamiliar codebase |
 | `klyne-health` | `get_context_health` | An advisory mentions context fill / drift / acceleration / 5-hour window, the user asks about token usage, after a `/compact` event, or before loading a >5K-token file |
 
 Installed under `~/.claude/skills/<skill>/SKILL.md` by `klyne mcp install`. More skills land here as klyne grows; the install is idempotent and overwrites on upgrade. See [`docs/features/mcp-and-slash-commands.md`](docs/features/mcp-and-slash-commands.md#skills--the-agent-invoked-path) for the full rationale.
@@ -342,6 +346,7 @@ To stay honest:
 
 | Surface | Claude Code | Codex |
 |---|---|---|
+| `bootstrap` | ✅ | ✅ |
 | `list_sessions` | ✅ | ✅ |
 | `get_context_health` | ✅ | ✅ |
 | `search_messages` | ✅ | ✅ |
@@ -349,6 +354,7 @@ To stay honest:
 | `get_pre_compact_context` | ✅ via `compact_boundary` | ✅ via embedded `replacement_history` |
 | `get_token_timeline` | ✅ | ✅ |
 | `remember` / `recall` | ✅ | ✅ via MCP |
+| `update_memory` / `delete_memory` / `list_memories` | ✅ | ✅ via MCP |
 | Trigger-phrase auto-recall (`klyne remember…`, `refer klyne…`) | ✅ via CLAUDE.md rule | ⚠️ explicit MCP calls only until Codex has equivalent project rules |
 | `klyne advise` (advisor hook) | ✅ | n/a — Codex CLI doesn't expose `UserPromptSubmit` yet |
 
@@ -413,7 +419,7 @@ The `mcp install` command auto-detects host configs:
 | Codex CLI | `~/.codex/config.toml` | `[mcp_servers.klyne]` |
 | Claude Code (advisor hook) | `~/.claude/settings.json` | `hooks.UserPromptSubmit[].klyne` (idempotent merge) |
 | Claude Code (slash commands) | `~/.claude/commands/klyne/*.md` | Six Markdown files |
-| Claude Code (skills) | `~/.claude/skills/<skill>/SKILL.md` | One bundle per agent-invoked skill (currently `klyne-health`) |
+| Claude Code (skills) | `~/.claude/skills/<skill>/SKILL.md` | One bundle per agent-invoked skill (`klyne-bootstrap`, `klyne-health`) |
 
 Pass `--platform claude` or `--platform codex` to scope the install.
 
