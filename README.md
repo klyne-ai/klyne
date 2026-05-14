@@ -234,6 +234,26 @@ Press `/` anywhere to open the search overlay (FTS5 across every indexed session
 
 ---
 
+## Why klyne, not just ask Claude?
+
+A fair skeptic question for any rescue layer: if Claude is already in the session, why does klyne need to exist? Every klyne surface falls into one of three modes — three things Claude *cannot* do from its own context:
+
+| Mode | What klyne sees that Claude can't | Example |
+|---|---|---|
+| **Prevention** | The 5-hour cap window, exact token counts, drift signals, cost acceleration — and a push channel to warn the user *before* compact bites | Advisor hook, `klyne statusline` |
+| **Recovery** | The pre-compact JSONL slice (still on disk after Claude's context has dropped it) and the full history of any prior session | `/klyne:precompact`, `/klyne:handoff` after compact, fresh-session restore |
+| **Audit / cross-session** | Every Claude + Codex session ever indexed — files, tool calls, subagent spend, token timelines — all queryable from one local store | `/klyne:search`, `klyne files`, `klyne subagents`, `klyne top`, `klyne audit-sessions` |
+
+The two **provably klyne-only** features are `get_pre_compact_context` (the messages are gone from Claude by definition) and the `UserPromptSubmit` advisor (Claude can't intercept its own input, doesn't see the cap window, and only speaks when called). Everything else either sees across sessions or reads `usage` fields Claude doesn't expose.
+
+One concrete example: `klyne subagents` on the maintainer's machine found **134 subagents across 5 parent sessions, 555M tokens** — hidden from the parent session's `cost_usd` because Claude's cost engine only sees the Task tool's final result, not the subagent's full conversation. Claude can't tell you about money you didn't know you were spending.
+
+The honest case where Claude wins: invoked in a short, healthy session, Claude can write a handoff from live context that's often as good or better than klyne's JSONL reconstruction. klyne's edge shows up the moment context is unhealthy, lost, or spread across sessions — which is when handoffs actually matter.
+
+**Full per-command comparison** — what Claude could plausibly try, what klyne does, and why the substitution fails for each MCP tool, slash command, and CLI surface: [`docs/QUESTIONS.md`](docs/QUESTIONS.md).
+
+---
+
 ## Memory: project runbooks the AI can actually reuse
 
 Memory is the chat-first version of the decisions log. It uses the same local SQLite table, but the verbs match how you work:
@@ -404,6 +424,7 @@ Pass `--platform claude` or `--platform codex` to scope the install.
 | 🛡️ [Security model](docs/SECURITY.md) | Threat model + privacy contract |
 | 🧭 [Context-rescue strategy](docs/marketing/context-rescue-strategy.md) | Why klyne exists, framed against neighbours |
 | 🆚 [Comparison and gaps](docs/marketing/comparison-and-gaps.md) | klyne vs ccusage / ccsession / mcp-memory-keeper / claudestat / claude-code-otel |
+| ❓ [Positioning questions](docs/QUESTIONS.md) | Per-command Claude-vs-klyne comparison — why each surface exists when Claude is already in the loop |
 
 ---
 
