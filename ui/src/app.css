@@ -364,6 +364,17 @@ a { color: inherit; text-decoration: none; }
 .work > * { min-height: 0; min-width: 0; }
 .work.inspector-collapsed { grid-template-columns: 268px 1fr 0px; }
 .work.rail-collapsed { grid-template-columns: 0px 1fr 336px; }
+/* Both rails hidden — give the terminal grid the full width. */
+.work.rail-collapsed.inspector-collapsed { grid-template-columns: 0px 1fr 0px; }
+
+/* Fullscreen mode: hides the top app nav (via body class) and the
+   rails so the terminal grid covers the entire viewport. Esc or F
+   toggles it. The OS-level fullscreen API is requested in parallel
+   so the browser chrome also disappears when the user gesture allows. */
+body.klyne-fullscreen .nav { display: none !important; }
+body.klyne-fullscreen .work,
+body.klyne-fullscreen .work.work-fullscreen { height: 100vh; }
+.work-fullscreen { grid-template-columns: 0px 1fr 0px !important; }
 
 .rail {
   border-right: 1px solid var(--ad-border-soft);
