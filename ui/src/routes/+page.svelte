@@ -200,15 +200,23 @@
   class:rail-collapsed={!railOpen}
   class:work-fullscreen={fullscreen}
 >
-  {#if railOpen}
-    <ProjectRail
-      projects={projects}
-      selectedPath={selectedPath}
-      pinnedPaths={pinnedPaths}
-      onSelect={selectProject}
-      onTogglePin={togglePin}
-    />
-  {/if}
+  <!--
+    ProjectRail is always rendered so the CSS grid keeps its three
+    tracks (rail, center, inspector) in the same order regardless of
+    which side is collapsed. Hiding the rail by removing the element
+    would shift the center and inspector into the wrong grid columns
+    (the Inspector would land in the wide 1fr middle column and take
+    over the viewport). The CSS `.work.rail-collapsed` rule
+    collapses the rail's column to 0px and `.rail { overflow: hidden }`
+    clips its content — that is what actually hides it visually.
+  -->
+  <ProjectRail
+    projects={projects}
+    selectedPath={selectedPath}
+    pinnedPaths={pinnedPaths}
+    onSelect={selectProject}
+    onTogglePin={togglePin}
+  />
 
   <main class="center">
     <div class="center-hd">
