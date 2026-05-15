@@ -174,6 +174,27 @@ func newXaggToolCount() *xaggToolCount {
 	}
 }
 
+// xaggSkillSource extracts the source from a Skill tool's input JSON. Skill
+// names follow `<source>:<name>` (e.g., "superpowers:brainstorming"); we
+// return the segment before the colon. Returns "" when the input is malformed
+// or the skill field is missing.
+func xaggSkillSource(input json.RawMessage) string {
+	var v struct {
+		Skill string `json:"skill"`
+	}
+	if err := json.Unmarshal(input, &v); err != nil {
+		return ""
+	}
+	skill := strings.TrimSpace(v.Skill)
+	if skill == "" {
+		return ""
+	}
+	if idx := strings.Index(skill, ":"); idx > 0 {
+		return skill[:idx]
+	}
+	return skill
+}
+
 // addFromJSONL tallies tool calls from a JSONL session file by reading each
 // line and extracting tool_use blocks from assistant messages.
 //
@@ -206,8 +227,9 @@ func (tc *xaggToolCount) addFromJSONL(path string) {
 		}
 		var msg struct {
 			Content []struct {
-				Type string `json:"type"`
-				Name string `json:"name"`
+				Type  string          `json:"type"`
+				Name  string          `json:"name"`
+				Input json.RawMessage `json:"input,omitempty"`
 			} `json:"content"`
 		}
 		if err := json.Unmarshal(line.Message, &msg); err != nil {
@@ -218,6 +240,17 @@ func (tc *xaggToolCount) addFromJSONL(path string) {
 				continue
 			}
 			src := mcpFromToolName(block.Name)
+			// Skill tool calls don't carry the source in their tool name —
+			// they use Anthropic's built-in `Skill` tool with input
+			// `{"skill":"<source>:<name>"}`. Without unwrapping, every Skill
+			// invocation gets bucketed as anthropic-builtins and the actual
+			// source (superpowers, klyne, etc.) shows "0 calls — never
+			// invoked" even when the user uses it constantly.
+			if block.Name == "Skill" && len(block.Input) > 0 {
+				if s := xaggSkillSource(block.Input); s != "" {
+					src = s
+				}
+			}
 			tc.bySource[src]++
 			tc.byTool[block.Name]++
 		}
