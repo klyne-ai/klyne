@@ -43,6 +43,7 @@ func TestMigrationsApply(t *testing.T) {
 		"009_decisions.sql",             // decisions log (project-scoped persistent notes)
 		"012_shield_snapshots.sql",      // compact-shield snapshot log
 		"013_safety_snapshots.sql",      // pre-action safety-net snapshot log
+		"014_work_spans.sql",            // cost-per-outcome work-span attribution
 	}
 	if len(sqlFiles) != len(expected) {
 		t.Fatalf("expected %d migrations, found %d: %v", len(expected), len(sqlFiles), sqlFiles)
@@ -95,6 +96,7 @@ func TestMigrationsApply(t *testing.T) {
 		"compact_events",
 		"safety_snapshots",
 		"shield_snapshots",
+		"work_spans",
 	}
 	for _, tbl := range requiredTables {
 		var name string
