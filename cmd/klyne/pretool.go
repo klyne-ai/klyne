@@ -102,7 +102,7 @@ func defaultPolicyPath() string {
 	_ = import_path
 	// Most reliable: relative to CWD for development; binary-adjacent for prod.
 	candidates := []string{
-		exe[:len(exe)-len(baseName(exe))] + "policy/risky_commands.json",
+		exe[:len(exe)-len(policyBinBase(exe))] + "policy/risky_commands.json",
 		"policy/risky_commands.json",
 	}
 	for _, c := range candidates {
@@ -113,9 +113,9 @@ func defaultPolicyPath() string {
 	return "policy/risky_commands.json"
 }
 
-// baseName returns the base filename component of a path (no import of path/filepath
+// policyBinBase returns the base filename component of a path (no import of path/filepath
 // needed since we already have one for the store).
-func baseName(p string) string {
+func policyBinBase(p string) string {
 	for i := len(p) - 1; i >= 0; i-- {
 		if p[i] == '/' || p[i] == '\\' {
 			return p[i+1:]

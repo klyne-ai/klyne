@@ -126,7 +126,7 @@ func renderSnapshotsTable(w interface{ Write([]byte) (int, error) }, rows []stor
 		}
 		b.WriteString(fmt.Sprintf("| %d | %s | %s | %s | %s | %s |\n",
 			s.ID, fmtSnapshotAgo(s.Ts), s.Severity, s.PatternID,
-			truncate(s.Command, 50), restore))
+			truncMid(s.Command, 50), restore))
 	}
 	b.WriteString(fmt.Sprintf("\nRun `klyne restore <id>` to restore a snapshot.\n"))
 	_, _ = w.Write([]byte(b.String()))
@@ -149,7 +149,7 @@ func fmtSnapshotAgo(ms int64) string {
 	}
 }
 
-func truncate(s string, n int) string {
+func truncMid(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
