@@ -2,6 +2,7 @@ package attribution
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/klyne-ai/klyne/internal/connectors"
@@ -261,5 +262,31 @@ func TestBashCommand(t *testing.T) {
 		if got != c.want {
 			t.Errorf("bashCommand(%q) = %q, want %q", c.input, got, c.want)
 		}
+	}
+}
+
+func TestExtractCommitSubject(t *testing.T) {
+	cases := []struct {
+		name string
+		cmd  string
+		want string
+	}{
+		{"plain -m double quotes", `git commit -m "fix: thing"`, "fix: thing"},
+		{"plain -m single quotes", `git commit -m 'feat: add x'`, "feat: add x"},
+		{"-am combined flag", `git commit -am "wip: stash"`, "wip: stash"},
+		{"long-form --message=", `git commit --message="docs: update"`, "docs: update"},
+		{"truncated >60 chars", `git commit -m "` + strings.Repeat("a", 80) + `"`, strings.Repeat("a", 57) + "..."},
+		{"heredoc body subject",
+			"git commit -m \"$(cat <<'EOF'\nfeat: heredoc subject\n\nbody line\nEOF\n)\"",
+			"feat: heredoc subject"},
+		{"no -m flag", `git commit --amend`, ""},
+		{"empty cmd", ``, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := extractCommitSubject(c.cmd); got != c.want {
+				t.Errorf("extractCommitSubject = %q, want %q", got, c.want)
+			}
+		})
 	}
 }

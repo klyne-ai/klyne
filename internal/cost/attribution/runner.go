@@ -168,10 +168,18 @@ func buildSpans(msgs []*connectors.Message) ([]store.WorkSpan, error) {
 			}
 			cmd := bashCommand(tc)
 			if isGitCommit(cmd) {
-				// Parse the commit SHA from the matching tool result.
+				// SHA recovery via tool_result is structurally unreliable
+				// (Claude stores stdout in the next user message, not the
+				// assistant message that issued the call). Fall back to
+				// extracting the commit subject from the -m flag so the
+				// digest shows something meaningful instead of "unknown".
 				sha := parseCommitSHA(msg, tc.ID)
 				if sha == "" {
-					sha = "unknown-" + tc.ID
+					if subj := extractCommitSubject(cmd); subj != "" {
+						sha = "msg:" + subj
+					} else {
+						sha = "unknown-" + tc.ID
+					}
 				}
 				closedAt := msg.Ts
 
@@ -271,7 +279,27 @@ SELECT m.id, m.session_id,
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("messages rows: %w", err)
 	}
-	return msgs, nil
+
+	// In-memory dedup. The connector ingests JSONL on file-watch and the
+	// audit pipeline re-ingests on validation; both insert with unique
+	// `id`s but identical (session_id, ts, role) tuples, which inflates
+	// span totals N× per duplicate ingestion pass. The proper fix is at
+	// the connector layer; this is a defensive guard so the digest is
+	// usable today.
+	if len(msgs) <= 1 {
+		return msgs, nil
+	}
+	seen := make(map[string]struct{}, len(msgs))
+	out := msgs[:0]
+	for _, m := range msgs {
+		key := m.SessionID + "\t" + fmt.Sprintf("%d", m.Ts) + "\t" + string(m.Role)
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, m)
+	}
+	return out, nil
 }
 
 // ---- tool-call parsing helpers ---------------------------------------------
@@ -348,6 +376,103 @@ func isHex(s string) bool {
 		}
 	}
 	return true
+}
+
+// extractCommitSubject pulls the first-line subject from a `git commit -m "..."`
+// (or `-am`, `--message=`) flag. Returns "" when no -m flag is present or the
+// command shape isn't recognized.
+//
+// Heredoc-wrapped messages (`-m "$(cat <<'EOF' ... EOF)"`) are handled by
+// scanning the cmd's lines for the first non-empty line between the heredoc
+// markers — that line is the commit subject by convention.
+func extractCommitSubject(cmd string) string {
+	subject := extractDirectMessage(cmd)
+	if subject == "" {
+		return ""
+	}
+	if strings.Contains(subject, "$(cat") || strings.Contains(cmd, "<<'") ||
+		strings.Contains(cmd, `<<"`) || strings.Contains(cmd, "<<EOF") {
+		if h := extractHeredocFirstLine(cmd); h != "" {
+			return h
+		}
+	}
+	return subject
+}
+
+// extractDirectMessage returns the contents of the first quoted argument that
+// follows -m / -am / --message=. Naive: doesn't unescape; takes everything up
+// to the matching closing quote.
+func extractDirectMessage(cmd string) string {
+	flags := []string{" -m ", " -am ", " --message=", " --message "}
+	idx := -1
+	flagLen := 0
+	for _, f := range flags {
+		if i := strings.Index(cmd, f); i >= 0 && (idx < 0 || i < idx) {
+			idx = i
+			flagLen = len(f)
+		}
+	}
+	if idx < 0 {
+		return ""
+	}
+	after := cmd[idx+flagLen:]
+	// Find the opening quote.
+	var quote byte
+	startQ := -1
+	for i := 0; i < len(after); i++ {
+		if after[i] == '"' || after[i] == '\'' {
+			quote = after[i]
+			startQ = i + 1
+			break
+		}
+		if after[i] != ' ' && after[i] != '\t' {
+			break // first non-space is not a quote — bail
+		}
+	}
+	if startQ < 0 {
+		return ""
+	}
+	endQ := strings.IndexByte(after[startQ:], quote)
+	if endQ < 0 {
+		return ""
+	}
+	subject := after[startQ : startQ+endQ]
+	if i := strings.IndexByte(subject, '\n'); i >= 0 {
+		subject = subject[:i]
+	}
+	subject = strings.TrimSpace(subject)
+	if len(subject) > 60 {
+		subject = subject[:57] + "..."
+	}
+	return subject
+}
+
+// extractHeredocFirstLine scans cmd for a heredoc body and returns its first
+// non-empty line (the commit subject by convention).
+func extractHeredocFirstLine(cmd string) string {
+	lines := strings.Split(cmd, "\n")
+	seenStart := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !seenStart {
+			if strings.Contains(line, "<<'") || strings.Contains(line, `<<"`) ||
+				strings.Contains(line, "<<EOF") {
+				seenStart = true
+			}
+			continue
+		}
+		if trimmed == "" || strings.HasPrefix(trimmed, "EOF") {
+			if strings.HasPrefix(trimmed, "EOF") {
+				return ""
+			}
+			continue
+		}
+		if len(trimmed) > 60 {
+			trimmed = trimmed[:57] + "..."
+		}
+		return trimmed
+	}
+	return ""
 }
 
 // newExplorationID generates a random hex string for open/exploration spans.

@@ -273,14 +273,21 @@ func costSpanLabel(sp store.WorkSpan) string {
 	switch sp.Bucket {
 	case "commit":
 		sha := sp.CommitSHA
-		if len(sha) > 7 {
-			sha = sha[:7]
-		}
 		branch := sp.GitBranch
 		if branch == "" {
 			branch = "unknown-branch"
 		}
-		return fmt.Sprintf("commit %s (%s)", sha, branch)
+		switch {
+		case strings.HasPrefix(sha, "msg:"):
+			return fmt.Sprintf("commit %q (%s)", strings.TrimPrefix(sha, "msg:"), branch)
+		case strings.HasPrefix(sha, "unknown-"):
+			return fmt.Sprintf("commit unknown (%s)", branch)
+		default:
+			if len(sha) > 7 {
+				sha = sha[:7]
+			}
+			return fmt.Sprintf("commit %s (%s)", sha, branch)
+		}
 	case "exploration":
 		id := sp.ExplorationID
 		if len(id) > 12 {
