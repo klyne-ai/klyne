@@ -1,10 +1,14 @@
 package mcpserver
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+
+	"github.com/klyne-ai/klyne/internal/store"
 )
 
 // hook_install.go — installs the proactive-advisor UserPromptSubmit
@@ -273,5 +277,161 @@ func commandsEqual(a, b map[string]any) bool {
 	ac, _ := a["command"].(string)
 	bc, _ := b["command"].(string)
 	return ac == bc
+}
+
+// ShieldInjectResult is the outcome of ScopedShieldContext.
+type ShieldInjectResult struct {
+	// Context is the ≤4K-token context fragment to inject, or "" when
+	// no relevant shield snapshot was found.
+	Context string
+	// SnapshotID is the shield_snapshot row that was used (0 when none).
+	SnapshotID int64
+}
+
+// ScopedShieldContext checks whether the immediately preceding compact
+// event was klyne-blocked and, when it was, returns a keyword-scored
+// context fragment from that snapshot's decisions and turns, capped at
+// roughly 4K tokens (~16 000 bytes) and filtered to sentences that
+// overlap with the keywords extracted from userPrompt.
+//
+// This implements the "Scoped re-inject on next UserPromptSubmit" step
+// from the Compact Shield spec. The caller (klyne advise) should append
+// the returned Context to the hook's additionalContext when non-empty.
+//
+// db may be nil; returns an empty result gracefully when nil.
+func ScopedShieldContext(ctx context.Context, db *store.DB, sessionID, userPrompt string) (*ShieldInjectResult, error) {
+	if db == nil || sessionID == "" {
+		return &ShieldInjectResult{}, nil
+	}
+
+	// Find the most recent blocked snapshot for this session.
+	snaps, err := store.ListShieldSnapshots(ctx, db, store.ShieldSnapshotFilter{
+		SessionID:   sessionID,
+		OnlyBlocked: true,
+		Limit:       1,
+	})
+	if err != nil || len(snaps) == 0 {
+		return &ShieldInjectResult{}, nil //nolint:nilerr
+	}
+	snap := snaps[0]
+
+	// Build a keyword set from the user prompt for similarity scoring.
+	keywords := extractKeywords(userPrompt)
+	if len(keywords) == 0 {
+		return &ShieldInjectResult{}, nil
+	}
+
+	// Score candidate sentences from decisions and turns against keywords.
+	// Each JSON array value is treated as one candidate chunk.
+	candidates := extractCandidates(snap.DecisionsJSON, snap.TurnsJSON)
+	ranked := scoreByKeywords(candidates, keywords)
+
+	// Budget: roughly 4K tokens (~16 KB at ~4 bytes/token on average).
+	const maxBytes = 16_000
+	var sb strings.Builder
+	sb.WriteString("klyne compact-shield context (snapshot ")
+	sb.WriteString(fmt.Sprintf("%d", snap.ID))
+	sb.WriteString("):\n")
+	used := sb.Len()
+	for _, c := range ranked {
+		if used+len(c)+1 > maxBytes {
+			break
+		}
+		sb.WriteString("- ")
+		sb.WriteString(c)
+		sb.WriteByte('\n')
+		used += len(c) + 3
+	}
+	if used == sb.Len()-len(fmt.Sprintf("klyne compact-shield context (snapshot %d):\n", snap.ID)) {
+		// No candidates fit.
+		return &ShieldInjectResult{}, nil
+	}
+
+	return &ShieldInjectResult{
+		Context:    sb.String(),
+		SnapshotID: snap.ID,
+	}, nil
+}
+
+// extractKeywords returns a deduplicated lowercase word set from text,
+// excluding very short words and common stop-words.
+func extractKeywords(text string) map[string]struct{} {
+	stop := map[string]struct{}{
+		"the": {}, "a": {}, "an": {}, "and": {}, "or": {}, "but": {},
+		"in": {}, "on": {}, "at": {}, "to": {}, "for": {}, "of": {},
+		"is": {}, "it": {}, "be": {}, "as": {}, "by": {}, "we": {},
+		"do": {}, "so": {}, "no": {}, "my": {}, "if": {}, "up": {},
+		"can": {}, "are": {}, "was": {}, "not": {}, "has": {}, "had": {},
+		"you": {}, "use": {}, "run": {}, "get": {}, "set": {}, "new": {},
+	}
+	out := make(map[string]struct{})
+	for _, word := range strings.Fields(strings.ToLower(text)) {
+		// Strip punctuation prefix/suffix.
+		word = strings.Trim(word, ".,;:!?\"'`()[]{}#")
+		if len(word) < 3 {
+			continue
+		}
+		if _, ok := stop[word]; ok {
+			continue
+		}
+		out[word] = struct{}{}
+	}
+	return out
+}
+
+// extractCandidates decodes JSON arrays from decisionsJSON and turnsJSON
+// and returns the string values as individual candidates.
+func extractCandidates(decisionsJSON, turnsJSON string) []string {
+	var out []string
+	for _, raw := range []string{decisionsJSON, turnsJSON} {
+		var items []string
+		if err := json.Unmarshal([]byte(raw), &items); err != nil {
+			// Try []any for heterogeneous arrays.
+			var anys []any
+			if err2 := json.Unmarshal([]byte(raw), &anys); err2 != nil {
+				continue
+			}
+			for _, a := range anys {
+				if s, ok := a.(string); ok && s != "" {
+					items = append(items, s)
+				}
+			}
+		}
+		out = append(out, items...)
+	}
+	return out
+}
+
+// scoreByKeywords sorts candidates by how many keywords they overlap with
+// and returns them in descending score order (highest relevance first).
+func scoreByKeywords(candidates []string, keywords map[string]struct{}) []string {
+	type scored struct {
+		text  string
+		score int
+	}
+	items := make([]scored, 0, len(candidates))
+	for _, c := range candidates {
+		cWords := extractKeywords(c)
+		score := 0
+		for kw := range keywords {
+			if _, ok := cWords[kw]; ok {
+				score++
+			}
+		}
+		if score > 0 {
+			items = append(items, scored{text: c, score: score})
+		}
+	}
+	// Simple insertion sort — candidate lists are small (≤30 items).
+	for i := 1; i < len(items); i++ {
+		for j := i; j > 0 && items[j].score > items[j-1].score; j-- {
+			items[j], items[j-1] = items[j-1], items[j]
+		}
+	}
+	out := make([]string, len(items))
+	for i, it := range items {
+		out[i] = it.text
+	}
+	return out
 }
 
