@@ -30,7 +30,15 @@ func New(db *store.DB) *Runner {
 }
 
 // spanKey identifies an open span uniquely within a batch run.
+//
+// sessionID is part of the key on purpose: the prior version (branch, cwd) only
+// caused state to bleed across sessions. With messages ordered by
+// (session_id, ts) and the same branch+cwd reused across sessions, an open span
+// from session A would absorb session B's messages, then close at B's commit,
+// producing identical-token "duplicate" spans whose closed_at preceded their
+// opened_at (negative span duration). Per-session state machine fixes both.
 type spanKey struct {
+	sessionID string
 	gitBranch string
 	cwd       string
 }
@@ -52,7 +60,7 @@ type openSpan struct {
 
 func newOpenSpan(msg *connectors.Message) *openSpan {
 	return &openSpan{
-		key:         spanKey{gitBranch: msg.GitBranch, cwd: msg.Cwd},
+		key:         spanKey{sessionID: msg.SessionID, gitBranch: msg.GitBranch, cwd: msg.Cwd},
 		projectPath: msg.ProjectPath,
 		sessionIDs:  map[string]struct{}{},
 		openedAt:    msg.Ts,
@@ -103,15 +111,18 @@ func (os *openSpan) toWorkSpan(commitSHA, exploreID, bucket string, closedAt int
 // Attribution is the result of a single batch run.
 type Attribution struct {
 	SpansWritten int
-	SpansSkipped int // spans with zero messages (degenerate state)
+	SpansSkipped int   // spans with zero messages (degenerate state)
+	SpansDeleted int64 // rows removed by the pre-run truncate (debug visibility)
 }
 
 // Run streams all messages from the DB since sinceMs, runs the attribution
 // state machine, and writes new work_span rows.
 //
-// It does NOT deduplicate against existing spans — callers should truncate
-// or use a rebuild strategy. For v0, "klyne cost week --since=7d" is the
-// primary entry point and always rebuilds from the message window.
+// Truncate-then-insert: every Run call first deletes existing work_spans rows
+// in the same time window so the table holds exactly one batch per window.
+// Without this, repeat `klyne cost week` invocations append duplicate spans,
+// the renderer sums across all of them, and you see N× inflated totals plus
+// "triplicate" spans in the Top digest.
 func (r *Runner) Run(ctx context.Context, sinceMs int64, dryRun bool) (*Attribution, error) {
 	msgs, err := loadMessages(ctx, r.db, sinceMs)
 	if err != nil {
@@ -124,6 +135,13 @@ func (r *Runner) Run(ctx context.Context, sinceMs int64, dryRun bool) (*Attribut
 	}
 
 	attr := &Attribution{}
+	if !dryRun {
+		deleted, err := store.DeleteWorkSpansSince(ctx, r.db, sinceMs)
+		if err != nil {
+			return nil, fmt.Errorf("attribution: truncate stale spans: %w", err)
+		}
+		attr.SpansDeleted = deleted
+	}
 	for i := range spans {
 		if spans[i].MsgCount == 0 {
 			attr.SpansSkipped++
@@ -152,7 +170,7 @@ func buildSpans(msgs []*connectors.Message) ([]store.WorkSpan, error) {
 		if msg == nil {
 			continue
 		}
-		key := spanKey{gitBranch: msg.GitBranch, cwd: msg.Cwd}
+		key := spanKey{sessionID: msg.SessionID, gitBranch: msg.GitBranch, cwd: msg.Cwd}
 
 		os := state[key]
 		if os == nil {
@@ -279,27 +297,7 @@ SELECT m.id, m.session_id,
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("messages rows: %w", err)
 	}
-
-	// In-memory dedup. The connector ingests JSONL on file-watch and the
-	// audit pipeline re-ingests on validation; both insert with unique
-	// `id`s but identical (session_id, ts, role) tuples, which inflates
-	// span totals N× per duplicate ingestion pass. The proper fix is at
-	// the connector layer; this is a defensive guard so the digest is
-	// usable today.
-	if len(msgs) <= 1 {
-		return msgs, nil
-	}
-	seen := make(map[string]struct{}, len(msgs))
-	out := msgs[:0]
-	for _, m := range msgs {
-		key := m.SessionID + "\t" + fmt.Sprintf("%d", m.Ts) + "\t" + string(m.Role)
-		if _, dup := seen[key]; dup {
-			continue
-		}
-		seen[key] = struct{}{}
-		out = append(out, m)
-	}
-	return out, nil
+	return msgs, nil
 }
 
 // ---- tool-call parsing helpers ---------------------------------------------

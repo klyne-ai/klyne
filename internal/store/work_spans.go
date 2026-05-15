@@ -116,6 +116,25 @@ FROM work_spans WHERE id = ?`
 	return s, nil
 }
 
+// DeleteWorkSpansSince removes every work_spans row whose opened_at is at or
+// after sinceMs. The CLI calls this before each `klyne cost week` re-attribution
+// so the table contains exactly one batch per time window — without it, repeat
+// invocations append, sums double, and the digest reports inflated triples.
+//
+// Returns the number of rows deleted.
+func DeleteWorkSpansSince(ctx context.Context, db *DB, sinceMs int64) (int64, error) {
+	const q = `DELETE FROM work_spans WHERE opened_at >= ?`
+	res, err := db.Write().ExecContext(ctx, q, sinceMs)
+	if err != nil {
+		return 0, fmt.Errorf("store: delete work_spans since %d: %w", sinceMs, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("store: delete work_spans rows-affected: %w", err)
+	}
+	return n, nil
+}
+
 // ListWorkSpans returns work spans ordered by opened_at DESC. Limit defaults
 // to 100 when zero. Filter fields are ANDed.
 func ListWorkSpans(ctx context.Context, db *DB, f WorkSpanFilter) ([]WorkSpan, error) {

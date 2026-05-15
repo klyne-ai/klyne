@@ -214,3 +214,48 @@ func TestInsertWorkSpan_ExplorationBucket(t *testing.T) {
 		t.Errorf("expected empty commit_sha for exploration bucket, got %q", got.CommitSHA)
 	}
 }
+
+func TestDeleteWorkSpansSince(t *testing.T) {
+	ctx := context.Background()
+	db := openWorkSpansDB(t)
+
+	insert := func(openedAt int64, branch string) {
+		t.Helper()
+		sp := &store.WorkSpan{
+			Bucket:      "exploration",
+			ProjectPath: "/p",
+			GitBranch:   branch,
+			OpenedAt:    openedAt,
+			ClosedAt:    openedAt + 1000,
+		}
+		if err := store.InsertWorkSpan(ctx, db, sp); err != nil {
+			t.Fatalf("insert: %v", err)
+		}
+	}
+
+	insert(1000, "old")
+	insert(2000, "old")
+	insert(5000, "new1")
+	insert(6000, "new2")
+
+	deleted, err := store.DeleteWorkSpansSince(ctx, db, 5000)
+	if err != nil {
+		t.Fatalf("DeleteWorkSpansSince: %v", err)
+	}
+	if deleted != 2 {
+		t.Errorf("deleted = %d, want 2", deleted)
+	}
+
+	remaining, err := store.ListWorkSpans(ctx, db, store.WorkSpanFilter{})
+	if err != nil {
+		t.Fatalf("ListWorkSpans: %v", err)
+	}
+	if len(remaining) != 2 {
+		t.Errorf("remaining = %d, want 2", len(remaining))
+	}
+	for _, sp := range remaining {
+		if sp.OpenedAt >= 5000 {
+			t.Errorf("row with opened_at=%d should have been deleted", sp.OpenedAt)
+		}
+	}
+}
