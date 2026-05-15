@@ -37,8 +37,11 @@ func TestResumeCmd_ListHelp(t *testing.T) {
 	root.SetArgs([]string{"resume", "list", "--help"})
 	_ = root.Execute()
 
-	if !strings.Contains(buf.String(), "Rank") {
-		t.Errorf("resume list --help: missing 'Rank'\n---\n%s", buf.String())
+	help := buf.String()
+	for _, want := range []string{"Rank", "--limit", "--all"} {
+		if !strings.Contains(help, want) {
+			t.Errorf("resume list --help: missing %q\n---\n%s", want, help)
+		}
 	}
 }
 
@@ -237,7 +240,7 @@ func resumeBuildPayloadText(sessionID, projectPath string, lastActive time.Time,
 // resumeNoCandidatesMsg returns the standard message for an empty candidate list.
 func resumeNoCandidatesMsg() string {
 	return "no candidates — no recent sessions score ≥ 0.55 for this directory\n" +
-		"  (try running from a project directory that has prior klyne sessions)\n"
+		"  (try `klyne resume list --all` to see every ingested session)\n"
 }
 
 // resumeOpenTestDB opens a temp-dir SQLite DB for tests.

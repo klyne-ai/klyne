@@ -4,6 +4,13 @@ description: Resume a past session with a token-cost receipt — rank candidates
 
 Run `klyne resume list` in a shell to see ranked past sessions for this working directory.
 
+By default the list is capped at 3 high-score candidates. To browse more:
+
+```
+klyne resume list --limit 10   # raise the cap, keep the score threshold
+klyne resume list --all        # every ingested session, no threshold, no cap
+```
+
 Each candidate shows:
 - The project path and how long ago the session was active
 - The number of recorded decisions

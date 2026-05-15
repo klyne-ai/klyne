@@ -141,26 +141,50 @@ func normalizeFilePath(p string) string {
 // ScoreThreshold is the minimum score for surfacing a session candidate.
 const ScoreThreshold = 0.55
 
-// MaxCandidates is the maximum number of candidates returned by Rank.
+// MaxCandidates is the default maximum number of candidates returned by Rank.
 const MaxCandidates = 3
 
+// RankOptions tunes Rank's filtering and cap behaviour. The zero value
+// reproduces the legacy default (top-3, threshold ≥ 0.55).
+type RankOptions struct {
+	// Limit caps the number of returned candidates.
+	//  - 0  → use MaxCandidates (the default top-3 cap)
+	//  - <0 → no cap; return every candidate that passes the threshold
+	Limit int
+	// IgnoreThreshold disables the ScoreThreshold filter when true, so even
+	// stale/unrelated sessions surface. Pair with Limit<0 to dump everything.
+	IgnoreThreshold bool
+}
+
 // Rank scores all sessions, filters by threshold, and returns the top-N
-// sorted by descending score. Pure — no I/O.
+// sorted by descending score. Equivalent to RankWithOptions with the zero
+// RankOptions. Pure — no I/O.
 func Rank(sessions []SessionInput, cwd string, gitRecent []string, now time.Time) []Ranked {
+	return RankWithOptions(sessions, cwd, gitRecent, now, RankOptions{})
+}
+
+// RankWithOptions is Rank with explicit cap and threshold controls.
+// See RankOptions for the meaning of Limit and IgnoreThreshold.
+func RankWithOptions(sessions []SessionInput, cwd string, gitRecent []string, now time.Time, opts RankOptions) []Ranked {
 	out := make([]Ranked, 0, len(sessions))
 	for _, s := range sessions {
 		sc := Score(s, cwd, gitRecent, now)
-		if sc >= ScoreThreshold {
-			out = append(out, Ranked{Session: s, Score: sc})
+		if !opts.IgnoreThreshold && sc < ScoreThreshold {
+			continue
 		}
+		out = append(out, Ranked{Session: s, Score: sc})
 	}
 
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].Score > out[j].Score
 	})
 
-	if len(out) > MaxCandidates {
-		out = out[:MaxCandidates]
+	limit := opts.Limit
+	if limit == 0 {
+		limit = MaxCandidates
+	}
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
 	}
 	return out
 }

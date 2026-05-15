@@ -63,17 +63,29 @@ Flags (hydrate):
 // ---- resume list -------------------------------------------------------
 
 func newResumeListCmd() *cobra.Command {
-	return &cobra.Command{
+	var limit int
+	var showAll bool
+
+	c := &cobra.Command{
 		Use:   "list",
 		Short: "Rank past sessions against the current working directory",
+		Long: `Rank past sessions against the current working directory.
+
+By default, returns up to 3 sessions that score ≥ 0.55. Use --limit to
+raise the cap, or --all to browse every ingested session (drops the
+threshold and the cap so you can pick by memory rather than by score).`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return resumeRunList(cmd)
+			return resumeRunList(cmd, limit, showAll)
 		},
 		SilenceUsage: true,
 	}
+
+	c.Flags().IntVar(&limit, "limit", 0, "max candidates to return (0 = default top-3)")
+	c.Flags().BoolVar(&showAll, "all", false, "list every ingested session (no threshold, no cap)")
+	return c
 }
 
-func resumeRunList(cmd *cobra.Command) error {
+func resumeRunList(cmd *cobra.Command, limit int, showAll bool) error {
 	ctx := cmd.Context()
 	if ctx == nil {
 		ctx = context.Background()
@@ -90,7 +102,13 @@ func resumeRunList(cmd *cobra.Command) error {
 	}
 	defer db.Close() //nolint:errcheck
 
-	sessions, err := store.ListSessions(ctx, db, store.SessionFilter{Limit: 50})
+	// When --all is set we pull a much wider window from the store so genuinely
+	// old sessions become reachable (default ListSessions cap is 50).
+	storeLimit := 50
+	if showAll {
+		storeLimit = 500
+	}
+	sessions, err := store.ListSessions(ctx, db, store.SessionFilter{Limit: storeLimit})
 	if err != nil {
 		return fmt.Errorf("resume list: list sessions: %w", err)
 	}
@@ -113,10 +131,15 @@ func resumeRunList(cmd *cobra.Command) error {
 	// Fetch decision counts per session for the briefing output.
 	decisionCounts := resumeDecisionCounts(ctx, db, inputs)
 
-	ranked := resume.Rank(inputs, cwd, gitRecent, now)
+	opts := resume.RankOptions{Limit: limit}
+	if showAll {
+		opts.IgnoreThreshold = true
+		opts.Limit = -1
+	}
+	ranked := resume.RankWithOptions(inputs, cwd, gitRecent, now, opts)
 	if len(ranked) == 0 {
 		fmt.Fprintln(cmd.OutOrStdout(), "no candidates — no recent sessions score ≥ 0.55 for this directory")
-		fmt.Fprintln(cmd.OutOrStdout(), "  (try running from a project directory that has prior klyne sessions)")
+		fmt.Fprintln(cmd.OutOrStdout(), "  (try `klyne resume list --all` to see every ingested session)")
 		return nil
 	}
 

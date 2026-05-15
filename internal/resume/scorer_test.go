@@ -201,6 +201,79 @@ func TestCwdMatch_RootDirectory(t *testing.T) {
 	}
 }
 
+func TestRankWithOptions_CustomLimit(t *testing.T) {
+	sessions := make([]SessionInput, 5)
+	for i := range sessions {
+		sessions[i] = SessionInput{
+			ID:          string(rune('a' + i)),
+			LastMsgAt:   hoursAgo(float64(i + 1)),
+			ProjectPath: "/my/project",
+		}
+	}
+	ranked := RankWithOptions(sessions, "/my/project", nil, fixedNow, RankOptions{Limit: 5})
+	if len(ranked) != 5 {
+		t.Errorf("Limit=5: got %d candidates, want 5", len(ranked))
+	}
+}
+
+func TestRankWithOptions_NoCap(t *testing.T) {
+	// Limit < 0 means no cap at all; with 7 qualifying sessions we expect 7 back.
+	sessions := make([]SessionInput, 7)
+	for i := range sessions {
+		sessions[i] = SessionInput{
+			ID:          string(rune('a' + i)),
+			LastMsgAt:   hoursAgo(float64(i + 1)),
+			ProjectPath: "/my/project",
+		}
+	}
+	ranked := RankWithOptions(sessions, "/my/project", nil, fixedNow, RankOptions{Limit: -1})
+	if len(ranked) != 7 {
+		t.Errorf("Limit=-1: got %d candidates, want 7 (no cap)", len(ranked))
+	}
+}
+
+func TestRankWithOptions_IgnoreThreshold(t *testing.T) {
+	// Mix of below-threshold and qualifying sessions. IgnoreThreshold should
+	// surface every one of them; ordering is still by descending score.
+	sessions := []SessionInput{
+		{ID: "stale", LastMsgAt: hoursAgo(200), ProjectPath: "/completely/different"},
+		{ID: "fresh", LastMsgAt: hoursAgo(1), ProjectPath: "/my/project"},
+	}
+	ranked := RankWithOptions(sessions, "/my/project", nil, fixedNow, RankOptions{
+		Limit:           -1,
+		IgnoreThreshold: true,
+	})
+	if len(ranked) != 2 {
+		t.Fatalf("IgnoreThreshold: got %d, want 2", len(ranked))
+	}
+	if ranked[0].Session.ID != "fresh" || ranked[1].Session.ID != "stale" {
+		t.Errorf("expected ordering [fresh, stale], got [%s, %s]",
+			ranked[0].Session.ID, ranked[1].Session.ID)
+	}
+}
+
+func TestRankWithOptions_DefaultMatchesRank(t *testing.T) {
+	// Zero-value RankOptions must reproduce legacy Rank behaviour (top-3, threshold).
+	sessions := make([]SessionInput, 5)
+	for i := range sessions {
+		sessions[i] = SessionInput{
+			ID:          string(rune('a' + i)),
+			LastMsgAt:   hoursAgo(float64(i + 1)),
+			ProjectPath: "/my/project",
+		}
+	}
+	got := RankWithOptions(sessions, "/my/project", nil, fixedNow, RankOptions{})
+	want := Rank(sessions, "/my/project", nil, fixedNow)
+	if len(got) != len(want) {
+		t.Fatalf("zero RankOptions vs Rank: len mismatch %d vs %d", len(got), len(want))
+	}
+	for i := range got {
+		if got[i].Session.ID != want[i].Session.ID {
+			t.Errorf("idx %d: got %q, want %q", i, got[i].Session.ID, want[i].Session.ID)
+		}
+	}
+}
+
 func TestRank_MultipleSessionsOrdering(t *testing.T) {
 	// Construct sessions with known scores and verify ordering.
 	sessions := []SessionInput{
