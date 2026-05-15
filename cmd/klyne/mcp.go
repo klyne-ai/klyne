@@ -143,6 +143,15 @@ func runMcpInstall(cmd *cobra.Command, platformFlag string) error {
 		fmt.Fprintf(cmd.OutOrStdout(), "advisor: %s — %s\n",
 			report.Action, report.Path)
 
+		// Install the PreToolUse safety-net hook so klyne snapshots
+		// working-tree state before risky commands run.
+		ptReport, err := mcpserver.InstallPreToolHook(exe)
+		if err != nil {
+			return fmt.Errorf("install pretool hook: %w", err)
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "safety-net: %s — %s\n",
+			ptReport.Action, ptReport.Path)
+
 		// Unpack the bundled markdown slash commands under
 		// ~/.claude/commands/klyne/. Claude Code surfaces these as
 		// /klyne:<name> in every project on the host — independent

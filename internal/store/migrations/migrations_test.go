@@ -41,6 +41,7 @@ func TestMigrationsApply(t *testing.T) {
 		"007_zero_costs.sql",            // backfill cost=0 for flat-subscription DTO compat
 		"008_message_branch_cwd.sql",    // git_branch + cwd on messages for cockpit splits
 		"009_decisions.sql",             // decisions log (project-scoped persistent notes)
+		"013_safety_snapshots.sql",      // pre-action safety-net snapshot log
 	}
 	if len(sqlFiles) != len(expected) {
 		t.Fatalf("expected %d migrations, found %d: %v", len(expected), len(sqlFiles), sqlFiles)
@@ -91,6 +92,7 @@ func TestMigrationsApply(t *testing.T) {
 		"thread_sessions",
 		"session_summaries",
 		"compact_events",
+		"safety_snapshots",
 	}
 	for _, tbl := range requiredTables {
 		var name string

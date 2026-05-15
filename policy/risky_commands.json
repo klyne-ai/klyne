@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "patterns": [
+    {"id": "git-reset-hard",     "regex": "^git\\s+reset\\s+--hard",             "severity": "high",     "snapshot": true},
+    {"id": "git-clean-fd",       "regex": "^git\\s+clean\\s+-fd",                "severity": "high",     "snapshot": true},
+    {"id": "git-checkout-dot",   "regex": "^git\\s+checkout\\s+--\\s*\\.",        "severity": "high",     "snapshot": true},
+    {"id": "git-restore-dot",    "regex": "^git\\s+restore\\s+(\\.|--source)",    "severity": "high",     "snapshot": true},
+    {"id": "git-worktree-rm",    "regex": "^git\\s+worktree\\s+remove",           "severity": "medium",   "snapshot": true},
+    {"id": "git-branch-D",       "regex": "^git\\s+branch\\s+-D\\s",              "severity": "medium",   "snapshot": true},
+    {"id": "rm-rf-broad",        "regex": "^rm\\s+-rf\\s+(/|~|\\$HOME|\\.\\./)", "severity": "critical", "snapshot": true, "block_unless_confirm": true},
+    {"id": "git-push-force-main","regex": "git\\s+push.*--force(\\s|$).*\\b(main|master|develop)\\b|git\\s+push.*\\b(main|master|develop)\\b.*--force(\\s|$)", "severity": "critical", "block_unless_confirm": true},
+    {"id": "schema-drop",        "regex": "(DROP\\s+(TABLE|DATABASE|SCHEMA))",     "severity": "high",     "snapshot": true},
+    {"id": "migration-rollback", "regex": "(rollback|down)\\s+(--all|--all-the-way|all)", "severity": "high", "snapshot": true}
+  ]
+}
