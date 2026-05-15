@@ -143,7 +143,10 @@ func ListShieldSnapshots(ctx context.Context, db *DB, f ShieldSnapshotFilter) ([
 // `klyne precompact --status`. It counts total snapshots, blocked snapshots,
 // and fold decisions.
 func CountShieldDecisions(ctx context.Context, db *DB, sessionID string) (total, blocked, folded int64, err error) {
-	q := `SELECT COUNT(*), SUM(CASE WHEN blocked=1 THEN 1 ELSE 0 END), SUM(CASE WHEN block_reason='fold' THEN 1 ELSE 0 END)
+	// COALESCE handles the NULL that SUM() returns when the table is empty.
+	q := `SELECT COUNT(*),
+               COALESCE(SUM(CASE WHEN blocked=1 THEN 1 ELSE 0 END), 0),
+               COALESCE(SUM(CASE WHEN block_reason='fold' THEN 1 ELSE 0 END), 0)
           FROM shield_snapshots`
 	args := make([]any, 0, 1)
 	if sessionID != "" {
