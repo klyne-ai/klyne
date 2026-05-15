@@ -96,8 +96,13 @@ func runXray(cmd *cobra.Command, sessionID string) error {
 	// loadXraySystemMessages enriches the message slice with synthetic system
 	// messages parsed from those attachments so AttributeSources sees them.
 	traj := contexthealth.ComputeCacheTrajectory(snap.Messages)
-	enriched := append(loadXraySystemMessages(path), snap.Messages...)
-	sources := contexthealth.AttributeSources(enriched)
+	// AttributeSources only needs role=system messages, and Claude Code stores
+	// all SessionStart context as `type=attachment` — which loadXraySystemMessages
+	// converts into typed system messages directly. Including snap.Messages here
+	// would double-count the same hook injections that LoadSnapshot also parses
+	// into RoleSystem entries (and misclassifies them as "unknown" because they
+	// lack our prefix conventions).
+	sources := contexthealth.AttributeSources(loadXraySystemMessages(path))
 
 	scorecard := renderXrayScorecard(snap, res, traj, sources)
 	fmt.Fprint(cmd.OutOrStdout(), scorecard)

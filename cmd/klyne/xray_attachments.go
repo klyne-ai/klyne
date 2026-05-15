@@ -40,6 +40,13 @@ func loadXraySystemMessages(path string) []*connectors.Message {
 	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 
 	var out []*connectors.Message
+	// Track the most recent pending Skill invocation: when an assistant emits
+	// `Skill(skill="superpowers:brainstorming")`, the actual skill body lands
+	// in the very next user message with isMeta=true (~10KB of markdown).
+	// We attribute that body to the skill rather than letting it count as
+	// regular conversation context — that's the real per-skill token cost.
+	var pendingSkill string
+
 	for sc.Scan() {
 		raw := sc.Bytes()
 		if len(raw) == 0 {
@@ -48,21 +55,104 @@ func loadXraySystemMessages(path string) []*connectors.Message {
 		var head struct {
 			Type       string          `json:"type"`
 			Attachment json.RawMessage `json:"attachment,omitempty"`
+			IsMeta     bool            `json:"isMeta,omitempty"`
+			Message    json.RawMessage `json:"message,omitempty"`
 		}
 		if err := json.Unmarshal(raw, &head); err != nil {
 			continue
 		}
-		if head.Type != "attachment" || len(head.Attachment) == 0 {
-			continue
+
+		switch head.Type {
+		case "attachment":
+			if len(head.Attachment) == 0 {
+				continue
+			}
+			var att map[string]any
+			if err := json.Unmarshal(head.Attachment, &att); err != nil {
+				continue
+			}
+			attType, _ := att["type"].(string)
+			out = append(out, synthFromAttachment(attType, att)...)
+
+		case "assistant":
+			// Look for assistant Skill tool_use → arms pendingSkill so the
+			// next isMeta user message gets attributed to the skill.
+			if name := skillFromAssistantLine(head.Message); name != "" {
+				pendingSkill = name
+			}
+
+		case "user":
+			// isMeta user messages right after a Skill tool_use carry the
+			// skill body. Attribute their bytes to the pending skill name.
+			if !head.IsMeta || pendingSkill == "" {
+				continue
+			}
+			body := userMetaText(head.Message)
+			if body == "" {
+				pendingSkill = ""
+				continue
+			}
+			out = append(out, &connectors.Message{
+				Role:    connectors.RoleSystem,
+				Content: "skill: " + sanitizeSourceName(pendingSkill) + "\n" + body,
+			})
+			pendingSkill = ""
 		}
-		var att map[string]any
-		if err := json.Unmarshal(head.Attachment, &att); err != nil {
-			continue
-		}
-		attType, _ := att["type"].(string)
-		out = append(out, synthFromAttachment(attType, att)...)
 	}
 	return out
+}
+
+// skillFromAssistantLine returns the skill name when an assistant message
+// invokes the Skill tool, or "" otherwise.
+func skillFromAssistantLine(messageRaw json.RawMessage) string {
+	if len(messageRaw) == 0 {
+		return ""
+	}
+	var m struct {
+		Content []map[string]any `json:"content"`
+	}
+	if err := json.Unmarshal(messageRaw, &m); err != nil {
+		return ""
+	}
+	for _, b := range m.Content {
+		if t, _ := b["type"].(string); t != "tool_use" {
+			continue
+		}
+		if name, _ := b["name"].(string); name != "Skill" {
+			continue
+		}
+		input, _ := b["input"].(map[string]any)
+		if input == nil {
+			continue
+		}
+		if s, ok := input["skill"].(string); ok {
+			return s
+		}
+	}
+	return ""
+}
+
+// userMetaText extracts the first text block's content from a meta-user message
+// payload. Used to fish the skill body bytes out so we can attribute them.
+func userMetaText(messageRaw json.RawMessage) string {
+	if len(messageRaw) == 0 {
+		return ""
+	}
+	var m struct {
+		Content []map[string]any `json:"content"`
+	}
+	if err := json.Unmarshal(messageRaw, &m); err != nil {
+		return ""
+	}
+	for _, b := range m.Content {
+		if t, _ := b["type"].(string); t != "text" {
+			continue
+		}
+		if s, _ := b["text"].(string); s != "" {
+			return s
+		}
+	}
+	return ""
 }
 
 func synthFromAttachment(attType string, att map[string]any) []*connectors.Message {
@@ -75,8 +165,56 @@ func synthFromAttachment(attType string, att map[string]any) []*connectors.Messa
 		return synthDeferredTools(att)
 	case "command_permissions":
 		return synthCommandPermissions(att)
+	case "hook_success":
+		return synthHookSuccess(att)
 	}
 	return nil
+}
+
+// synthHookSuccess attributes the stdout of a SessionStart / UserPromptSubmit
+// hook to its source. The "You have superpowers" injection lands here as a
+// hook_success attachment with ~6KB of stdout containing the using-superpowers
+// skill body — that's a real context cost the user pays.
+//
+// We classify by hookName + stdout content: the using-superpowers injection
+// goes to "superpowers"; klyne advisor / Stop hook output goes to "klyne hooks";
+// anything else falls through to a generic "<hookName>" bucket.
+func synthHookSuccess(att map[string]any) []*connectors.Message {
+	stdout, _ := att["stdout"].(string)
+	if stdout == "" {
+		return nil
+	}
+	hookName, _ := att["hookName"].(string)
+
+	var prefix string
+	switch {
+	case strings.Contains(stdout, "You have superpowers") || strings.Contains(stdout, "using-superpowers"):
+		prefix = "skill: superpowers"
+	case strings.Contains(strings.ToLower(hookName), "klyne") ||
+		strings.Contains(stdout, "klyne advise") ||
+		strings.Contains(stdout, "klyne:"):
+		prefix = "klyne: hook-injection"
+	default:
+		// Use the hook name itself as the source identifier.
+		clean := sanitizeSourceName(hookName)
+		if clean == "" {
+			clean = "anonymous-hook"
+		}
+		prefix = "hook: " + clean
+	}
+
+	// Pad to stdout length so charsToTokens reports the real cost without
+	// embedding the raw stdout (which could itself contain rule prefixes
+	// that confuse downstream consumers if they ever loosen the classifier).
+	header := prefix + "\n"
+	padLen := len(stdout) - len(header)
+	if padLen < 0 {
+		padLen = 0
+	}
+	return []*connectors.Message{{
+		Role:    connectors.RoleSystem,
+		Content: header + strings.Repeat(" ", padLen),
+	}}
 }
 
 func synthMCPInstructions(att map[string]any) []*connectors.Message {

@@ -120,9 +120,16 @@ func classifySystemMessage(content string) (string, SourceKind) {
 		return name, kind
 	}
 
-	lower := strings.ToLower(strings.TrimSpace(content))
+	// Match prefix rules ONLY on the first non-empty line. Earlier we used
+	// Contains() over the entire content, which produced false positives when
+	// rule prefixes (e.g., "[skill]", "mcp:") appeared inside skill body text
+	// or hook injections — extractSourceName would then return whatever word
+	// followed the misplaced prefix. HasPrefix-on-first-line is the disciplined
+	// shape: a row classifies as "mcp:" only when its OWN content opens with
+	// "mcp:", not when it merely mentions one.
+	firstLineRaw := firstNonEmptyLine(content)
+	lowerFirst := strings.ToLower(firstLineRaw)
 
-	// Prefix heuristics.
 	type rule struct {
 		prefix string
 		kind   SourceKind
@@ -141,21 +148,20 @@ func classifySystemMessage(content string) (string, SourceKind) {
 		{"anthropic hooks", SourceKindHook, "anthropic hooks"},
 	}
 	for _, r := range rules {
-		if strings.HasPrefix(lower, r.prefix) || strings.Contains(lower, r.prefix) {
-			if r.label != "" {
-				return r.label, r.kind
-			}
-			name := extractSourceName(content, r.prefix)
-			if name == "" {
-				name = kindDefaultName(r.kind)
-			}
-			return name, r.kind
+		if !strings.HasPrefix(lowerFirst, r.prefix) {
+			continue
 		}
+		if r.label != "" {
+			return r.label, r.kind
+		}
+		name := extractSourceName(firstLineRaw, r.prefix)
+		if name == "" {
+			name = kindDefaultName(r.kind)
+		}
+		return name, r.kind
 	}
 
 	// Well-known MCP server names embedded anywhere in the first line.
-	firstLine := firstNonEmptyLine(content)
-	lowerFirst := strings.ToLower(firstLine)
 	mcpNames := []string{"serena", "github", "linear", "slack", "playwright", "context7"}
 	for _, n := range mcpNames {
 		if strings.Contains(lowerFirst, n) {
