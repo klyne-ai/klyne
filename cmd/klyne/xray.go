@@ -91,8 +91,13 @@ func runXray(cmd *cobra.Command, sessionID string) error {
 	})
 
 	// Compute the new v0 signals: cache trajectory + source attribution.
+	// Claude Code stores SessionStart context (MCP instructions, skill listing,
+	// tool catalog) as `type=attachment` records, not role=system messages.
+	// loadXraySystemMessages enriches the message slice with synthetic system
+	// messages parsed from those attachments so AttributeSources sees them.
 	traj := contexthealth.ComputeCacheTrajectory(snap.Messages)
-	sources := contexthealth.AttributeSources(snap.Messages)
+	enriched := append(loadXraySystemMessages(path), snap.Messages...)
+	sources := contexthealth.AttributeSources(enriched)
 
 	scorecard := renderXrayScorecard(snap, res, traj, sources)
 	fmt.Fprint(cmd.OutOrStdout(), scorecard)
