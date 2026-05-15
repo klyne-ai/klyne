@@ -72,6 +72,8 @@ func newRootCmd() *cobra.Command {
 	// v0 Pre-Action Safety Net — PreToolUse hook entry + restore.
 	root.AddCommand(newPreToolCmd())
 	root.AddCommand(newRestoreCmd())
+	// v0 Auto-Resume with Receipts — rank + hydrate past sessions.
+	root.AddCommand(newResumeCmd())
 	return root
 }
 

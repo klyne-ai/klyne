@@ -87,3 +87,38 @@ func quoteWindows(path string) string {
 	}
 	return escaped
 }
+
+// EstimateTokensForVariant returns the projected token size of a hydrate
+// payload variant. The variant string controls which sections are included:
+//
+//   - "full"           — all turns + all decisions (~8K typical)
+//   - "decisions-only" — pinned decisions only (~800 tokens typical)
+//   - "last-N"         — same as full but caller pre-filters to N turns;
+//     this function estimates based on the provided turnCount
+//
+// The estimates are rough heuristics (4 chars per token) calibrated
+// against real klyne session sizes. Callers display these before injection
+// so the user can confirm the cost before committing.
+//
+// Parameters:
+//   - variant:      one of "full", "decisions-only"
+//   - turnCount:    number of conversation turns (used for "full" / "last-N")
+//   - decisionCount: number of decision records
+func EstimateTokensForVariant(variant string, turnCount, decisionCount int) int {
+	// Empirically: each turn averages ~300 tokens (mix of short user asks
+	// and longer assistant responses + tool payloads).
+	const tokensPerTurn = 300
+	// Each decision averages ~40 tokens of text.
+	const tokensPerDecision = 40
+
+	switch variant {
+	case "decisions-only":
+		base := decisionCount * tokensPerDecision
+		if base == 0 {
+			return 800 // spec default for empty decision set
+		}
+		return base
+	default: // "full" or "last-N" — caller controls turnCount
+		return turnCount*tokensPerTurn + decisionCount*tokensPerDecision
+	}
+}
