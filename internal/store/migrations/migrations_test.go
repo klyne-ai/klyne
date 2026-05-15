@@ -22,7 +22,7 @@ func TestMigrationsApply(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read embedded migrations dir: %v", err)
 	}
-	// Filter to *.sql and assert we have the expected three.
+	// Filter to *.sql and assert we have the expected count.
 	var sqlFiles []string
 	for _, e := range entries {
 		if e.IsDir() || filepath.Ext(e.Name()) != ".sql" {
@@ -41,6 +41,7 @@ func TestMigrationsApply(t *testing.T) {
 		"007_zero_costs.sql",            // backfill cost=0 for flat-subscription DTO compat
 		"008_message_branch_cwd.sql",    // git_branch + cwd on messages for cockpit splits
 		"009_decisions.sql",             // decisions log (project-scoped persistent notes)
+		"012_shield_snapshots.sql",      // compact-shield snapshot log
 		"013_safety_snapshots.sql",      // pre-action safety-net snapshot log
 	}
 	if len(sqlFiles) != len(expected) {
@@ -93,6 +94,7 @@ func TestMigrationsApply(t *testing.T) {
 		"session_summaries",
 		"compact_events",
 		"safety_snapshots",
+		"shield_snapshots",
 	}
 	for _, tbl := range requiredTables {
 		var name string
