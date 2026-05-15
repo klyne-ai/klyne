@@ -76,6 +76,8 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newResumeCmd())
 	// v0 Compact Shield — PreCompact hook entry + status.
 	root.AddCommand(newPreCompactCmd())
+	// v0 Cost-Per-Outcome + Waste Digest — attribution batch + weekly digest CLI.
+	root.AddCommand(newCostCmd())
 	return root
 }
 
