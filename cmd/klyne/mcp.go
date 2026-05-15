@@ -152,6 +152,15 @@ func runMcpInstall(cmd *cobra.Command, platformFlag string) error {
 		fmt.Fprintf(cmd.OutOrStdout(), "safety-net: %s — %s\n",
 			ptReport.Action, ptReport.Path)
 
+		// Install the PreCompact compact-shield hook so klyne intercepts
+		// native compact events and blocks them when a snapshot is armed.
+		csReport, err := mcpserver.InstallPreCompactHook(exe)
+		if err != nil {
+			return fmt.Errorf("install compact-shield hook: %w", err)
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "compact-shield: %s — %s\n",
+			csReport.Action, csReport.Path)
+
 		// Unpack the bundled markdown slash commands under
 		// ~/.claude/commands/klyne/. Claude Code surfaces these as
 		// /klyne:<name> in every project on the host — independent

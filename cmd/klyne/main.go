@@ -74,6 +74,8 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newRestoreCmd())
 	// v0 Auto-Resume with Receipts — rank + hydrate past sessions.
 	root.AddCommand(newResumeCmd())
+	// v0 Compact Shield — PreCompact hook entry + status.
+	root.AddCommand(newPreCompactCmd())
 	return root
 }
 
