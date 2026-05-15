@@ -75,6 +75,19 @@ const (
 	// BloatKindToolResult is a single large tool result that doesn't
 	// fit the file-read or command groupings.
 	BloatKindToolResult BloatKind = "tool_result"
+
+	// BloatKindMCPInject is a SessionStart-injected system prompt from an
+	// MCP server. Unlike file_read / command, these tokens arrive before the
+	// first user turn and persist for the entire session — the user never
+	// explicitly requested them.
+	BloatKindMCPInject BloatKind = "mcp_inject"
+	// BloatKindSkillInject is a SessionStart-injected system prompt from a
+	// Superpower / skill. Same persistence semantics as BloatKindMCPInject.
+	BloatKindSkillInject BloatKind = "skill_inject"
+	// BloatKindHookInject is a SessionStart-injected system prompt from a
+	// UserPromptSubmit / PreToolCall / PostToolCall hook. These are per-turn
+	// injections that accumulate across the session.
+	BloatKindHookInject BloatKind = "hook_inject"
 )
 
 // BloatRow is one entry in the "what is eating the context window"

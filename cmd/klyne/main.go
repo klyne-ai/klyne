@@ -62,6 +62,13 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newDecisionsCmd())
 	root.AddCommand(newSubagentsCmd())
 	root.AddCommand(newOtelCmd())
+	// v3 surfaces — runbook proposer, installation snapshot,
+	// Stop-hook session summary writer.
+	root.AddCommand(newRunbooksCmd())
+	root.AddCommand(newStatusCmd())
+	root.AddCommand(newSessionEndCmd())
+	// v0 Context X-ray — scorecard of context fill, cache trajectory, and MCP source attribution.
+	root.AddCommand(newXrayCmd())
 	return root
 }
 
