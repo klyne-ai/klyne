@@ -29,6 +29,7 @@ import (
 
 func newXrayCmd() *cobra.Command {
 	var sessionID string
+	var aggFlags xaggFlags
 
 	c := &cobra.Command{
 		Use:   "xray",
@@ -41,13 +42,24 @@ Shows:
   - Pre-prompt token attribution by source (MCP servers, skills, hooks)
   - Top bloat sources (file reads, commands, tool results)
 
+With --week, --project, or --since: aggregate across multiple sessions and
+show which MCPs are loaded but never called (redundancy markers ✗ / ⚠).
+
 Output exactly mirrors the spec rendering in
 docs/superpowers/specs/2026-05-15-context-xray-design.md.
 
 Examples:
   klyne xray
-  klyne xray --session-id abc123`,
+  klyne xray --session-id abc123
+  klyne xray --week
+  klyne xray --week --project
+  klyne xray --since=30d
+  klyne xray --project`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			// Aggregate mode is triggered by any of the three aggregate flags.
+			if aggFlags.week || aggFlags.project || aggFlags.since != "" {
+				return runXrayAggregate(cmd, aggFlags)
+			}
 			return runXray(cmd, sessionID)
 		},
 		SilenceUsage: true,
@@ -55,6 +67,12 @@ Examples:
 
 	c.Flags().StringVar(&sessionID, "session-id", "",
 		"explicit session id to analyse (default: latest active session in cwd)")
+	c.Flags().BoolVar(&aggFlags.week, "week", false,
+		"aggregate across all sessions in the last 7 days (all projects)")
+	c.Flags().BoolVar(&aggFlags.project, "project", false,
+		"restrict aggregation to the current project (use with --week or alone for all-time)")
+	c.Flags().StringVar(&aggFlags.since, "since", "",
+		"aggregate sessions from the last N days/hours (e.g. 30d, 24h)")
 	return c
 }
 
