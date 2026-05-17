@@ -99,10 +99,15 @@ func TestRenderClaudeAutoMemoryAsMarkdown_WithEntries(t *testing.T) {
 		},
 	}
 	out := RenderClaudeAutoMemoryAsMarkdown(mem)
-	for _, want := range []string{"foo memory", "(project)", "project_foo.md", "notes"} {
+	for _, want := range []string{"foo memory", "(project)", "project_foo.md", "notes", "### Index (MEMORY.md)", "### Entries"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("Markdown missing %q\n%s", want, out)
 		}
+	}
+	idxAt := strings.Index(out, "### Index (MEMORY.md)")
+	entAt := strings.Index(out, "### Entries")
+	if idxAt < 0 || entAt < 0 || idxAt >= entAt {
+		t.Errorf("expected Index subsection before Entries; idxAt=%d, entAt=%d\n%s", idxAt, entAt, out)
 	}
 }
 
