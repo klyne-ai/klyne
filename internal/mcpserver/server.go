@@ -131,6 +131,15 @@ Call at session start when you have no prior context for this project, or when t
 	}, HandleBootstrap)
 
 	mcp.AddTool(srv, &mcp.Tool{
+		Name: "recap_project",
+		Description: `Return the visible worklog entries for a project in the last N days, mixing Claude AND Codex sessions in one timeline.
+
+Use when the user asks "what did I do in project X this week?" / "what did I discuss with Codex about Y?" / "what shipped lately?". Pulls from klyne's worklog Memory layer (stop_summaries with recap_visible=1). Each entry is tagged with its source CLI so the agent can answer cross-tool questions.
+
+Inputs: project_path (required), since_days (default 7), topic (optional substring filter on recap_topic). Returns: entries sorted newest-first, capped at 50.`,
+	}, HandleRecapProject)
+
+	mcp.AddTool(srv, &mcp.Tool{
 		Name: "code_review_context",
 		Description: `Surface the optional code-review-graph enrichment for a repository.
 
