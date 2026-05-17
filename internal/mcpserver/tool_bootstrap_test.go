@@ -85,6 +85,36 @@ func TestHandleBootstrap_EmptyProject(t *testing.T) {
 	if strings.Contains(out.Markdown, "Current session health") {
 		t.Errorf("Markdown should omit 'Current session health' when LatestHealth is nil\n%s", out.Markdown)
 	}
+	// No entries → no reflection-due advisory.
+	if out.ReflectionDue {
+		t.Errorf("ReflectionDue must be false on empty project")
+	}
+	if strings.Contains(out.Markdown, "Reflection due") {
+		t.Errorf("Markdown must NOT include the Reflection-due advisory on an empty project\n%s", out.Markdown)
+	}
+}
+
+// TestBootstrapSurfacesReflectionDueAdvisory seeds enough high-importance
+// entries to cross the default 150 threshold; bootstrap must surface
+// both the structured ReflectionDue flag AND the markdown advisory.
+func TestBootstrapSurfacesReflectionDueAdvisory(t *testing.T) {
+	withFakeHome(t)
+	db := withBootstrapDB(t)
+	// Three entries scoring 60 each → 180 ≥ 150 → trigger fires.
+	seedStopSummary(t, db, "/p", "claude", "e1", true, 60, time.Now().Add(-3*time.Hour))
+	seedStopSummary(t, db, "/p", "claude", "e2", true, 60, time.Now().Add(-2*time.Hour))
+	seedStopSummary(t, db, "/p", "codex", "e3", true, 60, time.Now().Add(-1*time.Hour))
+
+	out := mustBootstrap(t, BootstrapInput{CWD: "/p"})
+	if !out.ReflectionDue {
+		t.Errorf("ReflectionDue must be true when importance-sum exceeds threshold")
+	}
+	if !strings.Contains(out.Markdown, "Reflection due") {
+		t.Errorf("Markdown must include the Reflection-due advisory\n%s", out.Markdown)
+	}
+	if !strings.Contains(out.Markdown, "/klyne:reflect") {
+		t.Errorf("Markdown must mention the /klyne:reflect slash command\n%s", out.Markdown)
+	}
 }
 
 // TestHandleBootstrap_FiveSessionsReturnsThreeMostRecent confirms the

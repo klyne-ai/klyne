@@ -30,24 +30,20 @@ type Config struct {
 	Worklog WorklogConfig `toml:"worklog" json:"worklog"`
 }
 
-// WorklogConfig is the [worklog] table — feature flags for the
-// cross-AI worklog Memory + Reflection layers. Both off by default
-// so a fresh install runs without the new behavior until the user
-// opts in.
+// WorklogConfig is the [worklog] table — feature flag for the
+// cross-AI worklog Memory layer. Off by default so a fresh install
+// runs without the new behavior until the user opts in.
+//
+// Reflection synthesis is NOT a daemon concern: it now runs inside
+// the user's Claude/Codex session via the `/klyne:reflect` slash
+// command, using their existing subscription auth. The daemon no
+// longer issues any LM calls of its own.
 type WorklogConfig struct {
 	// CodexDetectorEnabled, when true, makes the daemon poll the
 	// sessions table on a 60s tick for idle Codex sessions (last_msg_at
 	// older than 30 min) and write a worklog entry for each. This is
 	// the cross-AI capture differentiator.
 	CodexDetectorEnabled bool `toml:"codex_detector_enabled" json:"codex_detector_enabled"`
-	// ReflectionEnabled, when true, runs the Reflection synthesizer
-	// (Generative Agents pattern) on a 5-minute tick: importance-sum
-	// threshold or Sunday-evening cron. Costs Anthropic API calls;
-	// requires ANTHROPIC_API_KEY env var.
-	ReflectionEnabled bool `toml:"reflection_enabled" json:"reflection_enabled"`
-	// ReflectionThreshold is the importance-sum threshold that fires
-	// a reflection synthesis. Default: 150 (Park et al. 2023).
-	ReflectionThreshold int `toml:"reflection_threshold" json:"reflection_threshold"`
 }
 
 // AdvisorConfig is the [advisor] table. Lives separately from
@@ -146,8 +142,6 @@ func Defaults() *Config {
 		},
 		Worklog: WorklogConfig{
 			CodexDetectorEnabled: false,
-			ReflectionEnabled:    false,
-			ReflectionThreshold:  150,
 		},
 	}
 }

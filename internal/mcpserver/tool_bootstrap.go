@@ -11,7 +11,15 @@ import (
 
 	"github.com/klyne-ai/klyne/internal/config"
 	"github.com/klyne-ai/klyne/internal/store"
+	"github.com/klyne-ai/klyne/internal/worklog"
 )
+
+// bootstrapReflectionTriggerThreshold mirrors the default the daemon
+// used to feed into the AnthropicLM-backed synthesizer. Keeping it here
+// (a constant the bootstrap brief consults directly) is what surfaces
+// the "Reflection due" advisory in the next session without round-
+// tripping through config.
+const bootstrapReflectionTriggerThreshold = 150
 
 // Bootstrap tool
 // ==============
@@ -79,6 +87,7 @@ type BootstrapOutput struct {
 	LatestHealth          *BootstrapHealthSummary `json:"latest_health,omitempty" jsonschema:"context-health verdict for the most-recently modified session, when one exists"`
 	WorklogEntries        []RecapEntry            `json:"worklog_entries" jsonschema:"recent worklog entries from both Claude and Codex sessions in this project (capped, newest-first)"`
 	Reflections           []ReflectionSummary     `json:"reflections,omitempty" jsonschema:"latest synthesized weekly reflections for this project"`
+	ReflectionDue         bool                    `json:"reflection_due" jsonschema:"true when importance-sum threshold or weekly-cron trigger fires — host should suggest /klyne:reflect"`
 	Markdown              string                  `json:"markdown" jsonschema:"slash-prompt-ready markdown rendering (verbatim-echo target)"`
 }
 
@@ -201,6 +210,17 @@ func HandleBootstrap(ctx context.Context, _ *mcp.CallToolRequest, in BootstrapIn
 		out.Reflections = refls
 	}
 
+	// Reflection-due advisory: surface a one-line hint when the project
+	// has accumulated enough activity to warrant a synthesis. The
+	// daemon no longer runs synthesis itself — the user fires it via
+	// the /klyne:reflect slash command — so the only nudge they get
+	// is this brief line in the next bootstrap brief.
+	fire1, _ := worklog.ShouldFireReflection(ctx, db, cwd, bootstrapReflectionTriggerThreshold)
+	fire2, _ := worklog.WeeklyCronShouldFire(ctx, db, cwd, time.Now())
+	if fire1 || fire2 {
+		out.ReflectionDue = true
+	}
+
 	// --- Claude auto-memory (on-disk, written by Claude itself) ----
 	// This is a SECOND memory system distinct from klyne's SQLite
 	// store: Claude Code maintains it via its own "auto memory" system
@@ -256,6 +276,15 @@ func formatBootstrapAsMarkdown(out BootstrapOutput) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# klyne bootstrap\n\n")
 	fmt.Fprintf(&b, "Project: `%s`\n\n", out.CWD)
+
+	// --- reflection-due advisory ------------------------------------
+	// Only rendered when the importance-sum threshold or the Sunday-
+	// evening cron has fired. The hint points the user at the slash
+	// command that triggers synthesis inside their own session — the
+	// daemon never calls an LM.
+	if out.ReflectionDue {
+		b.WriteString("> **Reflection due** — run `/klyne:reflect` to synthesize the latest entries.\n\n")
+	}
 
 	// --- sessions ---------------------------------------------------
 	b.WriteString("## Recent sessions\n\n")

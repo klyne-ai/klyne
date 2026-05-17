@@ -149,6 +149,24 @@ Inputs: since_days (default 7), group_by ("cli" | "project" | "" for both). Pure
 	}, HandleUserRecap)
 
 	mcp.AddTool(srv, &mcp.Tool{
+		Name: "propose_reflection",
+		Description: `Return the pending worklog entries that a Reflection synthesis should consider for a project, plus the trigger reason ("importance-sum N ≥ T" | "weekly cron" | "user-invoked").
+
+Use when the user invokes /klyne:reflect or when you proactively decide to synthesize. The markdown field is ready to render verbatim; the entries field is the structured form for downstream calls to record_reflection.
+
+Pure SQLite read — no AI call. The AI host (you) performs the synthesis and then calls record_reflection to persist the result.`,
+	}, HandleProposeReflection)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name: "record_reflection",
+		Description: `Persist a synthesized weekly reflection for a project. Enforces the citation invariant — every insight must cite at least one entry session_id from the propose_reflection output.
+
+Call this AFTER synthesizing insights from propose_reflection's entries. Failures to cite are rejected: a reflection without evidence cannot exist by design.
+
+Inputs: project_path (required), insights ([{text, evidence: [session_id, ...]}, ...]).`,
+	}, HandleRecordReflection)
+
+	mcp.AddTool(srv, &mcp.Tool{
 		Name: "code_review_context",
 		Description: `Surface the optional code-review-graph enrichment for a repository.
 

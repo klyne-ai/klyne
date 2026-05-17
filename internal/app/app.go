@@ -81,7 +81,6 @@ import (
 	"github.com/klyne-ai/klyne/internal/connectors/codex"
 	"github.com/klyne-ai/klyne/internal/cost"
 	"github.com/klyne-ai/klyne/internal/store"
-	"github.com/klyne-ai/klyne/internal/worklog"
 )
 
 // shutdownGrace is the maximum time Stop will wait for the HTTP server to
@@ -424,47 +423,11 @@ func (a *App) Start(ctx context.Context) error {
 		}()
 	}
 
-	if a.cfg.Worklog.ReflectionEnabled {
-		a.ingestWG.Add(1)
-		go func() {
-			defer a.ingestWG.Done()
-			lm, lerr := worklog.NewAnthropicLM()
-			if lerr != nil {
-				a.logger.Warn("reflection synthesizer disabled: no LM available",
-					slog.Any("error", lerr))
-				return
-			}
-			ticker := time.NewTicker(5 * time.Minute)
-			defer ticker.Stop()
-			threshold := a.cfg.Worklog.ReflectionThreshold
-			if threshold <= 0 {
-				threshold = 150
-			}
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-ticker.C:
-					projects, err := listActiveProjects(ctx, a.db)
-					if err != nil {
-						a.logger.Warn("reflection: list active projects failed", slog.Any("error", err))
-						continue
-					}
-					for _, p := range projects {
-						fire1, _ := worklog.ShouldFireReflection(ctx, a.db, p, threshold)
-						fire2, _ := worklog.WeeklyCronShouldFire(ctx, a.db, p, time.Now())
-						if !(fire1 || fire2) {
-							continue
-						}
-						if _, err := worklog.Synthesize(ctx, a.db, p, lm); err != nil {
-							a.logger.Warn("reflection synthesis failed",
-								slog.String("project", p), slog.Any("error", err))
-						}
-					}
-				}
-			}
-		}()
-	}
+	// Reflection synthesis used to run here on a 5-minute ticker against
+	// the Anthropic Messages API. It now happens inside the user's own
+	// AI session via the /klyne:reflect slash command — the daemon
+	// surfaces a "Reflection due" advisory in the bootstrap brief but
+	// never issues an LM call itself.
 
 	// 4. Serve HTTP in a goroutine and wait for ctx.
 	serveErr := make(chan error, 1)
@@ -1073,30 +1036,6 @@ func cloneCfgWithExpandedPaths(cfg *config.Config) *config.Config {
 	out.Connectors.Claude.Root = expandHomeOrDefault(cfg.Connectors.Claude.Root, "")
 	out.Connectors.Codex.Root = expandHomeOrDefault(cfg.Connectors.Codex.Root, "")
 	return &out
-}
-
-// listActiveProjects returns distinct project_path values from stop_summaries
-// with a visible entry written in the past 30 days. Used by the reflection
-// ticker so we only consider projects that actually have recent activity.
-func listActiveProjects(ctx context.Context, db *store.DB) ([]string, error) {
-	cutoff := time.Now().Add(-30 * 24 * time.Hour).UnixMilli()
-	rows, err := db.Read().QueryContext(ctx,
-		`SELECT DISTINCT project_path FROM stop_summaries
-         WHERE recap_visible = 1 AND ts >= ? AND project_path != ''`,
-		cutoff)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close() //nolint:errcheck
-	var out []string
-	for rows.Next() {
-		var p string
-		if err := rows.Scan(&p); err != nil {
-			return nil, err
-		}
-		out = append(out, p)
-	}
-	return out, rows.Err()
 }
 
 // dashboardURL builds the http://addr URL the browser is launched against.
