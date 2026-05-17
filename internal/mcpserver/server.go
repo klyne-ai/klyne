@@ -17,7 +17,11 @@ import (
 // for cross-session full-text search.
 // v0.5.0 — slice 6 (Serena-inspired): bootstrap session brief +
 // memory CRUD (update_memory, delete_memory, list_memories).
-const version = "v0.5.0"
+// v0.6.0 — slice 7 (bootstrap integration loop): per-session
+// fetch tools (get_session, summarize_session) + bootstrap now
+// surfaces Claude Code's on-disk auto-memory under a distinct
+// section beside klyne's SQLite memory store.
+const version = "v0.6.0"
 
 // New constructs the klyne MCP server with every v1 tool
 // registered. The returned server is ready for Run.
@@ -78,6 +82,28 @@ Sort defaults to "recent" (newest first); pass sort:"relevance" for BM25 best-ma
 
 REQUIRES the klyne daemon to be running (the FTS index lives in SQLite). When unreachable the tool returns daemon_down=true with a clear restart hint instead of hanging.`,
 	}, HandleSearchMessages)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name: "get_session",
+		Description: `Fetch one session's metadata and ordered messages directly from klyne's SQLite store.
+
+Use when you already know the session_id (typically from bootstrap, list_sessions, or search_messages) and need the actual content of the conversation. Pure SQLite read — no JSONL access, no daemon required.
+
+Inputs: session_id (required), optional limit (default 100, max 1000), optional before (epoch-ms cursor for backward pagination), optional since (epoch-ms lower bound), optional order ("asc" default | "desc").
+
+NOTE: since is filtered client-side AFTER limit rows are fetched — combine with a generous limit or page via before when count matters.
+
+Returns: session metadata + the messages slice. Use this instead of falling back to bash + jq over the raw JSONL — klyne is the source of truth.`,
+	}, HandleGetSession)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name: "summarize_session",
+		Description: `Synthesise one session's timeline from klyne's own data — stop-hook summaries, the rolling session summary, linked decisions, and files touched — into one Markdown block.
+
+Use after bootstrap when the user asks "what was I working on in session X?" / "summarize session Y for me". Pure SQLite synthesis — no AI call, no JSONL re-scan. Prefer this over generate_handoff for known-session-id digestion (generate_handoff is for the CURRENT session and re-scans the JSONL).
+
+Inputs: session_id (required). Returns: structured fields plus a verbatim-renderable markdown body covering session metadata, stop-summary timeline, files touched, linked decisions, and the latest rolling summary.`,
+	}, HandleSummarizeSession)
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "get_pre_compact_context",

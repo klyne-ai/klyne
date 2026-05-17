@@ -62,31 +62,15 @@ type BootstrapHealthSummary struct {
 }
 
 // BootstrapOutput is the structured payload returned by HandleBootstrap.
-// Mirrors the same shape `list_sessions` and `get_context_health` use:
-// structured fields for programmatic consumers PLUS a Markdown field
-// for verbatim rendering by the slash command and skill.
 type BootstrapOutput struct {
-	// CWD is the directory the resolver actually consulted.
-	CWD string `json:"cwd" jsonschema:"the working directory that was searched"`
-	// Sessions is the last 3 sessions in this project, newest-first.
-	Sessions []CandidateRow `json:"sessions" jsonschema:"up to 3 most-recent sessions in this project, newest first"`
-	// ProjectMemories is the last 5 project-scoped memories, ts DESC.
-	ProjectMemories []store.Decision `json:"project_memories" jsonschema:"up to 5 most-recent project-scoped memories"`
-	// GlobalMemoryCount is the total number of global memories in the
-	// store (rows where project_path = ""). Surfaced so the agent can
-	// tell the user "you have N more globals — `recall` to see them".
-	GlobalMemoryCount int `json:"global_memory_count" jsonschema:"total global memory count (project_path = \"\")"`
-	// GlobalMemoriesPreview is up to 3 of the most-recent globals.
-	GlobalMemoriesPreview []store.Decision `json:"global_memories_preview" jsonschema:"up to 3 most-recent global memories"`
-	// LatestHealth is the context-health verdict for the most-recently
-	// modified session. Nil when no sessions exist or the health call
-	// fails / is ambiguous — the agent can decide to fetch it directly
-	// if needed.
-	LatestHealth *BootstrapHealthSummary `json:"latest_health,omitempty" jsonschema:"context-health verdict for the most-recently modified session, when one exists"`
-	// Markdown is the slash-prompt-ready rendering, produced
-	// server-side so the host LLM can echo it verbatim instead of
-	// re-rendering structured rows itself. Always populated.
-	Markdown string `json:"markdown" jsonschema:"slash-prompt-ready markdown rendering (verbatim-echo target)"`
+	CWD                    string                  `json:"cwd" jsonschema:"the working directory that was searched"`
+	Sessions               []CandidateRow          `json:"sessions" jsonschema:"up to 3 most-recent sessions in this project, newest first"`
+	ProjectMemories        []store.Decision        `json:"project_memories" jsonschema:"up to 5 most-recent project-scoped klyne (SQLite) memories"`
+	GlobalMemoryCount      int                     `json:"global_memory_count" jsonschema:"total global klyne memory count (project_path = \"\")"`
+	GlobalMemoriesPreview  []store.Decision        `json:"global_memories_preview" jsonschema:"up to 3 most-recent global klyne (SQLite) memories"`
+	ClaudeAutoMemory       ClaudeAutoMemory        `json:"claude_auto_memory" jsonschema:"on-disk Claude auto-memory for this project (~/.claude/projects/<encoded-cwd>/memory/) — separate store, separate writer"`
+	LatestHealth           *BootstrapHealthSummary `json:"latest_health,omitempty" jsonschema:"context-health verdict for the most-recently modified session, when one exists"`
+	Markdown               string                  `json:"markdown" jsonschema:"slash-prompt-ready markdown rendering (verbatim-echo target)"`
 }
 
 // HandleBootstrap synthesises the Day-1 briefing. Read-only across all
@@ -176,6 +160,20 @@ func HandleBootstrap(ctx context.Context, _ *mcp.CallToolRequest, in BootstrapIn
 	}
 	out.GlobalMemoriesPreview = globals[:preview]
 
+	// --- Claude auto-memory (on-disk, written by Claude itself) ----
+	// This is a SECOND memory system distinct from klyne's SQLite
+	// store: Claude Code maintains it via its own "auto memory" system
+	// prompt and writes .md files with YAML frontmatter under
+	// ~/.claude/projects/<encoded-cwd>/memory/. Bootstrap shows both
+	// so the agent has a complete picture without conflating sources.
+	if home, herr := os.UserHomeDir(); herr == nil {
+		if auto, aerr := ReadClaudeAutoMemory(home, cwd); aerr == nil {
+			out.ClaudeAutoMemory = auto
+		}
+		// Silent on aerr: auto-memory is optional context and an
+		// unreadable file should not fail the bootstrap call.
+	}
+
 	// --- latest health: delegate to the existing handler ------------
 	// We pick the newest-modified session (cands[0]) so the verdict
 	// reflects whichever session the agent is most likely resuming.
@@ -238,8 +236,9 @@ func formatBootstrapAsMarkdown(out BootstrapOutput) string {
 		b.WriteString("\n")
 	}
 
-	// --- project memories ------------------------------------------
-	b.WriteString("## Project memories\n\n")
+	// --- klyne memory (SQLite store) -------------------------------
+	b.WriteString("## klyne memory (SQLite store)\n\n")
+	b.WriteString("### Project-scoped\n\n")
 	if len(out.ProjectMemories) == 0 {
 		b.WriteString("_(none)_\n\n")
 	} else {
@@ -248,9 +247,7 @@ func formatBootstrapAsMarkdown(out BootstrapOutput) string {
 		}
 		b.WriteString("\n")
 	}
-
-	// --- global memories -------------------------------------------
-	b.WriteString("## Global memories\n\n")
+	b.WriteString("### Global\n\n")
 	if out.GlobalMemoryCount == 0 {
 		b.WriteString("_(none)_\n\n")
 	} else {
@@ -263,6 +260,13 @@ func formatBootstrapAsMarkdown(out BootstrapOutput) string {
 		}
 		b.WriteString("\n")
 	}
+
+	// --- Claude auto-memory (files on disk) ------------------------
+	b.WriteString("## Claude auto-memory (files on disk)\n\n")
+	if out.ClaudeAutoMemory.Dir != "" {
+		fmt.Fprintf(&b, "_Source: `%s`_\n\n", out.ClaudeAutoMemory.Dir)
+	}
+	b.WriteString(RenderClaudeAutoMemoryAsMarkdown(out.ClaudeAutoMemory))
 
 	// --- latest health (only when populated) -----------------------
 	if out.LatestHealth != nil {
