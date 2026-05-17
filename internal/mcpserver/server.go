@@ -140,6 +140,15 @@ Inputs: project_path (required), since_days (default 7), topic (optional substri
 	}, HandleRecapProject)
 
 	mcp.AddTool(srv, &mcp.Tool{
+		Name: "user_recap",
+		Description: `Aggregate visible worklog entries across ALL projects and ALL CLIs.
+
+Use when the user asks "what did I do this week?" / "what's my AI productivity?" / "summarize the past N days across every project". Returns total count, breakdown by CLI (claude vs codex), breakdown by project, and the top-importance entries.
+
+Inputs: since_days (default 7), group_by ("cli" | "project" | "" for both). Pure SQLite read.`,
+	}, HandleUserRecap)
+
+	mcp.AddTool(srv, &mcp.Tool{
 		Name: "code_review_context",
 		Description: `Surface the optional code-review-graph enrichment for a repository.
 
