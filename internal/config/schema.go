@@ -25,6 +25,29 @@ type Config struct {
 	// Advisor is the [advisor] table — top-level on/off toggle for
 	// the UserPromptSubmit hook.
 	Advisor AdvisorConfig `toml:"advisor" json:"advisor"`
+	// Worklog is the [worklog] table — feature flags for the cross-AI
+	// worklog Memory + Reflection layers. Both off by default.
+	Worklog WorklogConfig `toml:"worklog" json:"worklog"`
+}
+
+// WorklogConfig is the [worklog] table — feature flags for the
+// cross-AI worklog Memory + Reflection layers. Both off by default
+// so a fresh install runs without the new behavior until the user
+// opts in.
+type WorklogConfig struct {
+	// CodexDetectorEnabled, when true, makes the daemon poll the
+	// sessions table on a 60s tick for idle Codex sessions (last_msg_at
+	// older than 30 min) and write a worklog entry for each. This is
+	// the cross-AI capture differentiator.
+	CodexDetectorEnabled bool `toml:"codex_detector_enabled" json:"codex_detector_enabled"`
+	// ReflectionEnabled, when true, runs the Reflection synthesizer
+	// (Generative Agents pattern) on a 5-minute tick: importance-sum
+	// threshold or Sunday-evening cron. Costs Anthropic API calls;
+	// requires ANTHROPIC_API_KEY env var.
+	ReflectionEnabled bool `toml:"reflection_enabled" json:"reflection_enabled"`
+	// ReflectionThreshold is the importance-sum threshold that fires
+	// a reflection synthesis. Default: 150 (Park et al. 2023).
+	ReflectionThreshold int `toml:"reflection_threshold" json:"reflection_threshold"`
 }
 
 // AdvisorConfig is the [advisor] table. Lives separately from
@@ -120,6 +143,11 @@ func Defaults() *Config {
 			SummaryModel: AIModelAuto,
 			TitleModel:   AIModelAuto,
 			EmbedModel:   AIModelOff, // v1.1 feature, off by default
+		},
+		Worklog: WorklogConfig{
+			CodexDetectorEnabled: false,
+			ReflectionEnabled:    false,
+			ReflectionThreshold:  150,
 		},
 	}
 }
