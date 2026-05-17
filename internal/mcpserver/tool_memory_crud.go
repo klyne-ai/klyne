@@ -196,7 +196,10 @@ func HandleListMemories(ctx context.Context, _ *mcp.CallToolRequest, in ListMemo
 
 	projectPath := strings.TrimSpace(in.ProjectPath)
 	if projectPath == "" {
-		projectPath = strings.TrimSpace(in.CWD)
+		cwd := strings.TrimSpace(in.CWD)
+		if cwd != "" {
+			projectPath = CanonicalProjectPath(cwd)
+		}
 	}
 
 	limit := clampLimit(in.Limit, 50, 500)

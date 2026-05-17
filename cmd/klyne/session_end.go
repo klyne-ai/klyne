@@ -143,8 +143,12 @@ func computeAndPersistSessionEnd(ctx context.Context, stdin io.Reader) error {
 		// Use the cwd reported on the latest message as a fallback.
 		cwd = derivedCWD(snap.Messages)
 	}
+	// Canonicalize to the main repo path so worklog entries from a
+	// worktree session land under the same project_path as the main
+	// checkout. Non-git dirs and git failures pass through unchanged.
+	projectPath := mcpserver.CanonicalProjectPath(cwd)
 
-	summary := buildSessionEndSummary(snap, cwd)
+	summary := buildSessionEndSummary(snap, projectPath)
 	if summary.Summary == "" {
 		return nil // nothing useful happened in the session
 	}
@@ -158,7 +162,7 @@ func computeAndPersistSessionEnd(ctx context.Context, stdin io.Reader) error {
 	row := &store.StopSummary{
 		SessionID:   snap.SessionID,
 		Ts:          time.Now().UnixMilli(),
-		ProjectPath: cwd,
+		ProjectPath: projectPath,
 		CLI:         string(detectCLI(snap)),
 		Summary:     summary.Summary,
 		LastUser:    summary.LastUser,

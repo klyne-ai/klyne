@@ -94,8 +94,8 @@ func HandleRecordDecision(ctx context.Context, _ *mcp.CallToolRequest, in Record
 		return nil, RecordDecisionOutput{}, errors.New("text is required")
 	}
 	proj := in.ProjectPath
-	if proj == "" {
-		proj = in.CWD
+	if proj == "" && in.CWD != "" {
+		proj = CanonicalProjectPath(in.CWD)
 	}
 	db, err := store.Open(config.DBPath())
 	if err != nil {
@@ -124,8 +124,8 @@ func HandleRecordDecision(ctx context.Context, _ *mcp.CallToolRequest, in Record
 // HandleListDecisions returns decisions matching the input filter.
 func HandleListDecisions(ctx context.Context, _ *mcp.CallToolRequest, in ListDecisionsInput) (*mcp.CallToolResult, DecisionsListOutput, error) {
 	proj := in.ProjectPath
-	if !in.AllProjects && proj == "" {
-		proj = in.CWD
+	if !in.AllProjects && proj == "" && in.CWD != "" {
+		proj = CanonicalProjectPath(in.CWD)
 	}
 	if in.AllProjects {
 		proj = ""
@@ -160,8 +160,8 @@ func HandleSearchDecisions(ctx context.Context, _ *mcp.CallToolRequest, in Searc
 		return nil, DecisionsListOutput{}, errors.New("query is required")
 	}
 	proj := in.ProjectPath
-	if !in.AllProjects && proj == "" {
-		proj = in.CWD
+	if !in.AllProjects && proj == "" && in.CWD != "" {
+		proj = CanonicalProjectPath(in.CWD)
 	}
 	if in.AllProjects {
 		proj = ""

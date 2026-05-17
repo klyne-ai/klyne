@@ -113,6 +113,11 @@ func HandleBootstrap(ctx context.Context, _ *mcp.CallToolRequest, in BootstrapIn
 		cwd = w
 	}
 
+	// Preserve the literal cwd for the user-facing echo, but use the
+	// canonical project root for every downstream query so worktrees of
+	// the same repo share project-scoped memory/decisions/worklog.
+	projectPath := CanonicalProjectPath(cwd)
+
 	out := BootstrapOutput{CWD: cwd}
 
 	// --- sessions: take up to 3, newest-first -----------------------
@@ -153,7 +158,7 @@ func HandleBootstrap(ctx context.Context, _ *mcp.CallToolRequest, in BootstrapIn
 	defer db.Close()
 
 	projectMemories, err := store.ListDecisions(ctx, db, store.DecisionFilter{
-		ProjectPath: cwd,
+		ProjectPath: projectPath,
 		Limit:       bootstrapProjectMemoryLimit,
 	})
 	if err != nil {
@@ -190,7 +195,7 @@ func HandleBootstrap(ctx context.Context, _ *mcp.CallToolRequest, in BootstrapIn
 	// are not a bootstrap failure (fresh project or pre-migration DB).
 	const bootstrapReflectionLimit = 2
 	recapOut, recapErr := handleRecapProject(ctx, db, RecapProjectArgs{
-		ProjectPath: cwd,
+		ProjectPath: projectPath,
 		SinceDays:   7,
 	})
 	if recapErr == nil && recapOut != nil {
@@ -202,7 +207,7 @@ func HandleBootstrap(ctx context.Context, _ *mcp.CallToolRequest, in BootstrapIn
 	}
 	// Reflections use a wider lookback because they're synthesized weekly.
 	reflOut, reflErr := handleRecapProject(ctx, db, RecapProjectArgs{
-		ProjectPath: cwd,
+		ProjectPath: projectPath,
 		SinceDays:   14,
 	})
 	if reflErr == nil && reflOut != nil {
@@ -218,8 +223,8 @@ func HandleBootstrap(ctx context.Context, _ *mcp.CallToolRequest, in BootstrapIn
 	// daemon no longer runs synthesis itself — the user fires it via
 	// the /klyne:reflect slash command — so the only nudge they get
 	// is this brief line in the next bootstrap brief.
-	fire1, _ := worklog.ShouldFireReflection(ctx, db, cwd, bootstrapReflectionTriggerThreshold)
-	fire2, _ := worklog.WeeklyCronShouldFire(ctx, db, cwd, time.Now())
+	fire1, _ := worklog.ShouldFireReflection(ctx, db, projectPath, bootstrapReflectionTriggerThreshold)
+	fire2, _ := worklog.WeeklyCronShouldFire(ctx, db, projectPath, time.Now())
 	if fire1 || fire2 {
 		out.ReflectionDue = true
 	}

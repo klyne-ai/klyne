@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -383,5 +384,63 @@ func TestBootstrapExcludesActiveSessionsFromRecentList(t *testing.T) {
 		if s.IsActive {
 			t.Errorf("active row in Sessions: %+v", s)
 		}
+	}
+}
+
+// TestHandleBootstrap_WorktreeSharesProjectMemory locks in the
+// worktree-canonicalization fix: a memory seeded under the main repo
+// path must surface when bootstrap is invoked from a worktree of the
+// same repo. Both checkouts are the same logical project.
+func TestHandleBootstrap_WorktreeSharesProjectMemory(t *testing.T) {
+	withFakeHome(t)
+	db := withBootstrapDB(t)
+
+	// Set up a main repo with one commit, then add a worktree.
+	main := t.TempDir()
+	run := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git -C %s %v: %v\n%s", dir, args, err, out)
+		}
+	}
+	run(main, "init")
+	if err := os.WriteFile(filepath.Join(main, "README"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run(main, "add", "README")
+	run(main, "commit", "-m", "init")
+	wt := t.TempDir() + "/wt"
+	run(main, "worktree", "add", wt)
+
+	// Seed a memory under the CANONICAL main-repo path (matching what
+	// HandleRememberMemory would produce when invoked from the main
+	// checkout). EvalSymlinks because macOS /var → /private/var.
+	mainCanonical, _ := filepath.EvalSymlinks(main)
+	if err := store.InsertDecision(context.Background(), db, &store.Decision{
+		ID:          "d-worktree-test",
+		Ts:          time.Now().UnixMilli(),
+		ProjectPath: mainCanonical,
+		Text:        "shared across worktrees",
+	}); err != nil {
+		t.Fatalf("seed memory: %v", err)
+	}
+
+	// Bootstrap from the WORKTREE — the canonical resolver should
+	// resolve worktree → main, and the memory should surface.
+	out := mustBootstrap(t, BootstrapInput{CWD: wt})
+	if len(out.ProjectMemories) != 1 {
+		t.Fatalf("ProjectMemories len = %d, want 1 (worktree must see main repo's memory). out=%+v", len(out.ProjectMemories), out)
+	}
+	if out.ProjectMemories[0].Text != "shared across worktrees" {
+		t.Errorf("ProjectMemories[0].Text = %q, want %q", out.ProjectMemories[0].Text, "shared across worktrees")
+	}
+	// Literal cwd preserved for display:
+	if out.CWD != wt {
+		t.Errorf("out.CWD = %q, want literal worktree path %q (display field)", out.CWD, wt)
 	}
 }

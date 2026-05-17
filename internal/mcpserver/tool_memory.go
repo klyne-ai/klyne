@@ -138,15 +138,19 @@ func HandleRememberMemory(ctx context.Context, _ *mcp.CallToolRequest, in Rememb
 
 	// project_path resolution:
 	//   * scope=global → always ""
-	//   * scope=project → explicit ProjectPath wins, else CWD, else
-	//     error (we refuse to silently fall back to global).
+	//   * scope=project → explicit ProjectPath wins (verbatim), else
+	//     canonicalize CWD (worktree → main repo), else error. We refuse
+	//     to silently fall back to global.
 	var projectPath string
 	if scope == MemoryScopeGlobal {
 		projectPath = ""
 	} else {
 		projectPath = strings.TrimSpace(in.ProjectPath)
 		if projectPath == "" {
-			projectPath = strings.TrimSpace(in.CWD)
+			cwd := strings.TrimSpace(in.CWD)
+			if cwd != "" {
+				projectPath = CanonicalProjectPath(cwd)
+			}
 		}
 		if projectPath == "" {
 			return nil, RememberMemoryOutput{}, errors.New("scope=project requires project_path or cwd to be set")
@@ -189,7 +193,10 @@ func HandleRememberMemory(ctx context.Context, _ *mcp.CallToolRequest, in Rememb
 func HandleRecallMemory(ctx context.Context, _ *mcp.CallToolRequest, in RecallMemoryInput) (*mcp.CallToolResult, RecallMemoryOutput, error) {
 	projectPath := strings.TrimSpace(in.ProjectPath)
 	if projectPath == "" {
-		projectPath = strings.TrimSpace(in.CWD)
+		cwd := strings.TrimSpace(in.CWD)
+		if cwd != "" {
+			projectPath = CanonicalProjectPath(cwd)
+		}
 	}
 	// projectPath may still be "" — that's fine. recall then returns
 	// only the global list (since there is no project to scope to).
