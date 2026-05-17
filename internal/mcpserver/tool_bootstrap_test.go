@@ -72,7 +72,7 @@ func TestHandleBootstrap_EmptyProject(t *testing.T) {
 	}
 	// Every section must show `_(none)_` so the agent renders a
 	// stable shape even on a brand-new project.
-	for _, section := range []string{"Recent sessions", "Project memories", "Global memories"} {
+	for _, section := range []string{"Recent sessions", "klyne memory (SQLite store)", "Claude auto-memory"} {
 		if !strings.Contains(out.Markdown, "## "+section) {
 			t.Errorf("Markdown missing section %q\n%s", section, out.Markdown)
 		}
@@ -143,6 +143,46 @@ func TestHandleBootstrap_FiveSessionsReturnsThreeMostRecent(t *testing.T) {
 	_ = nextIdx
 }
 
+// TestHandleBootstrap_SurfacesClaudeAutoMemory seeds the on-disk
+// auto-memory directory and asserts the bootstrap response carries
+// the parsed entries under a distinct "Claude auto-memory" section.
+func TestHandleBootstrap_SurfacesClaudeAutoMemory(t *testing.T) {
+	home := withFakeHome(t)
+	_ = withBootstrapDB(t)
+
+	cwd := "/tmp/proj-with-auto-memory"
+	memDir := filepath.Join(home, ".claude", "projects", EncodeCWD(cwd), "memory")
+	if err := os.MkdirAll(memDir, 0o755); err != nil {
+		t.Fatalf("mkdir memdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(memDir, "MEMORY.md"), []byte("- [pos](project_positioning.md) — hook\n"), 0o644); err != nil {
+		t.Fatalf("write MEMORY.md: %v", err)
+	}
+	body := "---\nname: positioning\ndescription: three modes\ntype: project\n---\nbody text\n"
+	if err := os.WriteFile(filepath.Join(memDir, "project_positioning.md"), []byte(body), 0o644); err != nil {
+		t.Fatalf("write project_positioning.md: %v", err)
+	}
+
+	out := mustBootstrap(t, BootstrapInput{CWD: cwd})
+
+	if len(out.ClaudeAutoMemory.Entries) != 1 {
+		t.Fatalf("ClaudeAutoMemory.Entries len = %d, want 1", len(out.ClaudeAutoMemory.Entries))
+	}
+	if out.ClaudeAutoMemory.Entries[0].Name != "positioning" {
+		t.Errorf("first entry Name = %q, want positioning", out.ClaudeAutoMemory.Entries[0].Name)
+	}
+	for _, want := range []string{
+		"## klyne memory (SQLite store)",
+		"## Claude auto-memory",
+		"positioning",
+		"(project)",
+	} {
+		if !strings.Contains(out.Markdown, want) {
+			t.Errorf("Markdown missing %q\n%s", want, out.Markdown)
+		}
+	}
+}
+
 // TestHandleBootstrap_MemoriesProjectAndGlobals seeds 8 project
 // memories + 2 globals and asserts the bootstrap returns the project
 // memories capped at 5 plus 2 globals (preview + count). The Markdown
@@ -200,7 +240,7 @@ func TestHandleBootstrap_MemoriesProjectAndGlobals(t *testing.T) {
 	}
 	// Markdown must render both Project and Global sections, NOT
 	// with the _(none)_ placeholder.
-	for _, want := range []string{"## Project memories", "## Global memories", "project memory 8", "global memory 2"} {
+	for _, want := range []string{"### Project-scoped", "### Global", "project memory 8", "global memory 2"} {
 		if !strings.Contains(out.Markdown, want) {
 			t.Errorf("Markdown missing %q\n%s", want, out.Markdown)
 		}

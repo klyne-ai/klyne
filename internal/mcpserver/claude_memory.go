@@ -161,27 +161,37 @@ func parseAutoMemoryFile(name, raw string) ClaudeAutoMemoryEntry {
 // RenderClaudeAutoMemoryAsMarkdown turns a ClaudeAutoMemory into a
 // Markdown section suitable for embedding in the bootstrap output.
 // Always emits a section header so the agent's output shape is stable
-// whether the dir exists or not.
+// whether the dir exists or not. Surfaces the verbatim MEMORY.md
+// index when present so the agent can see Claude's own per-topic
+// hooks before drilling into each .md file.
 func RenderClaudeAutoMemoryAsMarkdown(m ClaudeAutoMemory) string {
 	var b strings.Builder
 	if len(m.Entries) == 0 && strings.TrimSpace(m.Index) == "" {
 		b.WriteString("_(none)_\n\n")
 		return b.String()
 	}
-	for _, e := range m.Entries {
-		title := e.Name
-		if title == "" {
-			title = e.File
-		}
-		typ := e.Type
-		if typ == "" {
-			typ = "untyped"
-		}
-		fmt.Fprintf(&b, "- **%s** (%s) — `%s`\n", title, typ, e.File)
-		if e.Description != "" {
-			fmt.Fprintf(&b, "  - %s\n", oneLine(e.Description))
-		}
+	if strings.TrimSpace(m.Index) != "" {
+		b.WriteString("### Index (MEMORY.md)\n\n")
+		b.WriteString(strings.TrimRight(m.Index, "\n"))
+		b.WriteString("\n\n")
 	}
-	b.WriteString("\n")
+	if len(m.Entries) > 0 {
+		b.WriteString("### Entries\n\n")
+		for _, e := range m.Entries {
+			title := e.Name
+			if title == "" {
+				title = e.File
+			}
+			typ := e.Type
+			if typ == "" {
+				typ = "untyped"
+			}
+			fmt.Fprintf(&b, "- **%s** (%s) — `%s`\n", title, typ, e.File)
+			if e.Description != "" {
+				fmt.Fprintf(&b, "  - %s\n", oneLine(e.Description))
+			}
+		}
+		b.WriteString("\n")
+	}
 	return b.String()
 }

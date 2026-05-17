@@ -105,3 +105,20 @@ func TestRenderClaudeAutoMemoryAsMarkdown_WithEntries(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderClaudeAutoMemoryAsMarkdown_IndexOnly(t *testing.T) {
+	mem := ClaudeAutoMemory{
+		Dir:   "/x/memory",
+		Index: "- [foo](foo.md) — hook line\n",
+	}
+	out := RenderClaudeAutoMemoryAsMarkdown(mem)
+	if !strings.Contains(out, "### Index (MEMORY.md)") {
+		t.Errorf("Index-only render missing header:\n%s", out)
+	}
+	if !strings.Contains(out, "[foo](foo.md)") {
+		t.Errorf("Index-only render missing the index line:\n%s", out)
+	}
+	if strings.Contains(out, "_(none)_") {
+		t.Errorf("Index-only render should not show _(none)_:\n%s", out)
+	}
+}
