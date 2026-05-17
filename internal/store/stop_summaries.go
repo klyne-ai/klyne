@@ -73,6 +73,71 @@ ON CONFLICT(session_id, ts) DO UPDATE SET
 	return nil
 }
 
+// WorklogColumns groups the migration-015 columns that extend a stop_summaries
+// row with worklog-feature metadata (memory layer). It is paired with
+// StopSummary by UpsertStopSummaryWithWorklog so both detectors (Claude Stop
+// hook and Codex episode-boundary detector) write through one call.
+type WorklogColumns struct {
+	RecapVisible     int
+	RecapTopic       string
+	AIDraftedSummary string
+	DraftState       string
+	Signature        string
+	Importance       int
+	LastAccessedAt   int64
+}
+
+// UpsertStopSummaryWithWorklog writes a stop_summaries row together with
+// its worklog-feature columns. Idempotent on (session_id, ts) — re-running
+// at the same logical instant updates the worklog columns but leaves the
+// base fields stable (the ON CONFLICT clause intentionally only touches the
+// migration-015 columns so a later AI prose pass does not clobber the
+// deterministic body written by the Stop hook).
+//
+// row.Summary may be empty (the NOT NULL constraint allows empty string);
+// the worklog memory layer stores its prose in WorklogColumns.AIDraftedSummary.
+func UpsertStopSummaryWithWorklog(ctx context.Context, db *DB, row StopSummary, w WorklogColumns) error {
+	if strings.TrimSpace(row.SessionID) == "" {
+		return errors.New("store: upsert worklog: session_id required")
+	}
+	if row.Ts == 0 {
+		row.Ts = time.Now().UnixMilli()
+	}
+	if row.CLI == "" {
+		row.CLI = "claude"
+	}
+	files := row.Files
+	if files == nil {
+		files = []string{}
+	}
+	filesJSON, err := json.Marshal(files)
+	if err != nil {
+		return fmt.Errorf("store: marshal files: %w", err)
+	}
+	const q = `
+INSERT INTO stop_summaries (
+    session_id, ts, project_path, cli, summary, last_user, last_bash, files_json,
+    recap_visible, recap_topic, ai_drafted_summary, draft_state, signature, importance, last_accessed_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(session_id, ts) DO UPDATE SET
+    recap_visible      = excluded.recap_visible,
+    recap_topic        = excluded.recap_topic,
+    ai_drafted_summary = excluded.ai_drafted_summary,
+    draft_state        = excluded.draft_state,
+    signature          = excluded.signature,
+    importance         = excluded.importance,
+    last_accessed_at   = excluded.last_accessed_at`
+	_, err = db.Write().ExecContext(ctx, q,
+		row.SessionID, row.Ts, row.ProjectPath, row.CLI, row.Summary,
+		row.LastUser, row.LastBash, string(filesJSON),
+		w.RecapVisible, w.RecapTopic, w.AIDraftedSummary, w.DraftState,
+		w.Signature, w.Importance, w.LastAccessedAt)
+	if err != nil {
+		return fmt.Errorf("store: upsert stop summary with worklog: %w", err)
+	}
+	return nil
+}
+
 // LatestStopSummaryForProject returns the most recent stop-hook
 // summary scoped to projectPath, or nil if there is none. Empty
 // projectPath returns the most recent summary across all projects.

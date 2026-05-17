@@ -400,6 +400,35 @@ func (a *App) Start(ctx context.Context) error {
 		}()
 	}
 
+	// Cross-AI worklog tickers (T8 + T18). Both off by default — see
+	// WorklogConfig. Each ticker swallows per-iteration errors so a
+	// transient DB hiccup or LM outage doesn't tear down the daemon.
+	if a.cfg.Worklog.CodexDetectorEnabled {
+		a.ingestWG.Add(1)
+		go func() {
+			defer a.ingestWG.Done()
+			det := codex.NewBoundaryDetector(30 * time.Minute)
+			ticker := time.NewTicker(60 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					if err := det.Tick(ctx, a.db); err != nil {
+						a.logger.Warn("codex boundary detector tick failed", slog.Any("error", err))
+					}
+				}
+			}
+		}()
+	}
+
+	// Reflection synthesis used to run here on a 5-minute ticker against
+	// the Anthropic Messages API. It now happens inside the user's own
+	// AI session via the /klyne:reflect slash command — the daemon
+	// surfaces a "Reflection due" advisory in the bootstrap brief but
+	// never issues an LM call itself.
+
 	// 4. Serve HTTP in a goroutine and wait for ctx.
 	serveErr := make(chan error, 1)
 	go func() {

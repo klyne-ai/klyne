@@ -25,6 +25,25 @@ type Config struct {
 	// Advisor is the [advisor] table — top-level on/off toggle for
 	// the UserPromptSubmit hook.
 	Advisor AdvisorConfig `toml:"advisor" json:"advisor"`
+	// Worklog is the [worklog] table — feature flags for the cross-AI
+	// worklog Memory + Reflection layers. Both off by default.
+	Worklog WorklogConfig `toml:"worklog" json:"worklog"`
+}
+
+// WorklogConfig is the [worklog] table — feature flag for the
+// cross-AI worklog Memory layer. Off by default so a fresh install
+// runs without the new behavior until the user opts in.
+//
+// Reflection synthesis is NOT a daemon concern: it now runs inside
+// the user's Claude/Codex session via the `/klyne:reflect` slash
+// command, using their existing subscription auth. The daemon no
+// longer issues any LM calls of its own.
+type WorklogConfig struct {
+	// CodexDetectorEnabled, when true, makes the daemon poll the
+	// sessions table on a 60s tick for idle Codex sessions (last_msg_at
+	// older than 30 min) and write a worklog entry for each. This is
+	// the cross-AI capture differentiator.
+	CodexDetectorEnabled bool `toml:"codex_detector_enabled" json:"codex_detector_enabled"`
 }
 
 // AdvisorConfig is the [advisor] table. Lives separately from
@@ -120,6 +139,9 @@ func Defaults() *Config {
 			SummaryModel: AIModelAuto,
 			TitleModel:   AIModelAuto,
 			EmbedModel:   AIModelOff, // v1.1 feature, off by default
+		},
+		Worklog: WorklogConfig{
+			CodexDetectorEnabled: false,
 		},
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/klyne-ai/klyne/internal/connectors"
 	"github.com/klyne-ai/klyne/internal/mcpserver"
 	"github.com/klyne-ai/klyne/internal/store"
+	"github.com/klyne-ai/klyne/internal/worklog"
 )
 
 // session_end.go — `klyne session-end` Stop-hook entry point.
@@ -141,8 +143,12 @@ func computeAndPersistSessionEnd(ctx context.Context, stdin io.Reader) error {
 		// Use the cwd reported on the latest message as a fallback.
 		cwd = derivedCWD(snap.Messages)
 	}
+	// Canonicalize to the main repo path so worklog entries from a
+	// worktree session land under the same project_path as the main
+	// checkout. Non-git dirs and git failures pass through unchanged.
+	projectPath := mcpserver.CanonicalProjectPath(cwd)
 
-	summary := buildSessionEndSummary(snap, cwd)
+	summary := buildSessionEndSummary(snap, projectPath)
 	if summary.Summary == "" {
 		return nil // nothing useful happened in the session
 	}
@@ -156,7 +162,7 @@ func computeAndPersistSessionEnd(ctx context.Context, stdin io.Reader) error {
 	row := &store.StopSummary{
 		SessionID:   snap.SessionID,
 		Ts:          time.Now().UnixMilli(),
-		ProjectPath: cwd,
+		ProjectPath: projectPath,
 		CLI:         string(detectCLI(snap)),
 		Summary:     summary.Summary,
 		LastUser:    summary.LastUser,
@@ -166,7 +172,124 @@ func computeAndPersistSessionEnd(ctx context.Context, stdin io.Reader) error {
 	if err := store.InsertStopSummary(ctx, db, row); err != nil {
 		return fmt.Errorf("insert stop summary: %w", err)
 	}
+
+	// Derive worklog metrics from the snapshot. The Stop hook is the
+	// authoritative writer for Claude-side worklog entries; failures
+	// log to stderr but never block session-end (hook contract).
+	var (
+		toolCount      int
+		editWriteCount int
+		firstTs        int64
+		lastTs         int64
+	)
+	for _, m := range snap.Messages {
+		if m == nil {
+			continue
+		}
+		if m.Role == connectors.RoleAssistant {
+			toolCount += len(m.ToolCalls)
+			for _, tc := range m.ToolCalls {
+				switch strings.ToLower(tc.Name) {
+				case "edit", "write", "multiedit":
+					editWriteCount++
+				}
+			}
+		}
+		if firstTs == 0 || (m.Ts > 0 && m.Ts < firstTs) {
+			firstTs = m.Ts
+		}
+		if m.Ts > lastTs {
+			lastTs = m.Ts
+		}
+	}
+	wallTime := time.Duration(0)
+	if firstTs > 0 && lastTs > firstTs {
+		wallTime = time.Duration(lastTs-firstTs) * time.Millisecond
+	}
+
+	tags := deriveEventTags(sessionFixture{
+		LastBash:       summary.LastBash,
+		EditWriteCount: editWriteCount,
+		Files:          summary.Files,
+	})
+
+	entry := worklog.Entry{
+		SessionID:      row.SessionID,
+		TS:             time.UnixMilli(row.Ts),
+		ProjectPath:    row.ProjectPath,
+		CLI:            row.CLI,
+		LastUser:       row.LastUser,
+		LastBash:       row.LastBash,
+		Files:          row.Files,
+		CommitSHA:      "", // TODO: derive from `git commit` output when transcript carries it
+		WallTime:       wallTime,
+		ToolCallCount:  toolCount,
+		EditWriteCount: editWriteCount,
+		EventTags:      tags,
+	}
+	if _, werr := worklog.WriteEntry(ctx, db, entry, dismissedSignatures(ctx, db, row.ProjectPath), store.UpsertStopSummaryWithWorklog); werr != nil {
+		// Don't block session-end on a worklog failure; log to stderr.
+		fmt.Fprintf(os.Stderr, "klyne session-end: worklog write failed: %v\n", werr)
+	}
 	return nil
+}
+
+// sessionFixture is the minimal input shape consumed by
+// deriveEventTags. It exists as a named type so the classifier can be
+// unit-tested without having to assemble a full snapshot.
+type sessionFixture struct {
+	LastBash       string
+	EditWriteCount int
+	Files          []string
+}
+
+// deriveEventTags is the deterministic classifier that maps a
+// session-end summary onto worklog event tags. It is intentionally
+// boring — keyword and prefix matches only, no model calls — so the
+// memory layer's signal is reproducible and auditable.
+func deriveEventTags(s sessionFixture) []worklog.EventTag {
+	var tags []worklog.EventTag
+	cmd := strings.TrimSpace(s.LastBash)
+	if strings.HasPrefix(cmd, "git commit") {
+		tags = append(tags, worklog.TagCommitLanded)
+	}
+	if strings.HasPrefix(cmd, "gh pr create") {
+		tags = append(tags, worklog.TagPROpened)
+	}
+	if s.EditWriteCount >= 2 {
+		tags = append(tags, worklog.TagFileSignificantlyEdited)
+	}
+	for _, f := range s.Files {
+		if strings.Contains(f, "/migrations/") || strings.HasSuffix(f, ".sql") || strings.HasSuffix(f, ".proto") {
+			tags = append(tags, worklog.TagMigrationOrSchemaChange)
+			break
+		}
+	}
+	for _, f := range s.Files {
+		base := filepath.Base(f)
+		if base == "go.mod" || base == "package.json" || base == "Cargo.toml" || base == "pyproject.toml" {
+			tags = append(tags, worklog.TagDependencyChange)
+			break
+		}
+	}
+	for _, f := range s.Files {
+		lower := strings.ToLower(f)
+		for _, kw := range []string{"auth", "crypto", "password", "token", "secret", "oauth"} {
+			if strings.Contains(lower, kw) {
+				tags = append(tags, worklog.TagSecurityRelevantChange)
+				goto done
+			}
+		}
+	}
+done:
+	return tags
+}
+
+// dismissedSignatures returns the set of stop_summary signatures the
+// user has explicitly dismissed for a project. v1 returns an empty set;
+// the DAO will be added when the dismiss surface lands.
+func dismissedSignatures(_ context.Context, _ *store.DB, _ string) map[string]bool {
+	return map[string]bool{}
 }
 
 func readSessionEndInput(r io.Reader) sessionEndInput {

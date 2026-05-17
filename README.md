@@ -180,6 +180,10 @@ flowchart LR
 | `code_review_context` | Optional `.code-review-graph/` enrichment when present |
 | `propose_runbooks` / `accept_runbook` / `dismiss_runbook` | Pattern → runbook detector: surfaces Bash command sequences that recur across sessions and saves the user-accepted ones as memories |
 | `status_snapshot` | Portable Markdown summary of klyne's installation state (sessions, /compact events, projects, memories) for the last N hours |
+| `recap_project` | Cross-AI worklog: visible session-end entries for one project in the last N days, tagged `[claude]` / `[codex]` so the agent answers "what did I do here lately?" across tools |
+| `user_recap` | Cross-project, cross-AI rollup: total entries + by-CLI + by-project + top-importance — for "what did I ship this week?" |
+| `propose_reflection` | Returns pending worklog entries + a trigger reason (importance-sum / weekly cron / user-invoked) for the agent to synthesize over |
+| `record_reflection` | Persists synthesized insights to the reflections table. Citation invariant: every insight must cite at least one source entry — empty-evidence reflections are rejected |
 
 ### Slash commands — user-triggered via `/` in Claude Code
 
@@ -194,21 +198,9 @@ flowchart LR
 | `/klyne:tokens` | `get_token_timeline` |
 | `/klyne:runbooks` | `propose_runbooks` — see recurring shell workflows klyne thinks belong in memory |
 | `/klyne:status` | `status_snapshot` — installation-state snapshot for the current project |
+| `/klyne:reflect` | Cross-AI worklog synthesis: Claude calls `propose_reflection`, synthesizes 3–5 insights with mandatory citations, then calls `record_reflection`. Uses your Claude subscription — no extra API key |
 
-Installed as Markdown slash commands under `~/.claude/commands/klyne/*.md` — each command file calls the matching MCP tool above. Single surface, no `(MCP)` duplicates in the slash menu.
-
-### Skills — agent-triggered when the description matches
-
-Skills are the auto-invoked counterpart to slash commands. The agent reads each `SKILL.md`'s description and invokes the skill when it matches the current situation — no `/klyne:` typing required.
-
-| Skill | Wraps | Auto-invokes when |
-|---|---|---|
-| `klyne-bootstrap` | `bootstrap` | Session start in a project the agent has no prior context for, the user asks "what was I working on?" / "where did I leave off?", or before the agent's first major action in an unfamiliar codebase |
-| `klyne-health` | `get_context_health` | An advisory mentions context fill / drift / acceleration / 5-hour window, the user asks about token usage, after a `/compact` event, or before loading a >5K-token file |
-| `klyne-runbooks` | `propose_runbooks` | The user asks "what should I save as a runbook?", expresses fatigue at a repeated task, or the agent is about to re-run a multi-step shell sequence it has seen before |
-| `klyne-status` | `status_snapshot` | The user asks for a weekly review, install status, or "what has klyne been doing this week?" |
-
-Installed under `~/.claude/skills/<skill>/SKILL.md` by `klyne mcp install`. More skills land here as klyne grows; the install is idempotent and overwrites on upgrade. See [`docs/features/mcp-and-slash-commands.md`](docs/features/mcp-and-slash-commands.md#skills--the-agent-invoked-path) for the full rationale.
+Installed as Markdown slash commands under `~/.claude/commands/klyne/*.md` — each command file calls the matching MCP tool above. Single surface per command, no `(MCP)` duplicates in the slash menu.
 
 ### CLI commands — for your terminal
 
@@ -234,6 +226,7 @@ Installed under `~/.claude/skills/<skill>/SKILL.md` by `klyne mcp install`. More
 | `klyne subagents [--since=24h]` | Roll up Task-tool subagent spend back to the parent session. |
 | `klyne decisions add\|list\|search\|delete` | Project-scoped immutable decisions log. |
 | `klyne runbooks [list\|accept\|dismiss]` | Surface recurring Bash sequences as candidate runbooks; accept saves to memory, dismiss never re-proposes. |
+| `klyne worklog export-week [--project PATH] [--week YYYY-WW]` | Render `<project>/docs/worklog/YYYY-WW.md` from visible worklog entries — conditional on activity, no file written for quiet weeks. Tags each entry with its source CLI. |
 | `klyne status [--all-projects] [--since=Xh] [--write=PATH]` | Portable Markdown installation snapshot for the current project (or every project on this machine). |
 | Memory via chat | Say *"klyne remember this …"* / *"refer klyne …"* in Claude Code. Uses MCP `remember` / `recall`; no dedicated CLI alias yet. |
 | `klyne statusline [--format=short\|mini\|plain]` | One-line summary for Claude Code's `statusLine` settings hook. |
@@ -300,6 +293,36 @@ On recall, klyne returns two labelled lists in one MCP call:
 If a matching memory looks like a runbook, Claude substitutes variables from your request, shows the concrete commands, and asks before running them. The dashboard at `http://127.0.0.1:7878/memory` shows every memory grouped by service, with filters for text and tags.
 
 Details: [`docs/features/memory.md`](docs/features/memory.md).
+
+---
+
+## Cross-AI worklog: what you shipped, across every tool
+
+The worklog is a second persistence layer (separate from the runbook memory above) that captures *what happened* per session — automatically and deterministically — then lets the agent synthesize patterns across them. Two tiers:
+
+**Memory layer — automatic, silent.** Every Claude session that ends writes a worklog entry to `~/.klyne/klyne.db` via the existing `klyne session-end` hook. Entries get an importance score (1–10), an event-tag fingerprint (commit landed, decision recorded, security-relevant file touched, etc.), and a suppression pass that drops trivial sessions. Codex sessions get the same treatment when you opt in:
+
+```toml
+# ~/.klyne/config.toml
+[worklog]
+codex_detector_enabled = true
+```
+
+After that, idle Codex sessions (> 30 min since last message) also produce entries, tagged `cli='codex'`. **This is the cross-AI piece** — `/klyne:bootstrap` in a new Claude session now shows both Claude and Codex entries together, so the agent picks up where *either* tool left off.
+
+**Reflection layer — user-invoked, AI-synthesized.** Once you've accumulated enough entries (importance-sum ≥ 150, or end of the week), bootstrap shows a `> **Reflection due**` advisory. Run `/klyne:reflect` and Claude synthesizes 3–5 insights using *your own subscription* — no API key required. Every insight must cite at least one source entry's `session_id`; the citation invariant is enforced at write time so reflections are always grounded in evidence you can audit.
+
+**When to use which:**
+
+| You want… | Surface | Cost |
+|---|---|---|
+| "What did I do in this project this week?" | `mcp__klyne__recap_project` (auto-invoked by Claude) | Free, SQLite read |
+| "What did I ship across all projects this week?" | `mcp__klyne__user_recap` | Free, SQLite read |
+| Day-1 brief showing recent Claude + Codex work | `/klyne:bootstrap` | Free, SQLite read |
+| Synthesized weekly insights from accumulated entries | `/klyne:reflect` | Your Claude/Codex subscription tokens, ~1 call per week |
+| Per-project Markdown digest committed to the repo | `klyne worklog export-week --project /abs/path` | Free, writes `docs/worklog/YYYY-WW.md` only when there's activity |
+
+Both layers are local-first, schema-versioned (migrations 015 + 016), and live in the same SQLite store as everything else klyne tracks.
 
 ---
 
@@ -428,7 +451,6 @@ The `mcp install` command auto-detects host configs:
 | Claude Code (advisor hook) | `~/.claude/settings.json` | `hooks.UserPromptSubmit[].klyne` (idempotent merge) |
 | Claude Code (session-end hook) | `~/.claude/settings.json` | `hooks.Stop[].klyne` — writes deterministic session-end summaries to klyne's local store |
 | Claude Code (slash commands) | `~/.claude/commands/klyne/*.md` | Markdown files for every `/klyne:*` surface |
-| Claude Code (skills) | `~/.claude/skills/<skill>/SKILL.md` | One bundle per agent-invoked skill (`klyne-bootstrap`, `klyne-health`, `klyne-runbooks`, `klyne-status`) |
 
 Pass `--platform claude` or `--platform codex` to scope the install.
 

@@ -7,11 +7,13 @@ package mcpserver
 // payload to `klyne precompact`, which decides to block or allow based on
 // fill percentage and armed snapshot state.
 //
-// Hook entry shape (appended under "PreCompact"):
+// Hook entry shape (appended under "PreCompact" → matcher "*"):
 //
 //	{
-//	  "type":    "command",
-//	  "command": "/abs/path/to/klyne precompact"
+//	  "matcher": "*",
+//	  "hooks": [
+//	    { "type": "command", "command": "/abs/path/to/klyne precompact" }
+//	  ]
 //	}
 
 // InstallPreCompactHook writes the klyne precompact hook into Claude Code's
@@ -49,6 +51,10 @@ func InstallPreCompactHook(binaryPath string) (*HookInstallReport, error) {
 
 // mergePreCompactHookEntry mirrors mergePreToolHookEntry but for the
 // PreCompact event and the "precompact" command suffix.
+//
+// PreCompact uses the same {matcher, hooks} envelope as every other
+// Claude Code hook event — Claude Code's schema rejects flat hook
+// objects placed directly under hooks.PreCompact.
 func mergePreCompactHookEntry(entries []any, binaryPath string) ([]any, InstallAction) {
 	want := map[string]any{
 		"type":    "command",
@@ -65,38 +71,80 @@ func mergePreCompactHookEntry(entries []any, binaryPath string) ([]any, InstallA
 		action = InstallActionUpdated
 	}
 
-	// PreCompact entries don't use a matcher/hooks nesting — they're a flat
-	// list of hook objects (same as how Claude Code documents the event).
-	// Filter out stale klyne precompact hooks then append the canonical one.
-	updated := make([]any, 0, len(entries))
-	for _, raw := range entries {
-		hookObj, ok := raw.(map[string]any)
+	starIdx := -1
+	updated := make([]any, len(entries))
+	copy(updated, entries)
+	for i, raw := range updated {
+		entry, ok := raw.(map[string]any)
 		if !ok {
-			updated = append(updated, raw)
 			continue
 		}
-		if isKlynePreCompactCommand(hookObj) {
-			continue // strip stale entry
+		matcher, _ := entry["matcher"].(string)
+		if matcher != "" && matcher != "*" {
+			continue
 		}
-		updated = append(updated, hookObj)
+		if starIdx == -1 {
+			starIdx = i
+		}
+		inner, _ := entry["hooks"].([]any)
+		filtered := make([]any, 0, len(inner))
+		for _, h := range inner {
+			hookObj, ok := h.(map[string]any)
+			if !ok {
+				filtered = append(filtered, h)
+				continue
+			}
+			if isKlynePreCompactCommand(hookObj) {
+				continue
+			}
+			filtered = append(filtered, hookObj)
+		}
+		entry["hooks"] = filtered
+		updated[i] = entry
 	}
-	updated = append(updated, want)
+
+	if starIdx == -1 {
+		updated = append(updated, map[string]any{
+			"matcher": "*",
+			"hooks":   []any{want},
+		})
+		return updated, action
+	}
+
+	target := updated[starIdx].(map[string]any)
+	inner, _ := target["hooks"].([]any)
+	inner = append(inner, want)
+	target["hooks"] = inner
+	updated[starIdx] = target
 	return updated, action
 }
 
 // scanKlynePreCompact counts klyne precompact hooks in the PreCompact entries.
+// It walks the outer {matcher, hooks} envelopes and inspects the inner
+// hooks []any list, mirroring scanKlynePreTool.
 func scanKlynePreCompact(entries []any, want map[string]any) (total, canonical int) {
 	for _, raw := range entries {
-		hookObj, ok := raw.(map[string]any)
+		entry, ok := raw.(map[string]any)
 		if !ok {
 			continue
 		}
-		if !isKlynePreCompactCommand(hookObj) {
+		matcher, _ := entry["matcher"].(string)
+		if matcher != "" && matcher != "*" {
 			continue
 		}
-		total++
-		if commandsEqual(hookObj, want) {
-			canonical++
+		inner, _ := entry["hooks"].([]any)
+		for _, h := range inner {
+			hookObj, ok := h.(map[string]any)
+			if !ok {
+				continue
+			}
+			if !isKlynePreCompactCommand(hookObj) {
+				continue
+			}
+			total++
+			if commandsEqual(hookObj, want) {
+				canonical++
+			}
 		}
 	}
 	return total, canonical

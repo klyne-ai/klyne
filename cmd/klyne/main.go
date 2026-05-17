@@ -67,6 +67,8 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newRunbooksCmd())
 	root.AddCommand(newStatusCmd())
 	root.AddCommand(newSessionEndCmd())
+	// Cross-AI worklog — weekly digest exports + reflection ops.
+	root.AddCommand(newWorklogCmd())
 	// v0 Context X-ray — scorecard of context fill, cache trajectory, and MCP source attribution.
 	root.AddCommand(newXrayCmd())
 	// v0 Pre-Action Safety Net — PreToolUse hook entry + restore.

@@ -35,12 +35,22 @@ func TestInstallPreCompactHook_AddsToFreshSettings(t *testing.T) {
 	}
 	found := false
 	for _, raw := range entries {
-		h, ok := raw.(map[string]any)
+		entry, ok := raw.(map[string]any)
 		if !ok {
 			continue
 		}
-		if cmd, _ := h["command"].(string); strings.Contains(cmd, "klyne") && strings.HasSuffix(cmd, " precompact") {
-			found = true
+		if matcher, _ := entry["matcher"].(string); matcher != "*" {
+			continue
+		}
+		inner, _ := entry["hooks"].([]any)
+		for _, h := range inner {
+			hookObj, ok := h.(map[string]any)
+			if !ok {
+				continue
+			}
+			if cmd, _ := hookObj["command"].(string); strings.Contains(cmd, "klyne") && strings.HasSuffix(cmd, " precompact") {
+				found = true
+			}
 		}
 	}
 	if !found {
@@ -94,6 +104,48 @@ func TestInstallPreCompactHook_UpdatesStaleBinaryPath(t *testing.T) {
 	}
 	if strings.Contains(string(body), "/old/path/klyne precompact") {
 		t.Fatalf("old path still present: %s", body)
+	}
+}
+
+func TestInstallPreCompactHook_IdempotentAgainstPreExistingNested(t *testing.T) {
+	home := withFakeHome(t)
+	settings := filepath.Join(home, ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(settings), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Seed settings with an ALREADY-CORRECT nested PreCompact entry —
+	// exactly the shape Claude Code's schema requires. This is what
+	// the user had before `klyne mcp install` broke their file.
+	existing := map[string]any{
+		"hooks": map[string]any{
+			"PreCompact": []any{
+				map[string]any{
+					"matcher": "*",
+					"hooks": []any{
+						map[string]any{"type": "command", "command": "/usr/local/bin/klyne precompact"},
+					},
+				},
+			},
+		},
+	}
+	body, _ := json.MarshalIndent(existing, "", "  ")
+	if err := os.WriteFile(settings, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// First install MUST recognize the existing entry and report
+	// "already-installed", leaving the file byte-identical.
+	report, err := InstallPreCompactHook("/usr/local/bin/klyne")
+	if err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	if report.Action != InstallActionAlreadyInstalled {
+		t.Fatalf("Action=%q, want %q (pre-existing nested entry must be recognized)", report.Action, InstallActionAlreadyInstalled)
+	}
+	after, _ := os.ReadFile(settings)
+	if string(body) != string(after) {
+		t.Fatalf("file changed when it should be byte-identical:\nbefore:\n%s\nafter:\n%s", body, after)
 	}
 }
 

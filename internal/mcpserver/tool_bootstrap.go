@@ -5,12 +5,21 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/klyne-ai/klyne/internal/config"
 	"github.com/klyne-ai/klyne/internal/store"
+	"github.com/klyne-ai/klyne/internal/worklog"
 )
+
+// bootstrapReflectionTriggerThreshold mirrors the default the daemon
+// used to feed into the AnthropicLM-backed synthesizer. Keeping it here
+// (a constant the bootstrap brief consults directly) is what surfaces
+// the "Reflection due" advisory in the next session without round-
+// tripping through config.
+const bootstrapReflectionTriggerThreshold = 150
 
 // Bootstrap tool
 // ==============
@@ -40,6 +49,12 @@ const (
 	bootstrapGlobalMemoryPreview = 3
 )
 
+// bootstrapWorklogLimit caps how many cross-AI worklog entries the
+// bootstrap brief surfaces. Five is enough to convey "what was the
+// other CLI doing in this project recently" without crowding out the
+// rest of the brief. The recap source already orders newest-first.
+const bootstrapWorklogLimit = 5
+
 // BootstrapInput is the JSON-Schema input for the bootstrap MCP tool.
 // All fields optional; sensible defaults make the tool callable with
 // `{}`.
@@ -63,14 +78,17 @@ type BootstrapHealthSummary struct {
 
 // BootstrapOutput is the structured payload returned by HandleBootstrap.
 type BootstrapOutput struct {
-	CWD                    string                  `json:"cwd" jsonschema:"the working directory that was searched"`
-	Sessions               []CandidateRow          `json:"sessions" jsonschema:"up to 3 most-recent sessions in this project, newest first"`
-	ProjectMemories        []store.Decision        `json:"project_memories" jsonschema:"up to 5 most-recent project-scoped klyne (SQLite) memories"`
-	GlobalMemoryCount      int                     `json:"global_memory_count" jsonschema:"total global klyne memory count (project_path = \"\")"`
-	GlobalMemoriesPreview  []store.Decision        `json:"global_memories_preview" jsonschema:"up to 3 most-recent global klyne (SQLite) memories"`
-	ClaudeAutoMemory       ClaudeAutoMemory        `json:"claude_auto_memory" jsonschema:"on-disk Claude auto-memory for this project (~/.claude/projects/<encoded-cwd>/memory/) — separate store, separate writer"`
-	LatestHealth           *BootstrapHealthSummary `json:"latest_health,omitempty" jsonschema:"context-health verdict for the most-recently modified session, when one exists"`
-	Markdown               string                  `json:"markdown" jsonschema:"slash-prompt-ready markdown rendering (verbatim-echo target)"`
+	CWD                   string                  `json:"cwd" jsonschema:"the working directory that was searched"`
+	Sessions              []CandidateRow          `json:"sessions" jsonschema:"up to 3 most-recent sessions in this project, newest first"`
+	ProjectMemories       []store.Decision        `json:"project_memories" jsonschema:"up to 5 most-recent project-scoped klyne (SQLite) memories"`
+	GlobalMemoryCount     int                     `json:"global_memory_count" jsonschema:"total global klyne memory count (project_path = \"\")"`
+	GlobalMemoriesPreview []store.Decision        `json:"global_memories_preview" jsonschema:"up to 3 most-recent global klyne (SQLite) memories"`
+	ClaudeAutoMemory      ClaudeAutoMemory        `json:"claude_auto_memory" jsonschema:"on-disk Claude auto-memory for this project (~/.claude/projects/<encoded-cwd>/memory/) — separate store, separate writer"`
+	LatestHealth          *BootstrapHealthSummary `json:"latest_health,omitempty" jsonschema:"context-health verdict for the most-recently modified session, when one exists"`
+	WorklogEntries        []RecapEntry            `json:"worklog_entries" jsonschema:"recent worklog entries from both Claude and Codex sessions in this project (capped, newest-first)"`
+	Reflections           []ReflectionSummary     `json:"reflections,omitempty" jsonschema:"latest synthesized weekly reflections for this project"`
+	ReflectionDue         bool                    `json:"reflection_due" jsonschema:"true when importance-sum threshold or weekly-cron trigger fires — host should suggest /klyne:reflect"`
+	Markdown              string                  `json:"markdown" jsonschema:"slash-prompt-ready markdown rendering (verbatim-echo target)"`
 }
 
 // HandleBootstrap synthesises the Day-1 briefing. Read-only across all
@@ -95,6 +113,11 @@ func HandleBootstrap(ctx context.Context, _ *mcp.CallToolRequest, in BootstrapIn
 		cwd = w
 	}
 
+	// Preserve the literal cwd for the user-facing echo, but use the
+	// canonical project root for every downstream query so worktrees of
+	// the same repo share project-scoped memory/decisions/worklog.
+	projectPath := CanonicalProjectPath(cwd)
+
 	out := BootstrapOutput{CWD: cwd}
 
 	// --- sessions: take up to 3, newest-first -----------------------
@@ -102,13 +125,16 @@ func HandleBootstrap(ctx context.Context, _ *mcp.CallToolRequest, in BootstrapIn
 	if err != nil {
 		return nil, BootstrapOutput{}, fmt.Errorf("list sessions: %w", err)
 	}
-	limit := bootstrapRecentSessions
-	if len(cands) < limit {
-		limit = len(cands)
-	}
-	rows := make([]CandidateRow, 0, limit)
-	for i := 0; i < limit; i++ {
+	rows := make([]CandidateRow, 0, bootstrapRecentSessions)
+	for i := 0; i < len(cands) && len(rows) < bootstrapRecentSessions; i++ {
 		c := cands[i]
+		if c.IsActive {
+			// Skip the calling session (and any sibling terminals the
+			// user just typed into). Bootstrap exists to surface context
+			// the agent doesn't already have; an active session by
+			// definition is one the user is in RIGHT NOW.
+			continue
+		}
 		rows = append(rows, CandidateRow{
 			SessionID: c.SessionID,
 			Preview:   c.Preview,
@@ -132,7 +158,7 @@ func HandleBootstrap(ctx context.Context, _ *mcp.CallToolRequest, in BootstrapIn
 	defer db.Close()
 
 	projectMemories, err := store.ListDecisions(ctx, db, store.DecisionFilter{
-		ProjectPath: cwd,
+		ProjectPath: projectPath,
 		Limit:       bootstrapProjectMemoryLimit,
 	})
 	if err != nil {
@@ -159,6 +185,49 @@ func HandleBootstrap(ctx context.Context, _ *mcp.CallToolRequest, in BootstrapIn
 		preview = len(globals)
 	}
 	out.GlobalMemoriesPreview = globals[:preview]
+
+	// --- worklog entries (cross-AI) --------------------------------
+	// Surface recent visible entries from both Claude and Codex so the
+	// next session inherits the work-log context for this project. We
+	// reuse the existing recap_project handler against the SAME db
+	// handle — opening a second one would race against this defer
+	// db.Close() above. Failures are silent: missing worklog entries
+	// are not a bootstrap failure (fresh project or pre-migration DB).
+	const bootstrapReflectionLimit = 2
+	recapOut, recapErr := handleRecapProject(ctx, db, RecapProjectArgs{
+		ProjectPath: projectPath,
+		SinceDays:   7,
+	})
+	if recapErr == nil && recapOut != nil {
+		entries := recapOut.Entries
+		if len(entries) > bootstrapWorklogLimit {
+			entries = entries[:bootstrapWorklogLimit]
+		}
+		out.WorklogEntries = entries
+	}
+	// Reflections use a wider lookback because they're synthesized weekly.
+	reflOut, reflErr := handleRecapProject(ctx, db, RecapProjectArgs{
+		ProjectPath: projectPath,
+		SinceDays:   14,
+	})
+	if reflErr == nil && reflOut != nil {
+		refls := reflOut.Reflections
+		if len(refls) > bootstrapReflectionLimit {
+			refls = refls[:bootstrapReflectionLimit]
+		}
+		out.Reflections = refls
+	}
+
+	// Reflection-due advisory: surface a one-line hint when the project
+	// has accumulated enough activity to warrant a synthesis. The
+	// daemon no longer runs synthesis itself — the user fires it via
+	// the /klyne:reflect slash command — so the only nudge they get
+	// is this brief line in the next bootstrap brief.
+	fire1, _ := worklog.ShouldFireReflection(ctx, db, projectPath, bootstrapReflectionTriggerThreshold)
+	fire2, _ := worklog.WeeklyCronShouldFire(ctx, db, projectPath, time.Now())
+	if fire1 || fire2 {
+		out.ReflectionDue = true
+	}
 
 	// --- Claude auto-memory (on-disk, written by Claude itself) ----
 	// This is a SECOND memory system distinct from klyne's SQLite
@@ -216,6 +285,15 @@ func formatBootstrapAsMarkdown(out BootstrapOutput) string {
 	fmt.Fprintf(&b, "# klyne bootstrap\n\n")
 	fmt.Fprintf(&b, "Project: `%s`\n\n", out.CWD)
 
+	// --- reflection-due advisory ------------------------------------
+	// Only rendered when the importance-sum threshold or the Sunday-
+	// evening cron has fired. The hint points the user at the slash
+	// command that triggers synthesis inside their own session — the
+	// daemon never calls an LM.
+	if out.ReflectionDue {
+		b.WriteString("> **Reflection due** — run `/klyne:reflect` to synthesize the latest entries.\n\n")
+	}
+
 	// --- sessions ---------------------------------------------------
 	b.WriteString("## Recent sessions\n\n")
 	if len(out.Sessions) == 0 {
@@ -268,6 +346,44 @@ func formatBootstrapAsMarkdown(out BootstrapOutput) string {
 	}
 	b.WriteString(RenderClaudeAutoMemoryAsMarkdown(out.ClaudeAutoMemory))
 
+	// --- weekly reflections (cross-AI synthesis) -------------------
+	b.WriteString("## Weekly reflections\n\n")
+	if len(out.Reflections) == 0 {
+		b.WriteString("_(none)_\n\n")
+	} else {
+		for _, r := range out.Reflections {
+			ago := humanAgo(r.TS)
+			fmt.Fprintf(&b, "### %s (%s)\n", r.Title, ago)
+			// Body is markdown bullets already; render verbatim.
+			fmt.Fprintf(&b, "%s\n", strings.TrimRight(r.BodyMD, "\n"))
+			if r.EvidenceCount > 0 {
+				fmt.Fprintf(&b, "_evidence: %d entries_\n\n", r.EvidenceCount)
+			} else {
+				b.WriteString("\n")
+			}
+		}
+	}
+
+	// --- worklog entries (cross-AI) --------------------------------
+	// Renders the cross-AI handoff payload: a flat list of recent
+	// visible worklog entries from BOTH Claude and Codex in this
+	// project. Empty case uses `_(none)_` to keep the output shape
+	// stable for the empty-project test.
+	b.WriteString("## Recent worklog entries (cross-AI)\n\n")
+	if len(out.WorklogEntries) == 0 {
+		b.WriteString("_(none)_\n\n")
+	} else {
+		for _, e := range out.WorklogEntries {
+			title := e.RecapTopic
+			if title == "" {
+				title = "(no topic)"
+			}
+			fmt.Fprintf(&b, "- [%s] %s (%s) — importance %d\n",
+				e.CLI, title, humanAgo(e.TS), e.Importance)
+		}
+		b.WriteString("\n")
+	}
+
 	// --- latest health (only when populated) -----------------------
 	if out.LatestHealth != nil {
 		b.WriteString("## Current session health\n\n")
@@ -278,4 +394,22 @@ func formatBootstrapAsMarkdown(out BootstrapOutput) string {
 	}
 
 	return b.String()
+}
+
+// humanAgo renders a coarse "time-since" label suitable for the
+// worklog list ("just now" / "5m ago" / "3h ago" / "2d ago"). It is
+// intentionally lossy — exact timestamps are already on the structured
+// entry, this rendering exists so the agent's narrative reads naturally.
+func humanAgo(t time.Time) string {
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+	}
 }

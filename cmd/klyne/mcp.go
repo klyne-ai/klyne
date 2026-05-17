@@ -184,17 +184,13 @@ func runMcpInstall(cmd *cobra.Command, platformFlag string) error {
 		fmt.Fprintf(cmd.OutOrStdout(), "slash commands: %s — %d files in %s\n",
 			slashReport.Action, slashReport.Files, slashReport.Dir)
 
-		// Unpack agent-driven Skills under ~/.claude/skills/. Slash
-		// commands are user-typed (/klyne:health); skills are Claude-
-		// invoked when their description matches the situation — e.g.
-		// klyne-health fires when an advisory mentions context fill,
-		// after a /compact, or before loading a large file.
-		skillsReport, err := mcpserver.InstallSkills()
-		if err != nil {
-			return fmt.Errorf("install skills: %w", err)
-		}
-		fmt.Fprintf(cmd.OutOrStdout(), "skills: %s — %d files (%d skills) in %s\n",
-			skillsReport.Action, skillsReport.Files, len(skillsReport.Skills), skillsReport.Dir)
+		// Agent-driven Skills (~/.claude/skills/klyne-*) intentionally
+		// NOT installed. They duplicated the static slash commands
+		// installed above — same name, same handler, but shown as
+		// `/klyne-<name>` in the slash UI alongside `/klyne:<name>`.
+		// The static slash commands are the single user-facing surface;
+		// the AI still gets auto-activation via the underlying
+		// mcp__klyne__* tool registrations.
 
 		fmt.Fprintln(cmd.OutOrStdout(),
 			"klyne: advisor active — you'll see inline warnings in Claude Code when sessions drift, accelerate, or approach your 5-hour cap.")
