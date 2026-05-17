@@ -7,6 +7,7 @@
   import { removeSession } from '$lib/stores.svelte.js';
   import { kfmt, relAgo, dayLabel, costFmt } from '$lib/format.js';
   import type { Session, Message } from '$lib/types.js';
+  import { isConversationalMessage } from '$lib/messageFilters.js';
   import CliBadge from '$lib/ui/CliBadge.svelte';
   import StatusBadge from '$lib/ui/StatusBadge.svelte';
 
@@ -72,10 +73,10 @@
     return g;
   });
 
-  function isPreviewable(m: Message): boolean {
-    if (m.role === 'tool' || m.role === 'system') return false;
-    return (m.content?.trim().length ?? 0) > 0;
-  }
+  // Preview filter aliases the global rule (see $lib/messageFilters.ts):
+  // only user + assistant prose ever surfaces, so the project index
+  // shares the same source of truth as Terminal / cockpit / sessions.
+  const isPreviewable = isConversationalMessage;
 
   function compactPreview(text: string): string {
     return text.replace(/\s+/g, ' ').trim().slice(0, 140);

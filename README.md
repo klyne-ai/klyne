@@ -178,6 +178,8 @@ flowchart LR
 | `remember` / `recall` | Chat-first memory: project/global notes and runbooks that survive across fresh sessions |
 | `update_memory` / `delete_memory` / `list_memories` | Edit, delete, and browse memories by id — full CRUD parity with derived display names |
 | `code_review_context` | Optional `.code-review-graph/` enrichment when present |
+| `propose_runbooks` / `accept_runbook` / `dismiss_runbook` | Pattern → runbook detector: surfaces Bash command sequences that recur across sessions and saves the user-accepted ones as memories |
+| `status_snapshot` | Portable Markdown summary of klyne's installation state (sessions, /compact events, projects, memories) for the last N hours |
 
 ### Slash commands — user-triggered via `/` in Claude Code
 
@@ -190,6 +192,8 @@ flowchart LR
 | `/klyne:handoff` | `generate_handoff` |
 | `/klyne:precompact` | `get_pre_compact_context` |
 | `/klyne:tokens` | `get_token_timeline` |
+| `/klyne:runbooks` | `propose_runbooks` — see recurring shell workflows klyne thinks belong in memory |
+| `/klyne:status` | `status_snapshot` — installation-state snapshot for the current project |
 
 Installed as Markdown slash commands under `~/.claude/commands/klyne/*.md` — each command file calls the matching MCP tool above. Single surface, no `(MCP)` duplicates in the slash menu.
 
@@ -201,6 +205,8 @@ Skills are the auto-invoked counterpart to slash commands. The agent reads each 
 |---|---|---|
 | `klyne-bootstrap` | `bootstrap` | Session start in a project the agent has no prior context for, the user asks "what was I working on?" / "where did I leave off?", or before the agent's first major action in an unfamiliar codebase |
 | `klyne-health` | `get_context_health` | An advisory mentions context fill / drift / acceleration / 5-hour window, the user asks about token usage, after a `/compact` event, or before loading a >5K-token file |
+| `klyne-runbooks` | `propose_runbooks` | The user asks "what should I save as a runbook?", expresses fatigue at a repeated task, or the agent is about to re-run a multi-step shell sequence it has seen before |
+| `klyne-status` | `status_snapshot` | The user asks for a weekly review, install status, or "what has klyne been doing this week?" |
 
 Installed under `~/.claude/skills/<skill>/SKILL.md` by `klyne mcp install`. More skills land here as klyne grows; the install is idempotent and overwrites on upgrade. See [`docs/features/mcp-and-slash-commands.md`](docs/features/mcp-and-slash-commands.md#skills--the-agent-invoked-path) for the full rationale.
 
@@ -227,6 +233,8 @@ Installed under `~/.claude/skills/<skill>/SKILL.md` by `klyne mcp install`. More
 | `klyne roast [--max=N]` | Templated, deterministic zingers. No AI calls. |
 | `klyne subagents [--since=24h]` | Roll up Task-tool subagent spend back to the parent session. |
 | `klyne decisions add\|list\|search\|delete` | Project-scoped immutable decisions log. |
+| `klyne runbooks [list\|accept\|dismiss]` | Surface recurring Bash sequences as candidate runbooks; accept saves to memory, dismiss never re-proposes. |
+| `klyne status [--all-projects] [--since=Xh] [--write=PATH]` | Portable Markdown installation snapshot for the current project (or every project on this machine). |
 | Memory via chat | Say *"klyne remember this …"* / *"refer klyne …"* in Claude Code. Uses MCP `remember` / `recall`; no dedicated CLI alias yet. |
 | `klyne statusline [--format=short\|mini\|plain]` | One-line summary for Claude Code's `statusLine` settings hook. |
 | `klyne otel emit [--out=PATH] [--since=24h]` | Emit OTel-shaped JSON spans, one per assistant turn. File-only — never pushes off-host. |
@@ -418,8 +426,9 @@ The `mcp install` command auto-detects host configs:
 | Claude Code | `~/.claude.json` | `mcpServers.klyne` |
 | Codex CLI | `~/.codex/config.toml` | `[mcp_servers.klyne]` |
 | Claude Code (advisor hook) | `~/.claude/settings.json` | `hooks.UserPromptSubmit[].klyne` (idempotent merge) |
-| Claude Code (slash commands) | `~/.claude/commands/klyne/*.md` | Six Markdown files |
-| Claude Code (skills) | `~/.claude/skills/<skill>/SKILL.md` | One bundle per agent-invoked skill (`klyne-bootstrap`, `klyne-health`) |
+| Claude Code (session-end hook) | `~/.claude/settings.json` | `hooks.Stop[].klyne` — writes deterministic session-end summaries to klyne's local store |
+| Claude Code (slash commands) | `~/.claude/commands/klyne/*.md` | Markdown files for every `/klyne:*` surface |
+| Claude Code (skills) | `~/.claude/skills/<skill>/SKILL.md` | One bundle per agent-invoked skill (`klyne-bootstrap`, `klyne-health`, `klyne-runbooks`, `klyne-status`) |
 
 Pass `--platform claude` or `--platform codex` to scope the install.
 

@@ -6,7 +6,8 @@
   import { removeSession } from '$lib/stores.svelte.js';
   import { subscribe } from '$lib/sse.js';
   import { kfmt, relAgo, costFmt } from '$lib/format.js';
-  import type { Session, Message, RestoreResponse, ToolCall, ToolResult } from '$lib/types.js';
+  import type { Session, Message, RestoreResponse } from '$lib/types.js';
+  import { isConversationalMessage } from '$lib/messageFilters.js';
   import CliBadge from '$lib/ui/CliBadge.svelte';
   import StatusBadge from '$lib/ui/StatusBadge.svelte';
   import TokenSavings from '$lib/components/TokenSavings.svelte';
@@ -40,10 +41,8 @@
     }
   }
 
-  // Issue 4: page-level toggle for tool/system messages, default OFF
-  let showTools = $state(false);
-
-  // Issue 3: per-message expanded state keyed by message id
+  // Per-message expanded state keyed by message id (long bodies are
+  // collapsed by default; click to expand).
   let expandedIds = $state<Set<string>>(new Set());
 
   function toggleExpanded(id: string): void {
@@ -68,26 +67,12 @@
     session ? (session.project_path.split('/').filter(Boolean).pop() ?? session.project_path) : ''
   );
 
-  // A "pure tool-call" assistant message has no text content but carries
-  // tool_use blocks (Claude Code records each tool invocation as an assistant
-  // message containing only tool_use content blocks). Hide these by default
-  // alongside role=tool and empty system rows.
-  function isPureToolCallAssistant(m: Message): boolean {
-    return m.role === 'assistant'
-      && !m.content?.trim()
-      && (m.tool_calls?.length ?? 0) > 0;
-  }
-  function isHiddenByDefault(m: Message): boolean {
-    return m.role === 'tool'
-      || (m.role === 'system' && !m.content?.trim())
-      || isPureToolCallAssistant(m);
-  }
-
-  const hiddenCount = $derived(messages.filter(isHiddenByDefault).length);
-
-  const visibleMessages = $derived(
-    showTools ? messages : messages.filter((m) => !isHiddenByDefault(m))
-  );
+  // Global rule (see $lib/messageFilters.ts): never show tool /
+  // system / pure-tool-call rows. The session detail view is purely
+  // user + assistant prose; the action-trace is implicit in the
+  // assistant's narration and the Files / Tokens tabs.
+  const visibleMessages = $derived(messages.filter(isConversationalMessage));
+  const hiddenCount = $derived(messages.length - visibleMessages.length);
 
   function newestPageInDisplayOrder(page: Message[]): Message[] {
     return [...page].reverse();
@@ -95,22 +80,6 @@
 
   function sortMessagesForDisplay(page: Message[]): Message[] {
     return [...page].sort((a, b) => (a.ts - b.ts) || a.id.localeCompare(b.id));
-  }
-
-  // Helper to safely parse JSON for tool inputs
-  function safeParseJson(raw: string): string {
-    try {
-      return JSON.stringify(JSON.parse(raw), null, 2);
-    } catch {
-      return raw;
-    }
-  }
-
-  // Truncate tool output to first N lines
-  function truncateLines(text: string, maxLines: number): string {
-    const lines = text.split('\n');
-    if (lines.length <= maxLines) return text;
-    return lines.slice(0, maxLines).join('\n') + '\n…';
   }
 
   async function loadData(id: string): Promise<void> {
@@ -299,20 +268,16 @@
       </div>
     {/if}
 
-    <!-- Issue 4: Tool calls toggle bar -->
-    <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 10px; padding: 8px 12px; background: var(--ad-bg-2); border: 1px solid var(--ad-border-soft); border-radius: var(--ad-r-sm);">
-      <label style="display: inline-flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; user-select: none;">
-        <input type="checkbox" bind:checked={showTools} style="cursor: pointer;" />
-        <span>Show tool calls + system messages</span>
-      </label>
-      <span class="ad-mono ad-faint" style="font-size: 11px;">
-        {#if !showTools && hiddenCount > 0}
-          {hiddenCount} hidden
-        {:else if showTools}
-          Showing all
-        {/if}
-      </span>
-    </div>
+    <!-- Hidden-count footer: tool / system / pure-tool-call rows are
+         filtered globally; the count is shown so the user knows the
+         transcript on disk is larger than what's rendered. -->
+    {#if hiddenCount > 0}
+      <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px; padding: 6px 12px; background: var(--ad-bg-2); border: 1px solid var(--ad-border-soft); border-radius: var(--ad-r-sm);">
+        <span class="ad-mono ad-faint" style="font-size: 11px;">
+          {hiddenCount} tool / system row{hiddenCount === 1 ? '' : 's'} hidden — only user + assistant prose is shown
+        </span>
+      </div>
+    {/if}
 
     <!-- Messages -->
     <div class="ad-stack" style="gap: 8px;">
@@ -320,110 +285,34 @@
         {@const cliLabel = session?.cli === 'codex' ? 'codex' : 'claude'}
         {@const cliColor = session?.cli === 'codex' ? 'var(--ad-codex)' : 'var(--ad-claude)'}
         {@const palette = m.role === 'user'
-          ? { lab: 'you',     color: 'var(--ad-fg)',      bg: 'var(--ad-panel)' }
-          : m.role === 'assistant'
-          ? { lab: cliLabel,  color: cliColor,            bg: 'var(--ad-panel)' }
-          : m.role === 'tool'
-          ? { lab: m.tool_calls?.[0]?.name ?? m.tool_results?.[0]?.id ?? 'tool', color: 'var(--ad-fg-2)', bg: 'var(--ad-bg-2)' }
-          : m.role === 'system'
-          ? { lab: 'system',  color: 'var(--ad-compact)', bg: 'var(--ad-compact-bg)' }
-          : { lab: m.role,    color: 'var(--ad-muted)',   bg: 'var(--ad-panel)' }}
+          ? { lab: 'you',    color: 'var(--ad-fg)', bg: 'var(--ad-panel)' }
+          : { lab: cliLabel, color: cliColor,       bg: 'var(--ad-panel)' }}
         {@const isExpanded = expandedIds.has(m.id)}
+        {@const long = isLong(m.content)}
 
         <div class="ad-card" style="background: {palette.bg}; padding: 0;">
           <!-- Row header -->
           <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid var(--ad-border-soft);">
             <div style="display: flex; align-items: center; gap: 8px;">
               <span style="font-size: 11px; font-weight: 600; color: {palette.color}; font-family: var(--ad-font-mono); text-transform: lowercase;">{palette.lab}</span>
-              {#if m.role === 'tool'}
-                {#if (m.tool_calls?.length ?? 0) > 0}
-                  <span class="ad-badge ad-badge--ghost" style="font-size: 10px;">tool_use</span>
-                {:else if (m.tool_results?.length ?? 0) > 0}
-                  <span class="ad-badge ad-badge--ghost" style="font-size: 10px;">tool_result</span>
-                {/if}
-              {/if}
             </div>
             <span class="ad-mono ad-faint" style="font-size: 11px;">
               {m.tokens_out ? `↓ ${m.tokens_out} · ` : ''}{relAgo(Date.now() - m.ts)}
             </span>
           </div>
 
-          <!-- Row body -->
+          <!-- Row body — visibleMessages guarantees role is user|assistant
+               with non-empty content, so the body is always plain prose. -->
           <div style="padding: 10px 12px;">
-
-            {#if m.role === 'assistant' && (m.tool_calls?.length ?? 0) > 0}
-              <!-- Assistant message that includes tool_use blocks. Render the
-                   tool calls. If there is also text content alongside the
-                   tool_use blocks, render the text below. (When the page
-                   toggle is OFF and content is empty, this row is filtered
-                   out by isPureToolCallAssistant; this branch only fires when
-                   the user opted in to seeing tool calls.) -->
-              {#each m.tool_calls ?? [] as tc (tc.id)}
-                <div style="margin-bottom: {(m.tool_calls?.length ?? 0) > 1 ? '10px' : '0'};">
-                  <div style="font-size: 11px; font-weight: 600; color: var(--ad-fg-2); font-family: var(--ad-font-mono); margin-bottom: 6px;">
-                    → {tc.name}
-                  </div>
-                  <pre style="margin: 0; font-family: var(--ad-font-mono); font-size: 11px; color: var(--ad-fg); white-space: pre-wrap; line-height: 1.5; background: var(--ad-bg); padding: 8px 10px; border-radius: var(--ad-r-sm); border: 1px solid var(--ad-border-soft);">{safeParseJson(tc.input || '{}')}</pre>
-                </div>
-              {/each}
-              {#if m.content?.trim()}
-                <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--ad-border-soft); font-size: 13px; line-height: 1.55; white-space: pre-wrap;">{m.content}</div>
-              {/if}
-
-            {:else if m.role === 'tool' && (m.tool_calls?.length ?? 0) > 0}
-              <!-- Issue 2: tool_use — show tool name + pretty-printed input -->
-              {#each m.tool_calls ?? [] as tc (tc.id)}
-                <div style="margin-bottom: {(m.tool_calls?.length ?? 0) > 1 ? '10px' : '0'};">
-                  <div style="font-size: 11px; font-weight: 600; color: var(--ad-fg-2); font-family: var(--ad-font-mono); margin-bottom: 6px;">
-                    → {tc.name}
-                  </div>
-                  <pre style="margin: 0; font-family: var(--ad-font-mono); font-size: 11px; color: var(--ad-fg); white-space: pre-wrap; line-height: 1.5; background: var(--ad-bg); padding: 8px 10px; border-radius: var(--ad-r-sm); border: 1px solid var(--ad-border-soft);">{safeParseJson(tc.input || '{}')}</pre>
-                </div>
-              {/each}
-
-            {:else if m.role === 'tool' && (m.tool_results?.length ?? 0) > 0}
-              <!-- Issue 2: tool_result — show output truncated to 5 lines -->
-              {#each m.tool_results ?? [] as tr (tr.id)}
-                <div style="margin-bottom: {(m.tool_results?.length ?? 0) > 1 ? '10px' : '0'};">
-                  {#if tr.is_error}
-                    <div style="font-size: 11px; font-weight: 600; color: var(--ad-error); font-family: var(--ad-font-mono); margin-bottom: 6px;">
-                      ✕ error
-                    </div>
-                  {/if}
-                  <pre style="margin: 0; font-family: var(--ad-font-mono); font-size: 11px; color: {tr.is_error ? 'var(--ad-error)' : 'var(--ad-fg)'}; white-space: pre-wrap; line-height: 1.5; background: var(--ad-bg); padding: 8px 10px; border-radius: var(--ad-r-sm); border: 1px solid var(--ad-border-soft);">{truncateLines(tr.output || '', 5)}</pre>
-                </div>
-              {/each}
-
-            {:else if m.role === 'tool' && m.content}
-              <!-- Fallback: tool message with plain content -->
-              <div
-                style="font-family: var(--ad-font-mono); font-size: 12px; color: var(--ad-fg); white-space: pre-wrap; line-height: 1.55; {!isExpanded && isLong(m.content) ? 'max-height: 7.75em; overflow: hidden; -webkit-mask-image: linear-gradient(to bottom, black 60%, transparent 100%); mask-image: linear-gradient(to bottom, black 60%, transparent 100%);' : ''}"
-              >{m.content}</div>
-              {#if isLong(m.content)}
-                <button
-                  class="ad-btn ad-btn--ghost ad-btn--sm"
-                  onclick={() => toggleExpanded(m.id)}
-                  style="margin-top: 6px; font-size: 11px; color: var(--ad-muted);"
-                >{isExpanded ? 'Show less' : 'Show more'}</button>
-              {/if}
-
-            {:else if m.content}
-              <!-- Issue 3: regular message content with show-more truncation -->
-              {@const long = isLong(m.content)}
-              <div
-                style="font-family: {m.role === 'system' ? 'var(--ad-font-mono)' : 'var(--ad-font-ui)'}; font-size: {m.role === 'system' ? '12px' : '13px'}; color: {m.role === 'system' ? 'var(--ad-compact)' : 'var(--ad-fg)'}; white-space: pre-wrap; line-height: 1.55; {long && !isExpanded ? 'max-height: 7.75em; overflow: hidden; -webkit-mask-image: linear-gradient(to bottom, black 60%, transparent 100%); mask-image: linear-gradient(to bottom, black 60%, transparent 100%);' : ''}"
-              >{m.content}</div>
-              {#if long}
-                <button
-                  class="ad-btn ad-btn--ghost ad-btn--sm"
-                  onclick={() => toggleExpanded(m.id)}
-                  style="margin-top: 6px; font-size: 11px; color: var(--ad-muted);"
-                >{isExpanded ? 'Show less' : 'Show more'}</button>
-              {/if}
-
-            {:else}
-              <!-- Empty content: render nothing (empty tool/system messages are filtered out when showTools=false) -->
-              <span style="font-size: 12px; color: var(--ad-faint); font-style: italic;">—</span>
+            <div
+              style="font-family: var(--ad-font-ui); font-size: 13px; color: var(--ad-fg); white-space: pre-wrap; line-height: 1.55; {long && !isExpanded ? 'max-height: 7.75em; overflow: hidden; -webkit-mask-image: linear-gradient(to bottom, black 60%, transparent 100%); mask-image: linear-gradient(to bottom, black 60%, transparent 100%);' : ''}"
+            >{m.content}</div>
+            {#if long}
+              <button
+                class="ad-btn ad-btn--ghost ad-btn--sm"
+                onclick={() => toggleExpanded(m.id)}
+                style="margin-top: 6px; font-size: 11px; color: var(--ad-muted);"
+              >{isExpanded ? 'Show less' : 'Show more'}</button>
             {/if}
 
           </div>

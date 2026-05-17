@@ -209,6 +209,60 @@ Fire this tool when the user says "klyne list memories" / "klyne what do you rem
 Returns two labelled lists (project_memories and global_memories), newest first. Each row carries a derived ` + "`name`" + ` field (first non-empty line of text, ≤ 60 chars, with ` + "`…`" + ` when truncated) so you can present them Serena-style as a named list. Scope: "all" (default — both lists) | "project" | "global". Optional tag filter applies to both lists. Default limit 50 per scope, max 500.`,
 	}, HandleListMemories)
 
+	// --- runbook proposer -------------------------------------------
+	// Pattern → runbook detector. Walks recent sessions for the
+	// resolved project, indexes Bash command sequences that recur
+	// across multiple sessions, and offers them as candidate
+	// memories. The user (or the AI on their behalf) accepts a
+	// candidate via accept_runbook or rejects it via dismiss_runbook.
+	mcp.AddTool(srv, &mcp.Tool{
+		Name: "propose_runbooks",
+		Description: `Surface recurring Bash command sequences in this project as candidate runbooks.
+
+Walks the user's recent Claude/Codex sessions in this project, extracts the shell commands run between consecutive user prompts, normalises them (paths, UUIDs, IPs, timestamps replaced with placeholders), and indexes N-grams that recur across MULTIPLE sessions.
+
+Returns ranked candidates with their occurrence count, distinct-session count, last-seen timestamp, suggested name, and a stable signature. Each candidate is a workflow the user has done at least 3 times across 2+ sessions — strong evidence they'll do it again.
+
+Fire this tool when:
+  * The user asks "what should I save as a runbook?" / "what runbooks do you recommend?"
+  * You notice the user is about to manually re-run a sequence you've seen them run before.
+  * The user wants to clean up repetitive shell workflows.
+
+Returns a markdown rendering plus structured rows. The agent should show the markdown verbatim, then ask before accepting any candidate.`,
+	}, HandleProposeRunbooks)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name: "accept_runbook",
+		Description: `Persist a proposed runbook candidate as a project-scoped memory.
+
+Fire this tool ONLY after the user confirms a specific candidate from propose_runbooks. Inputs: the candidate's signature (required), optional name override, optional pre-rendered body, optional extra tags. Writes a row to the same store as remember/record_decision, tagged with "runbook" and "klyne-proposed" so recall can find it again.
+
+Returns the new memory_id. Confirm back to the user.`,
+	}, HandleAcceptRunbook)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name: "dismiss_runbook",
+		Description: `Mark a proposed runbook signature so propose_runbooks never re-surfaces it.
+
+Fire when the user explicitly says "no" / "not useful" / "stop suggesting this" to a candidate. Default scope is the current project; pass scope="global" to suppress everywhere. Optional reason is stored for later inspection.`,
+	}, HandleDismissRunbook)
+
+	// --- status snapshot --------------------------------------------
+	// Portable Markdown summary of klyne's installation state for
+	// the current project (or every project on this machine). Useful
+	// for weekly review, teammate handoff, or "is the daemon
+	// actually doing its job?" introspection.
+	mcp.AddTool(srv, &mcp.Tool{
+		Name: "status_snapshot",
+		Description: `Generate a portable Markdown snapshot of klyne's installation state.
+
+Aggregates the last N hours (default 168 = 7 days) of klyne data: sessions ingested, total messages and tokens, top projects by token volume, recent sessions, /compact events, memory counts, and stop-hook session summaries. Different from generate_handoff (per-task) and bootstrap (Day-1 brief) — this is the per-installation "weekly review" view.
+
+Fire when the user asks "what has klyne been doing?", "what's the state of my klyne install?", "how much have I spent this week?", "give me a klyne weekly review", or similar. Pass all_projects=true for a machine-wide view; otherwise the snapshot scopes to the current project's cwd.
+
+Returns structured rollups plus a markdown body suitable for verbatim display.`,
+	}, HandleStatusSnapshot)
+
 	// Live MCP prompts. Each prompt parallels one of the tools above
 	// and surfaces in Claude Code's slash menu as /klyne:<name>
 	// (older Claude Code builds used /mcp__klyne__<name>; that form
@@ -284,6 +338,24 @@ Returns two labelled lists (project_memories and global_memories), newest first.
 		Title:       "Token usage timeline",
 		Description: "Show the per-turn token usage for the active session: cumulative input tokens, % of model context window, ASCII sparkline. Defaults to the last 5 hours.",
 	}, PromptTokenTimelineHandler)
+
+	srv.AddPrompt(&mcp.Prompt{
+		Name:        "runbooks",
+		Title:       "Runbook candidates",
+		Description: "Show recurring Bash command sequences in this project as candidate runbooks. Reads JSONL transcripts and indexes N-grams that repeat across sessions.",
+		Arguments: []*mcp.PromptArgument{
+			{Name: "cwd", Description: "Override the working directory used to resolve the project."},
+		},
+	}, PromptRunbooksHandler)
+
+	srv.AddPrompt(&mcp.Prompt{
+		Name:        "status",
+		Title:       "klyne status snapshot",
+		Description: "Portable Markdown snapshot of klyne's installation state for the current project — sessions ingested, compact events, advisors fired, plan-window burn, memory counts. Suitable for weekly review or pasting into a teammate's chat.",
+		Arguments: []*mcp.PromptArgument{
+			{Name: "cwd", Description: "Override the working directory used to resolve the project."},
+		},
+	}, PromptStatusHandler)
 
 	return srv
 }

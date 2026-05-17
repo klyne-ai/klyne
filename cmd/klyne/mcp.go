@@ -161,6 +161,17 @@ func runMcpInstall(cmd *cobra.Command, platformFlag string) error {
 		fmt.Fprintf(cmd.OutOrStdout(), "compact-shield: %s — %s\n",
 			csReport.Action, csReport.Path)
 
+		// Stop hook for the deterministic session-end summary. Same
+		// settings.json file, separate event ("Stop" vs
+		// "UserPromptSubmit"). Idempotent — re-running only rewrites
+		// when the entry would actually change.
+		stopReport, err := mcpserver.InstallStopHook(exe)
+		if err != nil {
+			return fmt.Errorf("install stop hook: %w", err)
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "session-end hook: %s — %s\n",
+			stopReport.Action, stopReport.Path)
+
 		// Unpack the bundled markdown slash commands under
 		// ~/.claude/commands/klyne/. Claude Code surfaces these as
 		// /klyne:<name> in every project on the host — independent

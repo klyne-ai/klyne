@@ -78,6 +78,42 @@ func PromptBootstrapHandler(ctx context.Context, req *mcp.GetPromptRequest) (*mc
 	), nil
 }
 
+// PromptRunbooksHandler implements /klyne:runbooks. Live: invokes
+// propose_runbooks for the current project and returns the
+// ranked-candidates Markdown for the agent to display verbatim.
+func PromptRunbooksHandler(ctx context.Context, req *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+	cwd, err := promptCWD(req)
+	if err != nil {
+		return nil, err
+	}
+	_, out, err := HandleProposeRunbooks(ctx, nil, ProposeRunbooksInput{CWD: cwd})
+	if err != nil {
+		return nil, err
+	}
+	return userPromptResult(
+		"Proposed runbook candidates for the current project",
+		out.Markdown,
+	), nil
+}
+
+// PromptStatusHandler implements /klyne:status. Live: invokes the
+// system-state snapshot aggregator and returns Markdown with a
+// portable summary of klyne's installation state.
+func PromptStatusHandler(ctx context.Context, req *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+	cwd, err := promptCWD(req)
+	if err != nil {
+		return nil, err
+	}
+	_, out, err := HandleStatusSnapshot(ctx, nil, StatusSnapshotInput{CWD: cwd})
+	if err != nil {
+		return nil, err
+	}
+	return userPromptResult(
+		"klyne installation-state snapshot",
+		out.Markdown,
+	), nil
+}
+
 // PromptHealthHandler implements the /klyne:health prompt.
 // Live: invokes get_context_health and returns its verdict + bloat
 // scorecard as Markdown. Equivalent to the AI calling the tool but

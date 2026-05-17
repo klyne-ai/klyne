@@ -41,6 +41,8 @@ func TestMigrationsApply(t *testing.T) {
 		"007_zero_costs.sql",            // backfill cost=0 for flat-subscription DTO compat
 		"008_message_branch_cwd.sql",    // git_branch + cwd on messages for cockpit splits
 		"009_decisions.sql",             // decisions log (project-scoped persistent notes)
+		"010_runbook_dismissals.sql",    // user dismissals for proposed recurring runbooks
+		"011_stop_summaries.sql",        // deterministic Stop-hook session summaries
 		"012_shield_snapshots.sql",      // compact-shield snapshot log
 		"013_safety_snapshots.sql",      // pre-action safety-net snapshot log
 		"014_work_spans.sql",            // cost-per-outcome work-span attribution

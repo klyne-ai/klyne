@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Message } from '$lib/types.js';
+  import { isConversationalMessage } from '$lib/messageFilters.js';
   import MessageBubble from './MessageBubble.svelte';
-  import ToolCallBlock from './ToolCallBlock.svelte';
 
   interface Props {
     messages: Message[];
@@ -19,28 +19,18 @@
     onRetry
   }: Props = $props();
 
-  /**
-   * Build a lookup map from tool_call id → ToolResult from the tool messages
-   * so ToolCallBlock can receive the matched result.
-   */
-  const toolResultMap = $derived(
-    (() => {
-      const map = new Map<string, { output: string; is_error: boolean; id: string }>();
-      for (const msg of messages) {
-        for (const tr of msg.tool_results ?? []) {
-          map.set(tr.id, tr);
-        }
-      }
-      return map;
-    })()
-  );
+  // Global rule (see $lib/messageFilters.ts): only user + assistant
+  // prose ever renders. Tool / system / pure-tool-call assistant
+  // rows are dropped before the bubble loop, and ToolCallBlock is
+  // no longer used anywhere here.
+  const visibleMessages = $derived(messages.filter(isConversationalMessage));
 
   let containerEl: HTMLElement | undefined = $state(undefined);
 
   // Scroll to bottom when new messages arrive
   $effect(() => {
-    // Depend on messages.length to re-run on append
-    void messages.length;
+    // Depend on visibleMessages.length to re-run on append
+    void visibleMessages.length;
     if (containerEl) {
       containerEl.scrollTop = containerEl.scrollHeight;
     }
@@ -79,8 +69,9 @@
       {/if}
     </div>
 
-  {:else if messages.length === 0}
-    <!-- Empty state -->
+  {:else if visibleMessages.length === 0}
+    <!-- Empty state — either no messages at all, or only tool / system
+         / pure-tool-call rows that the global filter drops. -->
     <div
       data-testid="session-view-empty"
       class="flex flex-col items-center justify-center flex-1 gap-2 py-12 text-center"
@@ -89,24 +80,8 @@
     </div>
 
   {:else}
-    {#each messages as msg (msg.id)}
-      {#if msg.role === 'tool'}
-        <!-- Tool result messages: rendered inside ToolCallBlock, skip standalone bubble -->
-        <!-- They show up via the toolResultMap lookup from assistant messages -->
-      {:else}
-        <!-- Render the message bubble -->
-        <MessageBubble message={msg} highlight={highlightMessageId === msg.id} />
-
-        <!-- If the message has tool calls, render each one with its matched result -->
-        {#each msg.tool_calls ?? [] as tc (tc.id)}
-          <div class="max-w-3xl w-full {msg.role === 'user' ? 'self-end' : 'self-start'}">
-            <ToolCallBlock
-              toolCall={tc}
-              toolResult={toolResultMap.get(tc.id)}
-            />
-          </div>
-        {/each}
-      {/if}
+    {#each visibleMessages as msg (msg.id)}
+      <MessageBubble message={msg} highlight={highlightMessageId === msg.id} />
     {/each}
   {/if}
 </div>

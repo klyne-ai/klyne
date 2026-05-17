@@ -349,22 +349,28 @@
   {#if inspectorOpen && selectedProject}
     <Inspector project={selectedProject} onClose={() => (inspectorOpen = false)} />
   {/if}
-</div>
 
-{#if focusProject}
-  <div class="overlay" onclick={() => (focusPath = null)} role="presentation">
-    <div class="search-modal" style="width: min(960px, 92vw); height: 78vh; display: flex; flex-direction: column;" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()} role="dialog" tabindex="-1" aria-modal="true" aria-label="Focused terminal">
-      <Terminal
-        project={focusProject}
-        pinned={pinnedPaths.includes(focusProject.project_path)}
-        onTogglePin={() => (focusPath = null)}
-        onFocus={() => {}}
-        onInfo={(sid) => (advisorSession = sid)}
-      />
+  <!--
+    Overlays live INSIDE .work so they remain visible when .work is the
+    active fullscreen element. The Fullscreen API paints only the
+    fullscreen element and its descendants; anything mounted as a
+    sibling of .work disappears the moment requestFullscreen() resolves.
+  -->
+  {#if focusProject}
+    <div class="overlay" onclick={() => (focusPath = null)} role="presentation">
+      <div class="search-modal" style="width: min(960px, 92vw); height: 78vh; display: flex; flex-direction: column;" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()} role="dialog" tabindex="-1" aria-modal="true" aria-label="Focused terminal">
+        <Terminal
+          project={focusProject}
+          pinned={pinnedPaths.includes(focusProject.project_path)}
+          onTogglePin={() => (focusPath = null)}
+          onFocus={() => {}}
+          onInfo={(sid) => (advisorSession = sid)}
+        />
+      </div>
     </div>
-  </div>
-{/if}
+  {/if}
 
-{#if advisorSession}
-  <AdvisorModal sessionId={advisorSession} onClose={() => (advisorSession = null)} />
-{/if}
+  {#if advisorSession}
+    <AdvisorModal sessionId={advisorSession} onClose={() => (advisorSession = null)} />
+  {/if}
+</div>

@@ -21,6 +21,7 @@
   import { relAgo, kfmt } from '$lib/format.js';
   import { renderMarkdown } from '$lib/markdown.js';
   import type { CockpitThread, Message, MsgNew, CLI } from '$lib/types.js';
+  import { isConversationalMessage } from '$lib/messageFilters.js';
   import CliBadge from '$lib/ui/CliBadge.svelte';
   import AdvisorModal from '$lib/components/AdvisorModal.svelte';
 
@@ -114,14 +115,10 @@
       : 0
   );
 
-  /** Filter: skip tool/system messages and assistant turns that are pure
-   *  tool_use with no prose — they make terrible previews. */
-  function isPreviewable(m: Message): boolean {
-    if (m.role === 'tool' || m.role === 'system') return false;
-    const hasText = (m.content?.trim().length ?? 0) > 0;
-    if (m.role === 'assistant' && !hasText) return false;
-    return hasText;
-  }
+  // Preview filter aliases the global rule (see $lib/messageFilters.ts):
+  // only user + assistant prose is ever shown, so previews share the
+  // same source of truth.
+  const isPreviewable = isConversationalMessage;
 
   async function loadTile(thread: CockpitThread): Promise<void> {
     const key = tileKey(thread);
