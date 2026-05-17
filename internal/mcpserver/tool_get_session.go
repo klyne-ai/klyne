@@ -37,7 +37,13 @@ type GetSessionInput struct {
 	Before int64 `json:"before,omitempty" jsonschema:"epoch-ms cursor; only messages with ts < before are returned"`
 	// Since is an epoch-ms lower bound; only messages with ts >= since
 	// are returned. 0 means "no lower bound".
-	Since int64 `json:"since,omitempty" jsonschema:"epoch-ms lower bound; only messages with ts >= since are returned"`
+	//
+	// NOTE: applied client-side AFTER the store query has paged. If you
+	// combine Since with a small Limit, the returned page may be
+	// underfull because Limit caps the rows fetched BEFORE this filter.
+	// Over-fetch (or page via Before) when you need a guaranteed
+	// minimum count.
+	Since int64 `json:"since,omitempty" jsonschema:"epoch-ms lower bound (ts >= since); applied client-side after Limit, so combining Since with a small Limit may underfill the page — over-fetch or use Before instead when count matters"`
 	// Order is "asc" (default — oldest first) or "desc" (newest first).
 	Order string `json:"order,omitempty" jsonschema:"asc (default) | desc"`
 }

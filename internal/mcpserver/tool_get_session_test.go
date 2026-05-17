@@ -83,3 +83,51 @@ func TestHandleGetSession_LimitClampedToMax(t *testing.T) {
 		t.Errorf("Limit = %d, want clamp to %d", out.Limit, getSessionMaxLimit)
 	}
 }
+
+func TestHandleGetSession_SinceFilter(t *testing.T) {
+	withFakeHome(t)
+	db := withBootstrapDB(t)
+	ctx := context.Background()
+
+	sess := &connectors.Session{
+		ID:          "sess-since",
+		CLI:         connectors.CLIClaude,
+		ProjectPath: "/tmp/proj",
+		StartedAt:   1000,
+		LastMsgAt:   3000,
+		Status:      connectors.SessionStatusActive,
+	}
+	if err := store.UpsertSession(ctx, db, sess); err != nil {
+		t.Fatalf("upsert session: %v", err)
+	}
+	for i, ts := range []int64{1000, 2000, 3000} {
+		m := &connectors.Message{
+			ID:        string(rune('a' + i)),
+			SessionID: "sess-since",
+			Role:      connectors.Role("user"),
+			Content:   string(rune('a' + i)),
+			Ts:        ts,
+		}
+		if err := store.InsertMessage(ctx, db, m); err != nil {
+			t.Fatalf("insert msg %d: %v", i, err)
+		}
+	}
+
+	// Since=2000 should drop the ts=1000 message.
+	_, out, err := HandleGetSession(context.Background(), nil, GetSessionInput{
+		SessionID: "sess-since",
+		Limit:     10,
+		Since:     2000,
+	})
+	if err != nil {
+		t.Fatalf("HandleGetSession: %v", err)
+	}
+	if len(out.Messages) != 2 {
+		t.Fatalf("Messages len = %d, want 2 (Since filter should drop ts=1000)", len(out.Messages))
+	}
+	for _, m := range out.Messages {
+		if m.Ts < 2000 {
+			t.Errorf("Since filter leaked a message with Ts=%d", m.Ts)
+		}
+	}
+}
