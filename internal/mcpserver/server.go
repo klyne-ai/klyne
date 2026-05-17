@@ -91,6 +91,15 @@ Returns: session metadata + the messages slice. Use this instead of falling back
 	}, HandleGetSession)
 
 	mcp.AddTool(srv, &mcp.Tool{
+		Name: "summarize_session",
+		Description: `Synthesise one session's timeline from klyne's own data — stop-hook summaries, the rolling session summary, linked decisions, and files touched — into one Markdown block.
+
+Use after bootstrap when the user asks "what was I working on in session X?" / "summarize session Y for me". Pure SQLite synthesis — no AI call, no JSONL re-scan. Prefer this over generate_handoff for known-session-id digestion (generate_handoff is for the CURRENT session and re-scans the JSONL).
+
+Inputs: session_id (required). Returns: structured fields plus a verbatim-renderable markdown body covering session metadata, stop-summary timeline, files touched, linked decisions, and the latest rolling summary.`,
+	}, HandleSummarizeSession)
+
+	mcp.AddTool(srv, &mcp.Tool{
 		Name: "get_pre_compact_context",
 		Description: `Recover the messages immediately preceding the last /compact event in a session.
 
