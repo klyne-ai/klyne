@@ -78,6 +78,7 @@ type BootstrapOutput struct {
 	ClaudeAutoMemory      ClaudeAutoMemory        `json:"claude_auto_memory" jsonschema:"on-disk Claude auto-memory for this project (~/.claude/projects/<encoded-cwd>/memory/) — separate store, separate writer"`
 	LatestHealth          *BootstrapHealthSummary `json:"latest_health,omitempty" jsonschema:"context-health verdict for the most-recently modified session, when one exists"`
 	WorklogEntries        []RecapEntry            `json:"worklog_entries" jsonschema:"recent worklog entries from both Claude and Codex sessions in this project (capped, newest-first)"`
+	Reflections           []ReflectionSummary     `json:"reflections,omitempty" jsonschema:"latest synthesized weekly reflections for this project"`
 	Markdown              string                  `json:"markdown" jsonschema:"slash-prompt-ready markdown rendering (verbatim-echo target)"`
 }
 
@@ -175,6 +176,7 @@ func HandleBootstrap(ctx context.Context, _ *mcp.CallToolRequest, in BootstrapIn
 	// handle — opening a second one would race against this defer
 	// db.Close() above. Failures are silent: missing worklog entries
 	// are not a bootstrap failure (fresh project or pre-migration DB).
+	const bootstrapReflectionLimit = 2
 	recapOut, recapErr := handleRecapProject(ctx, db, RecapProjectArgs{
 		ProjectPath: cwd,
 		SinceDays:   7,
@@ -185,6 +187,18 @@ func HandleBootstrap(ctx context.Context, _ *mcp.CallToolRequest, in BootstrapIn
 			entries = entries[:bootstrapWorklogLimit]
 		}
 		out.WorklogEntries = entries
+	}
+	// Reflections use a wider lookback because they're synthesized weekly.
+	reflOut, reflErr := handleRecapProject(ctx, db, RecapProjectArgs{
+		ProjectPath: cwd,
+		SinceDays:   14,
+	})
+	if reflErr == nil && reflOut != nil {
+		refls := reflOut.Reflections
+		if len(refls) > bootstrapReflectionLimit {
+			refls = refls[:bootstrapReflectionLimit]
+		}
+		out.Reflections = refls
 	}
 
 	// --- Claude auto-memory (on-disk, written by Claude itself) ----
@@ -294,6 +308,24 @@ func formatBootstrapAsMarkdown(out BootstrapOutput) string {
 		fmt.Fprintf(&b, "_Source: `%s`_\n\n", out.ClaudeAutoMemory.Dir)
 	}
 	b.WriteString(RenderClaudeAutoMemoryAsMarkdown(out.ClaudeAutoMemory))
+
+	// --- weekly reflections (cross-AI synthesis) -------------------
+	b.WriteString("## Weekly reflections\n\n")
+	if len(out.Reflections) == 0 {
+		b.WriteString("_(none)_\n\n")
+	} else {
+		for _, r := range out.Reflections {
+			ago := humanAgo(r.TS)
+			fmt.Fprintf(&b, "### %s (%s)\n", r.Title, ago)
+			// Body is markdown bullets already; render verbatim.
+			fmt.Fprintf(&b, "%s\n", strings.TrimRight(r.BodyMD, "\n"))
+			if r.EvidenceCount > 0 {
+				fmt.Fprintf(&b, "_evidence: %d entries_\n\n", r.EvidenceCount)
+			} else {
+				b.WriteString("\n")
+			}
+		}
+	}
 
 	// --- worklog entries (cross-AI) --------------------------------
 	// Renders the cross-AI handoff payload: a flat list of recent

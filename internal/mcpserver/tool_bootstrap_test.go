@@ -73,7 +73,7 @@ func TestHandleBootstrap_EmptyProject(t *testing.T) {
 	}
 	// Every section must show `_(none)_` so the agent renders a
 	// stable shape even on a brand-new project.
-	for _, section := range []string{"Recent sessions", "klyne memory (SQLite store)", "Claude auto-memory", "Recent worklog entries (cross-AI)"} {
+	for _, section := range []string{"Recent sessions", "klyne memory (SQLite store)", "Claude auto-memory", "Weekly reflections", "Recent worklog entries (cross-AI)"} {
 		if !strings.Contains(out.Markdown, "## "+section) {
 			t.Errorf("Markdown missing section %q\n%s", section, out.Markdown)
 		}
@@ -279,5 +279,23 @@ func TestBootstrapInjectsWorklogEntriesFromAllCLIs(t *testing.T) {
 	// Markdown must include the new section.
 	if !strings.Contains(out.Markdown, "## Recent worklog entries (cross-AI)") {
 		t.Errorf("markdown missing worklog section\n%s", out.Markdown)
+	}
+}
+
+func TestBootstrapInjectsLatestReflection(t *testing.T) {
+	withFakeHome(t)
+	db := withBootstrapDB(t)
+	seedStopSummary(t, db, "/p", "claude", "s1", true, 8, time.Now())
+	seedReflection(t, db, "/p", []string{"s1"}, "Weekly: shipped auth refactor")
+
+	out := mustBootstrap(t, BootstrapInput{CWD: "/p"})
+	if len(out.Reflections) == 0 {
+		t.Errorf("bootstrap must surface latest reflection")
+	}
+	if !strings.Contains(out.Markdown, "## Weekly reflections") {
+		t.Errorf("markdown missing weekly reflections section\n%s", out.Markdown)
+	}
+	if !strings.Contains(out.Markdown, "shipped auth refactor") {
+		t.Errorf("markdown should include reflection title:\n%s", out.Markdown)
 	}
 }
