@@ -120,13 +120,16 @@ func HandleBootstrap(ctx context.Context, _ *mcp.CallToolRequest, in BootstrapIn
 	if err != nil {
 		return nil, BootstrapOutput{}, fmt.Errorf("list sessions: %w", err)
 	}
-	limit := bootstrapRecentSessions
-	if len(cands) < limit {
-		limit = len(cands)
-	}
-	rows := make([]CandidateRow, 0, limit)
-	for i := 0; i < limit; i++ {
+	rows := make([]CandidateRow, 0, bootstrapRecentSessions)
+	for i := 0; i < len(cands) && len(rows) < bootstrapRecentSessions; i++ {
 		c := cands[i]
+		if c.IsActive {
+			// Skip the calling session (and any sibling terminals the
+			// user just typed into). Bootstrap exists to surface context
+			// the agent doesn't already have; an active session by
+			// definition is one the user is in RIGHT NOW.
+			continue
+		}
 		rows = append(rows, CandidateRow{
 			SessionID: c.SessionID,
 			Preview:   c.Preview,

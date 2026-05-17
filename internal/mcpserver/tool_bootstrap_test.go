@@ -128,16 +128,22 @@ func TestHandleBootstrap_FiveSessionsReturnsThreeMostRecent(t *testing.T) {
 	cwd := "/tmp/proj-five-sessions"
 	dir := filepath.Join(home, ".claude", "projects", EncodeCWD(cwd))
 
-	// Write 5 sessions. Mtimes get staggered by writeJSONL (it sets
-	// "now") so to make ordering deterministic we touch each one in
-	// turn after writing — later writes get later mtimes.
+	// Write 5 sessions, all backdated outside the 30s active window so
+	// the bootstrap active-session filter doesn't strip them. Mtimes
+	// are staggered (older index = older mtime) so newest-first ordering
+	// is deterministic.
+	base := time.Now().Add(-2 * time.Hour)
 	for i := 1; i <= 5; i++ {
 		name := fmt.Sprintf("session-%d.jsonl", i)
 		line := fmt.Sprintf(
 			`{"type":"user","sessionId":"sess-%d","timestamp":"2026-04-0%dT10:00:00.000Z","message":{"role":"user","content":[{"type":"text","text":"task %d"}]}}`,
 			i, i, i,
 		)
-		writeJSONL(t, dir, name, line)
+		p := writeJSONL(t, dir, name, line)
+		mtime := base.Add(time.Duration(i) * time.Minute)
+		if err := os.Chtimes(p, mtime, mtime); err != nil {
+			t.Fatalf("chtimes %s: %v", name, err)
+		}
 	}
 
 	out := mustBootstrap(t, BootstrapInput{CWD: cwd})
@@ -327,5 +333,55 @@ func TestBootstrapInjectsLatestReflection(t *testing.T) {
 	}
 	if !strings.Contains(out.Markdown, "shipped auth refactor") {
 		t.Errorf("markdown should include reflection title:\n%s", out.Markdown)
+	}
+}
+
+// TestBootstrapExcludesActiveSessionsFromRecentList verifies that
+// HandleBootstrap filters out IsActive==true sessions from out.Sessions.
+// The calling session is almost always the freshest (mod-time within the
+// 30s active window), so it would otherwise dominate the "Recent
+// sessions" list — redundant information, since the agent is already in
+// that session. Bootstrap exists to surface context the agent doesn't
+// already have.
+func TestBootstrapExcludesActiveSessionsFromRecentList(t *testing.T) {
+	home := withFakeHome(t)
+	_ = withBootstrapDB(t)
+
+	cwd := filepath.Join(home, "proj")
+	dir := filepath.Join(home, ".claude", "projects", EncodeCWD(cwd))
+
+	// Active session: writeJSONL stamps mtime = now, so this lands
+	// inside the 30s active window.
+	activeLine := `{"type":"user","sessionId":"active-now","timestamp":"2026-05-17T10:00:00.000Z","message":{"role":"user","content":[{"type":"text","text":"active work"}]}}`
+	writeJSONL(t, dir, "active-now.jsonl", activeLine)
+
+	// Inactive session: write it, then backdate the mtime so it falls
+	// well outside the 30s active window.
+	inactiveLine := `{"type":"user","sessionId":"old-session","timestamp":"2026-05-17T08:00:00.000Z","message":{"role":"user","content":[{"type":"text","text":"older work"}]}}`
+	oldPath := writeJSONL(t, dir, "old-session.jsonl", inactiveLine)
+	twoHoursAgo := time.Now().Add(-2 * time.Hour)
+	if err := os.Chtimes(oldPath, twoHoursAgo, twoHoursAgo); err != nil {
+		t.Fatalf("chtimes old-session: %v", err)
+	}
+
+	out := mustBootstrap(t, BootstrapInput{CWD: cwd})
+
+	if len(out.Sessions) != 1 {
+		t.Fatalf("Sessions len = %d, want 1 (active session must be filtered)", len(out.Sessions))
+	}
+	got := out.Sessions[0]
+	if got.SessionID != "old-session" {
+		t.Errorf("Sessions[0].SessionID = %q, want old-session", got.SessionID)
+	}
+	if got.IsActive {
+		t.Errorf("Sessions[0].IsActive = true, want false (no row should be active after fix)")
+	}
+	for _, s := range out.Sessions {
+		if s.SessionID == "active-now" {
+			t.Errorf("active-now leaked into Sessions list: %+v", s)
+		}
+		if s.IsActive {
+			t.Errorf("active row in Sessions: %+v", s)
+		}
 	}
 }
