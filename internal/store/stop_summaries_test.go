@@ -154,3 +154,122 @@ func TestListStopSummariesForSession_EmptyIDRejected(t *testing.T) {
 		t.Fatal("expected error for empty session_id, got nil")
 	}
 }
+
+func TestUpsertStopSummaryWithWorklog(t *testing.T) {
+	ctx := context.Background()
+	db := openStopSummariesDB(t)
+
+	row := store.StopSummary{
+		SessionID:   "sess-w",
+		Ts:          7000,
+		ProjectPath: "/proj/w",
+		CLI:         "claude",
+		Summary:     "", // memory-layer rows leave summary empty
+		LastUser:    "ship it",
+		LastBash:    "git commit -m x",
+		Files:       []string{"src/auth.go", "src/db.go"},
+	}
+	cols := store.WorklogColumns{
+		RecapVisible:     1,
+		RecapTopic:       "auth",
+		AIDraftedSummary: "drafted body",
+		DraftState:       "proposed",
+		Signature:        "sig-abc",
+		Importance:       8,
+		LastAccessedAt:   1234567890,
+	}
+
+	t.Run("round_trip", func(t *testing.T) {
+		if err := store.UpsertStopSummaryWithWorklog(ctx, db, row, cols); err != nil {
+			t.Fatalf("upsert: %v", err)
+		}
+
+		const q = `SELECT recap_visible, recap_topic, ai_drafted_summary, draft_state,
+			signature, importance, last_accessed_at, files_json
+			FROM stop_summaries WHERE session_id = ? AND ts = ?`
+		var (
+			recapVisible    int
+			recapTopic      string
+			aiDraftedSum    string
+			draftState      string
+			signature       string
+			importance      int
+			lastAccessedAt  int64
+			filesJSON       string
+		)
+		if err := db.Read().QueryRowContext(ctx, q, row.SessionID, row.Ts).Scan(
+			&recapVisible, &recapTopic, &aiDraftedSum, &draftState,
+			&signature, &importance, &lastAccessedAt, &filesJSON,
+		); err != nil {
+			t.Fatalf("query: %v", err)
+		}
+		if recapVisible != 1 {
+			t.Errorf("recap_visible = %d, want 1", recapVisible)
+		}
+		if recapTopic != "auth" {
+			t.Errorf("recap_topic = %q, want auth", recapTopic)
+		}
+		if aiDraftedSum != "drafted body" {
+			t.Errorf("ai_drafted_summary = %q, want drafted body", aiDraftedSum)
+		}
+		if draftState != "proposed" {
+			t.Errorf("draft_state = %q, want proposed", draftState)
+		}
+		if signature != "sig-abc" {
+			t.Errorf("signature = %q, want sig-abc", signature)
+		}
+		if importance != 8 {
+			t.Errorf("importance = %d, want 8", importance)
+		}
+		if lastAccessedAt != 1234567890 {
+			t.Errorf("last_accessed_at = %d, want 1234567890", lastAccessedAt)
+		}
+		if filesJSON != `["src/auth.go","src/db.go"]` {
+			t.Errorf("files_json = %q, want JSON-encoded list", filesJSON)
+		}
+	})
+
+	t.Run("on_conflict_updates_worklog_columns", func(t *testing.T) {
+		updated := store.WorklogColumns{
+			RecapVisible:     0,
+			RecapTopic:       "auth-revised",
+			AIDraftedSummary: "second pass",
+			DraftState:       "accepted",
+			Signature:        "sig-xyz",
+			Importance:       9,
+			LastAccessedAt:   9999999999,
+		}
+		if err := store.UpsertStopSummaryWithWorklog(ctx, db, row, updated); err != nil {
+			t.Fatalf("re-upsert: %v", err)
+		}
+
+		const q = `SELECT recap_visible, recap_topic, ai_drafted_summary, draft_state,
+			signature, importance, last_accessed_at, COUNT(*) OVER ()
+			FROM stop_summaries WHERE session_id = ? AND ts = ?`
+		var (
+			recapVisible    int
+			recapTopic      string
+			aiDraftedSum    string
+			draftState      string
+			signature       string
+			importance      int
+			lastAccessedAt  int64
+			rowCount        int
+		)
+		if err := db.Read().QueryRowContext(ctx, q, row.SessionID, row.Ts).Scan(
+			&recapVisible, &recapTopic, &aiDraftedSum, &draftState,
+			&signature, &importance, &lastAccessedAt, &rowCount,
+		); err != nil {
+			t.Fatalf("query: %v", err)
+		}
+		if rowCount != 1 {
+			t.Errorf("rowCount = %d, want 1 (ON CONFLICT should not insert a 2nd row)", rowCount)
+		}
+		if recapVisible != 0 || recapTopic != "auth-revised" || aiDraftedSum != "second pass" ||
+			draftState != "accepted" || signature != "sig-xyz" || importance != 9 ||
+			lastAccessedAt != 9999999999 {
+			t.Errorf("ON CONFLICT did not update worklog columns: visible=%d topic=%q ai=%q draft=%q sig=%q imp=%d last=%d",
+				recapVisible, recapTopic, aiDraftedSum, draftState, signature, importance, lastAccessedAt)
+		}
+	})
+}
