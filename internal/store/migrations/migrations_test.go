@@ -46,6 +46,7 @@ func TestMigrationsApply(t *testing.T) {
 		"012_shield_snapshots.sql",      // compact-shield snapshot log
 		"013_safety_snapshots.sql",      // pre-action safety-net snapshot log
 		"014_work_spans.sql",            // cost-per-outcome work-span attribution
+		"015_worklog_columns.sql",       // worklog memory-layer columns on stop_summaries
 	}
 	if len(sqlFiles) != len(expected) {
 		t.Fatalf("expected %d migrations, found %d: %v", len(expected), len(sqlFiles), sqlFiles)
@@ -56,33 +57,8 @@ func TestMigrationsApply(t *testing.T) {
 		}
 	}
 
-	dbPath := filepath.Join(t.TempDir(), "klyne-migrations-test.db")
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-
-	// Apply documented per-connection PRAGMAs so FTS5 + foreign_keys
-	// behave the same as production (spec §5).
-	for _, p := range PerConnectionPRAGMAs {
-		if _, err := db.Exec(p); err != nil {
-			t.Fatalf("pragma %q: %v", p, err)
-		}
-	}
-
-	for _, name := range expected {
-		name := name
-		t.Run(name, func(t *testing.T) {
-			body, err := FS.ReadFile(name)
-			if err != nil {
-				t.Fatalf("read %s: %v", name, err)
-			}
-			if _, err := db.Exec(string(body)); err != nil {
-				t.Fatalf("apply %s: %v", name, err)
-			}
-		})
-	}
+	db := newTestDB(t)
+	applyAll(t, db, expected)
 
 	// Sanity: every contract table the spec promises must exist after
 	// all migrations apply. This guards against a future migration that
@@ -110,4 +86,115 @@ func TestMigrationsApply(t *testing.T) {
 			t.Errorf("required table/view %q missing after migrations: %v", tbl, err)
 		}
 	}
+}
+
+// TestMigration015AddsWorklogColumns asserts that migration 015 extends
+// the stop_summaries table with the worklog memory-layer columns that
+// the writer, recap MCP tools, and weekly export all depend on.
+func TestMigration015AddsWorklogColumns(t *testing.T) {
+	t.Parallel()
+
+	db := newTestDB(t)
+	applyAll(t, db, nil)
+
+	expected := []string{
+		"recap_visible",
+		"recap_topic",
+		"ai_drafted_summary",
+		"draft_state",
+		"signature",
+		"importance",
+		"last_accessed_at",
+	}
+	have := columnSet(t, db, "stop_summaries")
+	for _, c := range expected {
+		if !have[c] {
+			t.Errorf("missing column %q on stop_summaries", c)
+		}
+	}
+}
+
+// newTestDB opens a fresh on-disk SQLite database in a temp directory
+// and applies the documented per-connection PRAGMAs (spec §5) so the
+// test environment matches production. The DB is closed on test cleanup.
+func newTestDB(t *testing.T) *sql.DB {
+	t.Helper()
+	dbPath := filepath.Join(t.TempDir(), "klyne-migrations-test.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	for _, p := range PerConnectionPRAGMAs {
+		if _, err := db.Exec(p); err != nil {
+			t.Fatalf("pragma %q: %v", p, err)
+		}
+	}
+	return db
+}
+
+// applyAll executes every embedded *.sql migration in lexicographic
+// order on db. If names is non-nil it is used as the apply order
+// (and the source of t.Run subtest names so a regression points at the
+// offending file); otherwise the embedded FS is scanned and sorted.
+func applyAll(t *testing.T, db *sql.DB, names []string) {
+	t.Helper()
+	if names == nil {
+		entries, err := FS.ReadDir(".")
+		if err != nil {
+			t.Fatalf("read embedded migrations dir: %v", err)
+		}
+		for _, e := range entries {
+			if e.IsDir() || filepath.Ext(e.Name()) != ".sql" {
+				continue
+			}
+			names = append(names, e.Name())
+		}
+		// FS.ReadDir already returns entries in lexicographic order.
+	}
+	for _, name := range names {
+		name := name
+		t.Run(name, func(t *testing.T) {
+			body, err := FS.ReadFile(name)
+			if err != nil {
+				t.Fatalf("read %s: %v", name, err)
+			}
+			if _, err := db.Exec(string(body)); err != nil {
+				t.Fatalf("apply %s: %v", name, err)
+			}
+		})
+	}
+}
+
+// columnSet runs PRAGMA table_info(table) and returns the set of
+// column names on that table. Returns an empty map if the table
+// does not exist.
+func columnSet(t *testing.T, db *sql.DB, table string) map[string]bool {
+	t.Helper()
+	rows, err := db.Query("PRAGMA table_info(" + table + ")")
+	if err != nil {
+		t.Fatalf("pragma table_info(%s): %v", table, err)
+	}
+	defer rows.Close() //nolint:errcheck
+
+	out := map[string]bool{}
+	for rows.Next() {
+		var (
+			cid       int
+			name      string
+			ctype     string
+			notnull   int
+			dfltValue sql.NullString
+			pk        int
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dfltValue, &pk); err != nil {
+			t.Fatalf("scan table_info row: %v", err)
+		}
+		out[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("table_info rows error: %v", err)
+	}
+	return out
 }
