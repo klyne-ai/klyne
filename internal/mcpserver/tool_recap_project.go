@@ -45,11 +45,26 @@ type RecapEntry struct {
 	ProjectPath      string    `json:"project_path,omitempty"`
 }
 
+// ReflectionSummary is a recap-tool-facing projection of a stored
+// reflection. EvidenceCount surfaces the citation invariant (T15) so an
+// AI consumer can see at a glance how grounded a synthesis is.
+type ReflectionSummary struct {
+	ID            string    `json:"id"`
+	ProjectPath   string    `json:"project_path,omitempty"`
+	Title         string    `json:"title"`
+	BodyMD        string    `json:"body_md"`
+	Tier          int       `json:"tier"`
+	TS            time.Time `json:"ts"`
+	EvidenceCount int       `json:"evidence_count"`
+}
+
 // RecapProjectOutput is the pure result of a per-project recap query.
 // Entries are ordered newest-first and capped server-side to keep the
-// MCP payload bounded.
+// MCP payload bounded. Reflections (T16) ride alongside so the
+// synthesis tier is visible in the same call.
 type RecapProjectOutput struct {
-	Entries []RecapEntry `json:"entries"`
+	Entries     []RecapEntry        `json:"entries"`
+	Reflections []ReflectionSummary `json:"reflections,omitempty"`
 }
 
 // handleRecapProject is the pure business-logic form — tests drive
@@ -84,7 +99,26 @@ func handleRecapProject(ctx context.Context, db *store.DB, args RecapProjectArgs
 		e.TS = time.UnixMilli(tsMs)
 		out.Entries = append(out.Entries, e)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// Reflections (T15/T16): surface up to 5 most recent for the project.
+	refls, refErr := store.ListReflectionsForProject(ctx, db, args.ProjectPath, 5)
+	if refErr == nil {
+		for _, r := range refls {
+			if time.UnixMilli(r.TS).Before(time.UnixMilli(cutoff)) {
+				continue
+			}
+			out.Reflections = append(out.Reflections, ReflectionSummary{
+				ID: r.ID, ProjectPath: r.ProjectPath, Title: r.Title, BodyMD: r.BodyMD,
+				Tier: r.Tier, TS: time.UnixMilli(r.TS),
+				EvidenceCount: len(r.EvidenceEntryIDs) + len(r.EvidenceReflectionIDs),
+			})
+		}
+	}
+	// Silent on refErr: older databases lacking migration 016 must not break
+	// recap_project. The error is non-fatal by design.
+	return out, nil
 }
 
 // HandleRecapProject is the MCP-facing handler. It opens the DB, runs

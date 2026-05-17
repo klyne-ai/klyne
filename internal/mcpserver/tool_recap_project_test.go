@@ -67,3 +67,41 @@ func TestRecapProjectFiltersOtherProjects(t *testing.T) {
 		t.Errorf("expected only s1, got %+v", out.Entries)
 	}
 }
+
+func seedReflection(t *testing.T, db *store.DB, project string, entryIDs []string, title string) {
+	t.Helper()
+	refl := store.Reflection{
+		ID:               "ref-" + project + "-" + title,
+		TS:               time.Now().UnixMilli(),
+		ProjectPath:      project,
+		Tier:             2,
+		Title:            title,
+		BodyMD:           "- " + title + " (evidence: " + entryIDs[0] + ")\n",
+		EvidenceEntryIDs: entryIDs,
+		Importance:       7,
+		SummarySource:    "ai",
+		State:            "proposed",
+		StateChangedAt:   time.Now().UnixMilli(),
+	}
+	if err := store.InsertReflection(context.Background(), db, refl); err != nil {
+		t.Fatalf("seed reflection: %v", err)
+	}
+}
+
+func TestRecapProjectIncludesReflections(t *testing.T) {
+	withFakeHome(t)
+	db := withBootstrapDB(t)
+	seedStopSummary(t, db, "/p", "claude", "s1", true, 8, time.Now())
+	seedReflection(t, db, "/p", []string{"s1"}, "Weekly: shipped auth refactor")
+
+	out, err := handleRecapProject(context.Background(), db, RecapProjectArgs{ProjectPath: "/p", SinceDays: 7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Reflections) != 1 {
+		t.Errorf("expected 1 reflection, got %d", len(out.Reflections))
+	}
+	if len(out.Reflections) > 0 && out.Reflections[0].EvidenceCount != 1 {
+		t.Errorf("expected EvidenceCount=1, got %d", out.Reflections[0].EvidenceCount)
+	}
+}

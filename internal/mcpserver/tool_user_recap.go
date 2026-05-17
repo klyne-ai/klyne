@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -32,10 +33,11 @@ type UserRecapInput struct {
 // preference, not a filter — the agent can ignore whichever map it
 // doesn't need). TopEntries is capped server-side to bound payload.
 type UserRecapOutput struct {
-	TotalEntries int            `json:"total_entries"`
-	ByCLI        map[string]int `json:"by_cli"`
-	ByProject    map[string]int `json:"by_project"`
-	TopEntries   []RecapEntry   `json:"top_entries"`
+	TotalEntries int                 `json:"total_entries"`
+	ByCLI        map[string]int      `json:"by_cli"`
+	ByProject    map[string]int      `json:"by_project"`
+	TopEntries   []RecapEntry        `json:"top_entries"`
+	Reflections  []ReflectionSummary `json:"reflections,omitempty"`
 }
 
 // Server-side caps. TopEntries bounds what we return to the agent; the
@@ -83,7 +85,35 @@ func handleUserRecap(ctx context.Context, db *store.DB, args UserRecapArgs) (*Us
 			out.TopEntries = append(out.TopEntries, e)
 		}
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// Cross-project reflections (T16) — surface up to 10 most recent in the window.
+	refRows, refErr := db.Read().QueryContext(ctx,
+		`SELECT id, ts, project_path, tier, title, body_md, evidence_entry_ids_json, evidence_reflection_ids_json
+         FROM worklog_reflections
+         WHERE ts >= ?
+         ORDER BY ts DESC LIMIT 10`,
+		cutoff)
+	if refErr == nil {
+		defer refRows.Close() //nolint:errcheck
+		for refRows.Next() {
+			var r ReflectionSummary
+			var tsMs int64
+			var entryJSON, refJSON string
+			if err := refRows.Scan(&r.ID, &tsMs, &r.ProjectPath, &r.Tier, &r.Title, &r.BodyMD, &entryJSON, &refJSON); err != nil {
+				continue
+			}
+			r.TS = time.UnixMilli(tsMs)
+			var ev, rev []string
+			_ = json.Unmarshal([]byte(entryJSON), &ev)
+			_ = json.Unmarshal([]byte(refJSON), &rev)
+			r.EvidenceCount = len(ev) + len(rev)
+			out.Reflections = append(out.Reflections, r)
+		}
+	}
+	// Silent on refErr — same rationale as recap_project.
+	return out, nil
 }
 
 // HandleUserRecap is the MCP-facing handler. Opens the DB, runs the

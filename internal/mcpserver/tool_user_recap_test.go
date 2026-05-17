@@ -45,3 +45,19 @@ func TestUserRecapExcludesSuppressed(t *testing.T) {
 		t.Errorf("expected only visible (1), got %d", out.TotalEntries)
 	}
 }
+
+func TestUserRecapIncludesReflections(t *testing.T) {
+	withFakeHome(t)
+	db := withBootstrapDB(t)
+	seedStopSummary(t, db, "/p1", "claude", "s1", true, 8, time.Now())
+	seedReflection(t, db, "/p1", []string{"s1"}, "p1 reflection")
+	seedReflection(t, db, "/p2", []string{"s2"}, "p2 reflection")
+
+	out, err := handleUserRecap(context.Background(), db, UserRecapArgs{SinceDays: 7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Reflections) != 2 {
+		t.Errorf("expected 2 reflections cross-project, got %d", len(out.Reflections))
+	}
+}
