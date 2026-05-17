@@ -27,6 +27,12 @@ import (
 //
 // No AI call. No JSONL read. Pure synthesis from klyne.db.
 
+// summarizeStopSummaryLimit caps how many stop-hook rows the timeline
+// includes. Fifty covers ~a week of typical use (most projects fire
+// the Stop hook 3–10 times per day) without blowing the agent's
+// reading budget. Not user-configurable — if a longer history is
+// needed, the caller can drop to get_session or read stop_summaries
+// directly via klyne's CLI.
 const summarizeStopSummaryLimit = 50
 
 // SummarizeSessionInput is the JSON-Schema input for the tool.
@@ -92,6 +98,12 @@ func HandleSummarizeSession(ctx context.Context, _ *mcp.CallToolRequest, in Summ
 
 	files := dedupFilesFromStops(stops)
 
+	// Found is true when we have ANY useful data. A session-row-only
+	// response (no stops, no rolling summary, no decisions) is still
+	// considered "found" — the metadata block alone is useful when
+	// the user asks about a session that started but hasn't yet been
+	// stop-hooked or summarised. The agent will see a header-only
+	// Markdown body in that case; that's intentional.
 	out := SummarizeSessionOutput{
 		SessionID:     in.SessionID,
 		Found:         sess != nil || len(stops) > 0 || latest != nil || len(decisions) > 0,
