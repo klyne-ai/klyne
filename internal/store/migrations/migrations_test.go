@@ -47,6 +47,7 @@ func TestMigrationsApply(t *testing.T) {
 		"013_safety_snapshots.sql",      // pre-action safety-net snapshot log
 		"014_work_spans.sql",            // cost-per-outcome work-span attribution
 		"015_worklog_columns.sql",       // worklog memory-layer columns on stop_summaries
+		"016_worklog_reflections.sql",   // reflection layer (Generative Agents pattern) w/ citation invariant
 	}
 	if len(sqlFiles) != len(expected) {
 		t.Fatalf("expected %d migrations, found %d: %v", len(expected), len(sqlFiles), sqlFiles)
@@ -110,6 +111,41 @@ func TestMigration015AddsWorklogColumns(t *testing.T) {
 	for _, c := range expected {
 		if !have[c] {
 			t.Errorf("missing column %q on stop_summaries", c)
+		}
+	}
+}
+
+// TestMigration016CreatesReflectionsTable asserts that migration 016
+// creates the worklog_reflections table with the full reflection-layer
+// column set (Generative Agents pattern) including the citation-invariant
+// CHECK constraint enforced at the schema level.
+func TestMigration016CreatesReflectionsTable(t *testing.T) {
+	t.Parallel()
+
+	db := newTestDB(t)
+	applyAll(t, db, nil)
+
+	expected := []string{
+		"id",
+		"ts",
+		"project_path",
+		"tier",
+		"title",
+		"body_md",
+		"evidence_entry_ids_json",
+		"evidence_reflection_ids_json",
+		"importance",
+		"summary_source",
+		"state",
+		"state_changed_at",
+	}
+	have := columnSet(t, db, "worklog_reflections")
+	if len(have) == 0 {
+		t.Fatal("worklog_reflections table not created")
+	}
+	for _, c := range expected {
+		if !have[c] {
+			t.Errorf("missing column %q on worklog_reflections", c)
 		}
 	}
 }
