@@ -145,6 +145,9 @@ func ListStopSummariesForProject(ctx context.Context, db *DB, projectPath string
 // session_id, newest first. limit caps the result (default 10).
 // Returns an empty slice when no rows exist.
 func ListStopSummariesForSession(ctx context.Context, db *DB, sessionID string, limit int) ([]StopSummary, error) {
+	if strings.TrimSpace(sessionID) == "" {
+		return nil, errors.New("store: stop summary session_id required")
+	}
 	if limit <= 0 {
 		limit = 10
 	}

@@ -1,40 +1,35 @@
 <!--
-  Work view — replaces Dashboard + Cockpit + Projects with one screen:
+  Work view — terminal grid of currently-active sessions, with a project
+  rail on the left and an inspector on the right.
 
-    Left rail   : every project, with live dots, filter, pin star
-    Center      : 1-3 column terminal grid of pinned projects, streaming tail
-    Right panel : inspector for the currently-selected project
+  Ordering rule (deliberately boring): stable insertion order, newest
+  session at the top. Once a tile is placed it never moves while it's
+  visible. Only two events change position:
+    - a new session appears → prepends at the top
+    - a session falls past the 30-min recency window → drops out
 
-  Pin selection is persisted in localStorage. The advisor modal
-  surfaces from each terminal's ⓘ button.
+  Streaming messages NEVER re-sort the grid. With three sessions
+  streaming in parallel, recent-first ordering shuffled tiles every
+  few seconds — unreadable. The "● N live" chip in the header is the
+  finder for active work; it scrolls the latest-active tile into view
+  without changing layout.
 -->
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
   import { projectsStore } from '$lib/projects.svelte.js';
   import type { ProjectAggregate } from '$lib/projects.svelte.js';
+  import { fetchCockpitThreads } from '$lib/api.js';
+  import { subscribe } from '$lib/sse.js';
+  import type { CockpitThread, MsgNew } from '$lib/types.js';
   import ProjectRail from '$lib/ui/ProjectRail.svelte';
   import Terminal from '$lib/ui/Terminal.svelte';
   import Inspector from '$lib/ui/Inspector.svelte';
   import AdvisorModal from '$lib/components/AdvisorModal.svelte';
 
-  const LS_PINS = 'klyne.work.pins';
   const LS_COLS = 'klyne.work.cols';
   const LS_RAIL = 'klyne.work.rail';
   const LS_INSP = 'klyne.work.inspector';
 
-  function loadPins(): string[] {
-    if (typeof localStorage === 'undefined') return [];
-    try {
-      const raw = localStorage.getItem(LS_PINS);
-      if (!raw) return [];
-      const parsed: unknown = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : [];
-    } catch { return []; }
-  }
-  function savePins(p: string[]): void {
-    if (typeof localStorage === 'undefined') return;
-    localStorage.setItem(LS_PINS, JSON.stringify(p));
-  }
   function loadCols(): 1 | 2 | 3 {
     if (typeof localStorage === 'undefined') return 2;
     const v = parseInt(localStorage.getItem(LS_COLS) ?? '2', 10);
@@ -55,60 +50,94 @@
     localStorage.setItem(key, String(value));
   }
 
-  let pinnedPaths = $state<string[]>(loadPins());
   let selectedPath = $state<string>('');
   let railOpen = $state(loadBool(LS_RAIL, true));
   let inspectorOpen = $state(loadBool(LS_INSP, true));
   let cols = $state<1 | 2 | 3>(loadCols());
   let advisorSession = $state<string | null>(null);
-  let focusPath = $state<string | null>(null);
-  // fullscreen hides both rails AND the top app nav so the terminal
-  // grid fills the entire viewport. Esc exits. The previous rail
-  // and inspector visibility states are restored on exit so a user
-  // who had the inspector hidden before fullscreen does not get it
-  // re-opened on the way back.
+  let focusSessionId = $state<string | null>(null);
   let fullscreen = $state(false);
   let savedRailOpen = $state(true);
   let savedInspectorOpen = $state(true);
 
-  // Live = active within the last minute (shown as "N live" in the header).
-  // Recent = active within the last 30 minutes — these auto-appear in the
-  // grid so the user can keep an eye on parallel tasks they're switching
-  // between, not just the one terminal that's actively streaming right now.
+  // Live = within 1 min. Recent (kept visible) = within 30 min. Sessions
+  // outside the 30-min window drop out of the grid.
   const LIVE_THRESHOLD_MS = 60_000;
   const RECENT_THRESHOLD_MS = 30 * 60 * 1000;
+  const SINCE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+  // tick drives "is this session still recent" recomputation without
+  // re-fetching the server. Updated every 5s.
+  let tick = $state(Date.now());
+
+  // Session-level data for the grid. /cockpit/threads returns one row
+  // per session_id — already the shape we want here.
+  let threads = $state<Record<string, CockpitThread>>({});
+
+  // Stable insertion order for the visible grid. Newest session at
+  // index 0, oldest at the end. A session only enters this list when
+  // first seen, and only leaves when last_msg_at falls past
+  // RECENT_THRESHOLD_MS. Streaming messages never re-sort.
+  let sessionOrder = $state<string[]>([]);
 
   const projects = $derived(projectsStore.items);
-  const liveCount = $derived(projects.filter((p) => p.lastMsAgo < LIVE_THRESHOLD_MS).length);
 
-  // Auto-seed selected project from the most-recent one when none chosen.
+  // Seed selected project for the rail/inspector from the most-recent
+  // project so the inspector isn't empty on first load.
   $effect(() => {
     if (!selectedPath && projects.length > 0) {
       selectedPath = projects[0].project_path;
     }
   });
 
-  // Drop stale pins (deleted projects) once the list loads.
-  $effect(() => {
-    if (projects.length === 0) return;
-    const valid = new Set(projects.map((p) => p.project_path));
-    const next = pinnedPaths.filter((p) => valid.has(p));
-    if (next.length !== pinnedPaths.length) {
-      pinnedPaths = next;
-      savePins(next);
+  async function loadThreads(): Promise<void> {
+    try {
+      const since = Date.now() - SINCE_WINDOW_MS;
+      const resp = await fetchCockpitThreads({ since, limit: 100 });
+      const next: Record<string, CockpitThread> = {};
+      for (const t of resp.threads) next[t.session_id] = t;
+      threads = next;
+    } catch {
+      // Next periodic refresh will recover.
     }
+  }
+
+  // Maintain sessionOrder: prepend newly-seen sessions, drop ones that
+  // aged out, keep all others exactly where they were. New sessions
+  // arriving in a single fetch are sorted by last_msg_at desc among
+  // themselves so a startup burst still lands in a meaningful order.
+  $effect(() => {
+    const recent = Object.values(threads).filter(
+      (t) => tick - t.last_msg_at < RECENT_THRESHOLD_MS
+    );
+    const recentIds = new Set(recent.map((t) => t.session_id));
+    untrack(() => {
+      let next = sessionOrder.filter((id) => recentIds.has(id));
+      const fresh = recent
+        .filter((t) => !next.includes(t.session_id))
+        .sort((a, b) => b.last_msg_at - a.last_msg_at)
+        .map((t) => t.session_id);
+      next = [...fresh, ...next];
+      const changed =
+        next.length !== sessionOrder.length ||
+        next.some((id, i) => id !== sessionOrder[i]);
+      if (changed) sessionOrder = next;
+    });
   });
+
+  const visibleThreads = $derived(
+    sessionOrder
+      .map((id) => threads[id])
+      .filter((t): t is CockpitThread => t !== undefined)
+  );
+
+  const liveCount = $derived(
+    visibleThreads.filter((t) => tick - t.last_msg_at < LIVE_THRESHOLD_MS).length
+  );
 
   function selectProject(path: string): void {
     selectedPath = path;
     inspectorOpen = true;
-  }
-
-  function togglePin(path: string): void {
-    pinnedPaths = pinnedPaths.includes(path)
-      ? pinnedPaths.filter((p) => p !== path)
-      : [...pinnedPaths, path];
-    savePins(pinnedPaths);
   }
 
   function setCols(c: 1 | 2 | 3): void { cols = c; saveCols(c); }
@@ -120,18 +149,6 @@
     inspectorOpen = !inspectorOpen;
     saveBool(LS_INSP, inspectorOpen);
   }
-  // toggleFullscreen hides both rails, the top app nav, AND requests
-  // OS-level fullscreen on the .work element so the terminal grid
-  // covers the entire monitor — past the browser's tab bar and any
-  // pinned extension sidebars (e.g. Brave's vertical sidebar).
-  //
-  // We request fullscreen on .work (a div) rather than
-  // document.documentElement because the body uses
-  // background-attachment: fixed radial gradients that fail to
-  // render under <html>:fullscreen on some browsers, producing a
-  // black screen. Putting the fullscreen on a child div keeps the
-  // body's painted background intact and gives .work its own
-  // background via the :fullscreen pseudo.
   function toggleFullscreen(): void {
     if (!fullscreen) {
       savedRailOpen = railOpen;
@@ -142,11 +159,7 @@
       if (typeof document !== 'undefined') {
         const el = document.querySelector('.work') as HTMLElement | null;
         if (el?.requestFullscreen) {
-          el.requestFullscreen().catch(() => {
-            // Browser refused (no user gesture, blocked by policy,
-            // etc.). The app-level body class still gives the user
-            // a maximised layout within the browser viewport.
-          });
+          el.requestFullscreen().catch(() => { /* browser refused */ });
         }
       }
     } else {
@@ -158,11 +171,6 @@
       }
     }
   }
-
-  // Keep the local fullscreen flag in sync with the browser. When
-  // the user dismisses OS fullscreen via Esc / the browser's UI, we
-  // also restore the rails and nav to avoid a half-state where
-  // chrome is hidden but the user is back in a normal window.
   function onFullscreenChange(): void {
     if (typeof document === 'undefined') return;
     if (!document.fullscreenElement && fullscreen) {
@@ -172,10 +180,6 @@
     }
   }
 
-  // Apply / remove the body-level class that hides the top nav.
-  // Done in an effect so the class is also stripped on
-  // component teardown (e.g. SPA route change) without leaving the
-  // shell stuck in fullscreen.
   $effect(() => {
     if (typeof document === 'undefined') return;
     if (fullscreen) {
@@ -189,72 +193,73 @@
   const selectedProject: ProjectAggregate | null = $derived(
     projects.find((p) => p.project_path === selectedPath) ?? null
   );
-  const pinnedProjects = $derived(
-    pinnedPaths
-      .map((path) => projects.find((p) => p.project_path === path))
-      .filter((p): p is ProjectAggregate => p !== undefined)
-  );
-  // Insertion-ordered list of unpinned recent project_paths. Stays stable
-  // across refreshes so cards don't jump positions when a tool call on
-  // terminal B updates its lastMsAgo — without this, a recency-sorted list
-  // would shuffle the grid on every SSE update, which is the irritating
-  // flicker users notice when watching 3-4 parallel tasks. Once a card
-  // joins this list it keeps its slot until it drops out of the 30-min
-  // window or gets pinned.
-  let recentOrder = $state<string[]>([]);
 
-  $effect(() => {
-    if (projects.length === 0) return;
-    const validPaths = new Set(projects.map((p) => p.project_path));
-    const pinnedSet = new Set(pinnedPaths);
-    const newlyRecent = projects
-      .filter((p) => p.lastMsAgo < RECENT_THRESHOLD_MS && !pinnedSet.has(p.project_path))
-      .map((p) => p.project_path);
-    untrack(() => {
-      let next = recentOrder.filter((path) => validPaths.has(path) && !pinnedSet.has(path));
-      for (const path of newlyRecent) {
-        if (!next.includes(path)) next = next.concat(path);
-      }
-      const changed = next.length !== recentOrder.length || next.some((p, i) => p !== recentOrder[i]);
-      if (changed) recentOrder = next;
-    });
-  });
-
-  // Live-unpinned in stable insertion order. Drops cards that have gone
-  // past the recency window; their slot doesn't get preserved (so a card
-  // that comes back to life appears at the end, where the user notices
-  // the new activity).
-  const liveUnpinned = $derived(
-    recentOrder
-      .map((path) => projects.find((p) => p.project_path === path))
-      .filter((p): p is ProjectAggregate => p !== undefined && p.lastMsAgo < RECENT_THRESHOLD_MS)
+  const focusThread: CockpitThread | null = $derived(
+    focusSessionId ? threads[focusSessionId] ?? null : null
   );
-  const visibleProjects = $derived([...pinnedProjects, ...liveUnpinned]);
 
-  const focusProject: ProjectAggregate | null = $derived(
-    focusPath ? projects.find((p) => p.project_path === focusPath) ?? null : null
-  );
+  // Scroll the most-recently-active live tile into view. Position
+  // doesn't change — we just bring the user's eye to it.
+  function jumpToLive(): void {
+    const liveT = visibleThreads
+      .filter((t) => tick - t.last_msg_at < LIVE_THRESHOLD_MS)
+      .sort((a, b) => b.last_msg_at - a.last_msg_at);
+    const target = liveT[0];
+    if (!target) return;
+    const el = document.querySelector<HTMLElement>(
+      `[data-session-id="${target.session_id}"]`
+    );
+    if (el?.scrollIntoView) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }
 
   function onKey(e: KeyboardEvent): void {
     const target = e.target as HTMLElement | null;
     const inField = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
     if (e.key === 'Escape') {
-      if (focusPath) { e.preventDefault(); focusPath = null; return; }
+      if (focusSessionId) { e.preventDefault(); focusSessionId = null; return; }
       if (fullscreen) { e.preventDefault(); toggleFullscreen(); return; }
     }
-    // `f` toggles app-level fullscreen. Skipped when typing in a
-    // form field so it doesn't fire when filtering projects.
     if (!inField && (e.key === 'f' || e.key === 'F') && !e.metaKey && !e.ctrlKey && !e.altKey) {
       e.preventDefault();
       toggleFullscreen();
     }
   }
+
+  let sseUnsub: (() => void) | null = null;
+  let tickHandle: ReturnType<typeof setInterval> | null = null;
+  let refreshHandle: ReturnType<typeof setInterval> | null = null;
+
+  // Patch last_msg_at in place for known sessions so the live indicator
+  // updates immediately. Position never changes — the order list keys
+  // off sessionOrder, not last_msg_at. Unknown session ids trigger a
+  // refresh so the full thread row (project_path, cli, etc.) lands.
+  function onMsgNew(ev: MsgNew): void {
+    const existing = threads[ev.session_id];
+    if (existing) {
+      threads = {
+        ...threads,
+        [ev.session_id]: { ...existing, last_msg_at: ev.ts }
+      };
+    } else {
+      void loadThreads();
+    }
+  }
+
   onMount(() => {
+    void loadThreads();
+    sseUnsub = subscribe({ onMsgNew });
+    tickHandle = setInterval(() => { tick = Date.now(); }, 5_000);
+    refreshHandle = setInterval(() => { void loadThreads(); }, 60_000);
     window.addEventListener('keydown', onKey);
     if (typeof document !== 'undefined') {
       document.addEventListener('fullscreenchange', onFullscreenChange);
     }
     return () => {
+      sseUnsub?.();
+      if (tickHandle !== null) clearInterval(tickHandle);
+      if (refreshHandle !== null) clearInterval(refreshHandle);
       window.removeEventListener('keydown', onKey);
       if (typeof document !== 'undefined') {
         document.removeEventListener('fullscreenchange', onFullscreenChange);
@@ -271,22 +276,10 @@
   class:rail-collapsed={!railOpen}
   class:work-fullscreen={fullscreen}
 >
-  <!--
-    ProjectRail is always rendered so the CSS grid keeps its three
-    tracks (rail, center, inspector) in the same order regardless of
-    which side is collapsed. Hiding the rail by removing the element
-    would shift the center and inspector into the wrong grid columns
-    (the Inspector would land in the wide 1fr middle column and take
-    over the viewport). The CSS `.work.rail-collapsed` rule
-    collapses the rail's column to 0px and `.rail { overflow: hidden }`
-    clips its content — that is what actually hides it visually.
-  -->
   <ProjectRail
     projects={projects}
     selectedPath={selectedPath}
-    pinnedPaths={pinnedPaths}
     onSelect={selectProject}
-    onTogglePin={togglePin}
   />
 
   <main class="center">
@@ -299,7 +292,16 @@
       >{railOpen ? '‹' : '›'}</button>
       <h2>Terminals</h2>
       <span class="sub">
-        {visibleProjects.length} shown · {pinnedPaths.length} pinned · {liveCount} live
+        {visibleThreads.length} session{visibleThreads.length === 1 ? '' : 's'}
+        ·
+        <button
+          class="btn btn--ghost btn--sm live-chip"
+          disabled={liveCount === 0}
+          title={liveCount > 0 ? 'Scroll to the latest active session' : 'No sessions are currently streaming'}
+          aria-label="Jump to latest live session"
+          onclick={jumpToLive}
+          style="display: inline-flex; align-items: center; gap: 4px; padding: 0 6px; font-size: 12px; color: {liveCount > 0 ? 'var(--ad-active, #10b981)' : 'var(--ad-faint)'};"
+        ><span style="font-size: 9px;">●</span> {liveCount} live</button>
       </span>
       <div class="right">
         <div class="seg" role="group" aria-label="Terminal columns">
@@ -312,33 +314,32 @@
           title={fullscreen ? 'Exit fullscreen (Esc or F)' : 'Fullscreen (F)'}
           aria-label={fullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
           onclick={toggleFullscreen}
-        >{fullscreen ? '⛶' : '⛶'}</button>
+        >⛶</button>
         <button class="btn btn--ghost btn--sm" onclick={toggleInspector}>
           {inspectorOpen ? 'hide inspector ›' : '‹ inspector'}
         </button>
       </div>
     </div>
 
-    {#if visibleProjects.length === 0}
+    {#if visibleThreads.length === 0}
       <div class="term-grid cols-1" style="padding: 32px;">
         <div class="term-empty">
           <div>
-            <h3>No active terminals</h3>
+            <h3>No active sessions</h3>
             <p>
-              Nothing is live right now. Pin a project from the rail to watch its
-              most recent thread, or start a session and it will appear here.
+              Nothing has been active in the last 30 minutes. Start a session
+              in any CLI and it will appear here as its own tile.
             </p>
           </div>
         </div>
       </div>
     {:else}
       <div class="term-grid cols-{cols}">
-        {#each visibleProjects as p (p.project_path)}
+        {#each visibleThreads as t (t.session_id)}
           <Terminal
-            project={p}
-            pinned={pinnedPaths.includes(p.project_path)}
-            onTogglePin={togglePin}
-            onFocus={(path) => (focusPath = path)}
+            thread={t}
+            tickMs={tick}
+            onFocus={(id) => (focusSessionId = id)}
             onInfo={(sid) => (advisorSession = sid)}
           />
         {/each}
@@ -350,20 +351,13 @@
     <Inspector project={selectedProject} onClose={() => (inspectorOpen = false)} />
   {/if}
 
-  <!--
-    Overlays live INSIDE .work so they remain visible when .work is the
-    active fullscreen element. The Fullscreen API paints only the
-    fullscreen element and its descendants; anything mounted as a
-    sibling of .work disappears the moment requestFullscreen() resolves.
-  -->
-  {#if focusProject}
-    <div class="overlay" onclick={() => (focusPath = null)} role="presentation">
+  {#if focusThread}
+    <div class="overlay" onclick={() => (focusSessionId = null)} role="presentation">
       <div class="search-modal" style="width: min(960px, 92vw); height: 78vh; display: flex; flex-direction: column;" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()} role="dialog" tabindex="-1" aria-modal="true" aria-label="Focused terminal">
         <Terminal
-          project={focusProject}
-          pinned={pinnedPaths.includes(focusProject.project_path)}
-          onTogglePin={() => (focusPath = null)}
-          onFocus={() => {}}
+          thread={focusThread}
+          tickMs={tick}
+          onFocus={() => (focusSessionId = null)}
           onInfo={(sid) => (advisorSession = sid)}
         />
       </div>
