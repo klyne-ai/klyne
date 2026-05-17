@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -40,6 +41,12 @@ const (
 	bootstrapGlobalMemoryPreview = 3
 )
 
+// bootstrapWorklogLimit caps how many cross-AI worklog entries the
+// bootstrap brief surfaces. Five is enough to convey "what was the
+// other CLI doing in this project recently" without crowding out the
+// rest of the brief. The recap source already orders newest-first.
+const bootstrapWorklogLimit = 5
+
 // BootstrapInput is the JSON-Schema input for the bootstrap MCP tool.
 // All fields optional; sensible defaults make the tool callable with
 // `{}`.
@@ -63,14 +70,15 @@ type BootstrapHealthSummary struct {
 
 // BootstrapOutput is the structured payload returned by HandleBootstrap.
 type BootstrapOutput struct {
-	CWD                    string                  `json:"cwd" jsonschema:"the working directory that was searched"`
-	Sessions               []CandidateRow          `json:"sessions" jsonschema:"up to 3 most-recent sessions in this project, newest first"`
-	ProjectMemories        []store.Decision        `json:"project_memories" jsonschema:"up to 5 most-recent project-scoped klyne (SQLite) memories"`
-	GlobalMemoryCount      int                     `json:"global_memory_count" jsonschema:"total global klyne memory count (project_path = \"\")"`
-	GlobalMemoriesPreview  []store.Decision        `json:"global_memories_preview" jsonschema:"up to 3 most-recent global klyne (SQLite) memories"`
-	ClaudeAutoMemory       ClaudeAutoMemory        `json:"claude_auto_memory" jsonschema:"on-disk Claude auto-memory for this project (~/.claude/projects/<encoded-cwd>/memory/) — separate store, separate writer"`
-	LatestHealth           *BootstrapHealthSummary `json:"latest_health,omitempty" jsonschema:"context-health verdict for the most-recently modified session, when one exists"`
-	Markdown               string                  `json:"markdown" jsonschema:"slash-prompt-ready markdown rendering (verbatim-echo target)"`
+	CWD                   string                  `json:"cwd" jsonschema:"the working directory that was searched"`
+	Sessions              []CandidateRow          `json:"sessions" jsonschema:"up to 3 most-recent sessions in this project, newest first"`
+	ProjectMemories       []store.Decision        `json:"project_memories" jsonschema:"up to 5 most-recent project-scoped klyne (SQLite) memories"`
+	GlobalMemoryCount     int                     `json:"global_memory_count" jsonschema:"total global klyne memory count (project_path = \"\")"`
+	GlobalMemoriesPreview []store.Decision        `json:"global_memories_preview" jsonschema:"up to 3 most-recent global klyne (SQLite) memories"`
+	ClaudeAutoMemory      ClaudeAutoMemory        `json:"claude_auto_memory" jsonschema:"on-disk Claude auto-memory for this project (~/.claude/projects/<encoded-cwd>/memory/) — separate store, separate writer"`
+	LatestHealth          *BootstrapHealthSummary `json:"latest_health,omitempty" jsonschema:"context-health verdict for the most-recently modified session, when one exists"`
+	WorklogEntries        []RecapEntry            `json:"worklog_entries" jsonschema:"recent worklog entries from both Claude and Codex sessions in this project (capped, newest-first)"`
+	Markdown              string                  `json:"markdown" jsonschema:"slash-prompt-ready markdown rendering (verbatim-echo target)"`
 }
 
 // HandleBootstrap synthesises the Day-1 briefing. Read-only across all
@@ -159,6 +167,25 @@ func HandleBootstrap(ctx context.Context, _ *mcp.CallToolRequest, in BootstrapIn
 		preview = len(globals)
 	}
 	out.GlobalMemoriesPreview = globals[:preview]
+
+	// --- worklog entries (cross-AI) --------------------------------
+	// Surface recent visible entries from both Claude and Codex so the
+	// next session inherits the work-log context for this project. We
+	// reuse the existing recap_project handler against the SAME db
+	// handle — opening a second one would race against this defer
+	// db.Close() above. Failures are silent: missing worklog entries
+	// are not a bootstrap failure (fresh project or pre-migration DB).
+	recapOut, recapErr := handleRecapProject(ctx, db, RecapProjectArgs{
+		ProjectPath: cwd,
+		SinceDays:   7,
+	})
+	if recapErr == nil && recapOut != nil {
+		entries := recapOut.Entries
+		if len(entries) > bootstrapWorklogLimit {
+			entries = entries[:bootstrapWorklogLimit]
+		}
+		out.WorklogEntries = entries
+	}
 
 	// --- Claude auto-memory (on-disk, written by Claude itself) ----
 	// This is a SECOND memory system distinct from klyne's SQLite
@@ -268,6 +295,26 @@ func formatBootstrapAsMarkdown(out BootstrapOutput) string {
 	}
 	b.WriteString(RenderClaudeAutoMemoryAsMarkdown(out.ClaudeAutoMemory))
 
+	// --- worklog entries (cross-AI) --------------------------------
+	// Renders the cross-AI handoff payload: a flat list of recent
+	// visible worklog entries from BOTH Claude and Codex in this
+	// project. Empty case uses `_(none)_` to keep the output shape
+	// stable for the empty-project test.
+	b.WriteString("## Recent worklog entries (cross-AI)\n\n")
+	if len(out.WorklogEntries) == 0 {
+		b.WriteString("_(none)_\n\n")
+	} else {
+		for _, e := range out.WorklogEntries {
+			title := e.RecapTopic
+			if title == "" {
+				title = "(no topic)"
+			}
+			fmt.Fprintf(&b, "- [%s] %s (%s) — importance %d\n",
+				e.CLI, title, humanAgo(e.TS), e.Importance)
+		}
+		b.WriteString("\n")
+	}
+
 	// --- latest health (only when populated) -----------------------
 	if out.LatestHealth != nil {
 		b.WriteString("## Current session health\n\n")
@@ -278,4 +325,22 @@ func formatBootstrapAsMarkdown(out BootstrapOutput) string {
 	}
 
 	return b.String()
+}
+
+// humanAgo renders a coarse "time-since" label suitable for the
+// worklog list ("just now" / "5m ago" / "3h ago" / "2d ago"). It is
+// intentionally lossy — exact timestamps are already on the structured
+// entry, this rendering exists so the agent's narrative reads naturally.
+func humanAgo(t time.Time) string {
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+	}
 }

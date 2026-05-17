@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/klyne-ai/klyne/internal/config"
 	"github.com/klyne-ai/klyne/internal/store"
@@ -72,7 +73,7 @@ func TestHandleBootstrap_EmptyProject(t *testing.T) {
 	}
 	// Every section must show `_(none)_` so the agent renders a
 	// stable shape even on a brand-new project.
-	for _, section := range []string{"Recent sessions", "klyne memory (SQLite store)", "Claude auto-memory"} {
+	for _, section := range []string{"Recent sessions", "klyne memory (SQLite store)", "Claude auto-memory", "Recent worklog entries (cross-AI)"} {
 		if !strings.Contains(out.Markdown, "## "+section) {
 			t.Errorf("Markdown missing section %q\n%s", section, out.Markdown)
 		}
@@ -244,5 +245,39 @@ func TestHandleBootstrap_MemoriesProjectAndGlobals(t *testing.T) {
 		if !strings.Contains(out.Markdown, want) {
 			t.Errorf("Markdown missing %q\n%s", want, out.Markdown)
 		}
+	}
+}
+
+// TestBootstrapInjectsWorklogEntriesFromAllCLIs verifies the cross-AI
+// worklog handoff: bootstrap surfaces visible worklog entries from
+// BOTH Claude and Codex sessions in this project, and skips suppressed
+// ones. Without this, a fresh session in CLI A is blind to what the
+// user did in CLI B.
+func TestBootstrapInjectsWorklogEntriesFromAllCLIs(t *testing.T) {
+	withFakeHome(t)
+	db := withBootstrapDB(t)
+	seedStopSummary(t, db, "/p", "claude", "s1", true, 8, time.Now().Add(-1*time.Hour))
+	seedStopSummary(t, db, "/p", "codex", "s2", true, 7, time.Now().Add(-30*time.Minute))
+	seedStopSummary(t, db, "/p", "claude", "s3", false, 3, time.Now()) // suppressed; must NOT appear
+
+	out := mustBootstrap(t, BootstrapInput{CWD: "/p"})
+	if len(out.WorklogEntries) != 2 {
+		t.Errorf("expected 2 visible entries, got %d", len(out.WorklogEntries))
+	}
+	var claudeFound, codexFound bool
+	for _, e := range out.WorklogEntries {
+		if e.CLI == "claude" {
+			claudeFound = true
+		}
+		if e.CLI == "codex" {
+			codexFound = true
+		}
+	}
+	if !claudeFound || !codexFound {
+		t.Errorf("bootstrap must surface both CLIs, got claude=%v codex=%v", claudeFound, codexFound)
+	}
+	// Markdown must include the new section.
+	if !strings.Contains(out.Markdown, "## Recent worklog entries (cross-AI)") {
+		t.Errorf("markdown missing worklog section\n%s", out.Markdown)
 	}
 }
