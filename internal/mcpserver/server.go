@@ -325,99 +325,15 @@ Fire when the user asks "what has klyne been doing?", "what's the state of my kl
 Returns structured rollups plus a markdown body suitable for verbatim display.`,
 	}, HandleStatusSnapshot)
 
-	// Live MCP prompts. Each prompt parallels one of the tools above
-	// and surfaces in Claude Code's slash menu as /klyne:<name>
-	// (older Claude Code builds used /mcp__klyne__<name>; that form
-	// has been retired). Handlers run server-side and return the
-	// result as injected user-message content — no AI roundtrip
-	// needed for the fetch.
-	srv.AddPrompt(&mcp.Prompt{
-		Name:        "bootstrap",
-		Title:       "Session bootstrap brief",
-		Description: "Day-1 briefing for the current project: recent sessions, project + global memories, and the latest session's context-health verdict.",
-		Arguments: []*mcp.PromptArgument{
-			{Name: "cwd", Description: "Override the working directory used to resolve the project."},
-		},
-	}, PromptBootstrapHandler)
-
-	srv.AddPrompt(&mcp.Prompt{
-		Name:        "health",
-		Title:       "Context health",
-		Description: "Classify the current session's context health and list the top bloat sources. Defaults to the session in the current working directory.",
-		Arguments: []*mcp.PromptArgument{
-			{Name: "cwd", Description: "Override the working directory used to resolve the session."},
-		},
-	}, PromptHealthHandler)
-
-	srv.AddPrompt(&mcp.Prompt{
-		Name:        "sessions",
-		Title:       "List sessions",
-		Description: "List every Claude Code and Codex session under the current working directory's project.",
-		Arguments: []*mcp.PromptArgument{
-			{Name: "cwd", Description: "Override the working directory used to find sessions."},
-		},
-	}, PromptSessionsHandler)
-
-	srv.AddPrompt(&mcp.Prompt{
-		Name:        "handoff",
-		Title:       "Generate handoff",
-		Description: "Render a deterministic Markdown handoff prompt the user can paste into a fresh session to continue without losing context.",
-		Arguments: []*mcp.PromptArgument{
-			{Name: "cwd", Description: "Override the working directory used to resolve the session."},
-		},
-	}, PromptHandoffHandler)
-
-	srv.AddPrompt(&mcp.Prompt{
-		Name:        "search",
-		Title:       "Search messages",
-		Description: "Full-text search across every indexed Claude + Codex session. Pass `query` (required) and optionally `limit`, `sort` (recent | relevance), or `project_path`.",
-		Arguments: []*mcp.PromptArgument{
-			{Name: "query", Description: "Full-text search query (required)", Required: true},
-			{Name: "limit", Description: "Max hits to return (default 10, max 200)"},
-			{Name: "sort", Description: "recent (default) | relevance"},
-			{Name: "project_path", Description: "Optional client-side filter restricting hits to one repository"},
-		},
-	}, PromptSearchHandler)
-
-	srv.AddPrompt(&mcp.Prompt{
-		Name:        "precompact",
-		Title:       "Recover pre-compact context",
-		Description: "Recover the conversation that was lost to the last /compact event (Claude) or replacement_history (Codex).",
-		Arguments: []*mcp.PromptArgument{
-			{Name: "cwd", Description: "Override the working directory used to resolve the session."},
-		},
-	}, PromptPreCompactHandler)
-
-	// /klyne:tokens — registered with NO arguments. Claude Code's
-	// slash UI waits for argument input when an MCP prompt declares
-	// optional args, which made the v1 surface fail to fire on
-	// bare press-enter. The handler still resolves cwd from the
-	// process env, so the no-arg form just works. Users who want a
-	// custom window override that via the underlying MCP tool
-	// (get_token_timeline) or the `klyne tokens` CLI subcommand.
-	srv.AddPrompt(&mcp.Prompt{
-		Name:        "tokens",
-		Title:       "Token usage timeline",
-		Description: "Show the per-turn token usage for the active session: cumulative input tokens, % of model context window, ASCII sparkline. Defaults to the last 5 hours.",
-	}, PromptTokenTimelineHandler)
-
-	srv.AddPrompt(&mcp.Prompt{
-		Name:        "runbooks",
-		Title:       "Runbook candidates",
-		Description: "Show recurring Bash command sequences in this project as candidate runbooks. Reads JSONL transcripts and indexes N-grams that repeat across sessions.",
-		Arguments: []*mcp.PromptArgument{
-			{Name: "cwd", Description: "Override the working directory used to resolve the project."},
-		},
-	}, PromptRunbooksHandler)
-
-	srv.AddPrompt(&mcp.Prompt{
-		Name:        "status",
-		Title:       "klyne status snapshot",
-		Description: "Portable Markdown snapshot of klyne's installation state for the current project — sessions ingested, compact events, advisors fired, plan-window burn, memory counts. Suitable for weekly review or pasting into a teammate's chat.",
-		Arguments: []*mcp.PromptArgument{
-			{Name: "cwd", Description: "Override the working directory used to resolve the project."},
-		},
-	}, PromptStatusHandler)
+	// MCP prompts intentionally NOT registered here. Each tool above
+	// already has a paired static slash command under
+	// ~/.claude/commands/klyne/<name>.md (installed by
+	// InstallSlashCommands). Registering an MCP prompt with the same
+	// name caused Claude Code to show two entries in the `/` menu:
+	// `/klyne:<name>` (static) and `/klyne:<name> (MCP)` (live).
+	// Users saw the same command twice with no idea which to pick.
+	// Tools remain auto-discoverable to the AI via the mcp__klyne__*
+	// surface — only the duplicate slash-prompt surface is removed.
 
 	return srv
 }
