@@ -24,11 +24,13 @@ Do **not** re-invoke within the same session unless the user explicitly asks aga
 
 Call `mcp__klyne__bootstrap` with no arguments. It auto-resolves the project from the current working directory.
 
-The response is structured (`sessions`, `project_memories`, `global_memories_preview`, `latest_health`) plus a pre-rendered `markdown` field for verbatim display.
+The response is structured (`sessions`, `project_memories`, `global_memories_preview`, `claude_auto_memory`, `latest_health`) plus a pre-rendered `markdown` field for verbatim display.
 
 ## How to report
 
-Render the `markdown` field VERBATIM. The server has already produced the Markdown with all four sections — recent sessions, project memories, global memories, and (when populated) current session health — under 80 chars per line, with `_(none)_` placeholders for empty sections so the shape is stable.
+Render the `markdown` field VERBATIM. The server has already produced the Markdown with all sections — recent sessions, **klyne memory (SQLite store)** (with project + global subsections), **Claude auto-memory (files on disk)**, and (when populated) current session health — under 80 chars per line, with `_(none)_` placeholders for empty sections so the shape is stable.
+
+The two memory sections describe **different systems**: `klyne memory` is rows in klyne's SQLite store written via the `remember` / `recall` / `record_decision` MCP tools; `Claude auto-memory` is `.md` files Claude Code writes for itself under `~/.claude/projects/<encoded-cwd>/memory/`. Surface both verbatim — do not merge them, and do not "correct" either label.
 
 No editorializing. No paraphrasing. No re-rendering the structured rows yourself. Output the `markdown` field byte-for-byte.
 
