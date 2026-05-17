@@ -17,7 +17,11 @@ import (
 // for cross-session full-text search.
 // v0.5.0 — slice 6 (Serena-inspired): bootstrap session brief +
 // memory CRUD (update_memory, delete_memory, list_memories).
-const version = "v0.5.0"
+// v0.6.0 — slice 7 (bootstrap integration loop): per-session
+// fetch tools (get_session, summarize_session) + bootstrap now
+// surfaces Claude Code's on-disk auto-memory under a distinct
+// section beside klyne's SQLite memory store.
+const version = "v0.6.0"
 
 // New constructs the klyne MCP server with every v1 tool
 // registered. The returned server is ready for Run.
@@ -86,6 +90,8 @@ REQUIRES the klyne daemon to be running (the FTS index lives in SQLite). When un
 Use when you already know the session_id (typically from bootstrap, list_sessions, or search_messages) and need the actual content of the conversation. Pure SQLite read — no JSONL access, no daemon required.
 
 Inputs: session_id (required), optional limit (default 100, max 1000), optional before (epoch-ms cursor for backward pagination), optional since (epoch-ms lower bound), optional order ("asc" default | "desc").
+
+NOTE: since is filtered client-side AFTER limit rows are fetched — combine with a generous limit or page via before when count matters.
 
 Returns: session metadata + the messages slice. Use this instead of falling back to bash + jq over the raw JSONL — klyne is the source of truth.`,
 	}, HandleGetSession)
