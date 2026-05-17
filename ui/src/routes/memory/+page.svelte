@@ -6,6 +6,8 @@
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { goto } from '$app/navigation';
+  import { page } from '$app/stores';
   import { fetchMemory, deleteMemory } from '$lib/api.js';
   import type { Decision, MemoryResponse } from '$lib/types.js';
   import { relTime } from '$lib/format.js';
@@ -31,6 +33,8 @@
   let scope = $state<Scope>('all');
   let groupBy = $state<GroupBy>('scope');
   let activeTag = $state<string | null>(null);
+  // '' = all projects. Initialized from ?project=... so URLs are shareable.
+  let selectedProject = $state<string>('');
 
   async function load(): Promise<void> {
     loading = true;
@@ -44,7 +48,22 @@
     }
   }
 
-  onMount(() => { void load(); });
+  onMount(() => {
+    selectedProject = $page.url.searchParams.get('project') ?? '';
+    void load();
+  });
+
+  function onSelectProject(next: string): void {
+    selectedProject = next;
+    const url = new URL(window.location.href);
+    if (next) url.searchParams.set('project', next);
+    else url.searchParams.delete('project');
+    void goto(url.pathname + url.search, {
+      replaceState: true,
+      noScroll: true,
+      keepFocus: true,
+    });
+  }
 
   function basename(p: string): string {
     if (!p) return '';
@@ -80,11 +99,18 @@
     Array.from(new Set(entries.flatMap((e) => e.tags ?? []))).sort()
   );
 
+  // Distinct project_paths across loaded memories, alphabetized. Global memories
+  // (project === '') are excluded — they're addressed via the scope toggle.
+  const projectOptions: string[] = $derived.by(() =>
+    Array.from(new Set(entries.map((e) => e.project_path ?? '').filter((p) => p !== ''))).sort()
+  );
+
   const filtered: MemoryEntry[] = $derived.by(() => {
     const q = query.trim().toLowerCase();
     return entries.filter((m) => {
       if (scope === 'global' && m.scope !== 'global') return false;
       if (scope === 'project' && m.scope !== 'project') return false;
+      if (selectedProject !== '' && (m.project_path ?? '') !== selectedProject) return false;
       if (activeTag && !(m.tags ?? []).includes(activeTag)) return false;
       if (q) {
         const hay = `${m.title}\n${m.body}\n${(m.tags ?? []).join(' ')}\n${m.project_name}`.toLowerCase();
@@ -131,7 +157,7 @@
   <div class="page-hd">
     <h1>
       Memory
-      {#if resp}<span class="count">({resp.total})</span>{/if}
+      {#if resp}<span class="count">({filtered.length})</span>{/if}
     </h1>
     <div class="row">
       <button class="btn btn--ghost btn--sm">Export markdown</button>
@@ -141,7 +167,7 @@
     Decisions and runbooks klyne is remembering. Add via Claude Code:&nbsp;
     <code>klyne remember this …</code> (project-scoped) or
     <code>klyne remember this globally …</code>. Recall with
-    <code>refer klyne …</code>.
+    <code>refer klyne …</code>. Use the Project dropdown to scope to a single repository.
   </p>
 
   <div class="toolbar">
@@ -151,6 +177,17 @@
       <button class:active={scope === 'global'} onclick={() => (scope = 'global')}>Global</button>
       <button class:active={scope === 'project'} onclick={() => (scope = 'project')}>Project</button>
     </div>
+    <select
+      class="proj-select"
+      title={selectedProject || 'All projects'}
+      value={selectedProject}
+      onchange={(e) => onSelectProject((e.currentTarget as HTMLSelectElement).value)}
+    >
+      <option value="">All projects</option>
+      {#each projectOptions as p (p)}
+        <option value={p} title={p}>{basename(p)}</option>
+      {/each}
+    </select>
     <span class="spacer"></span>
     <span class="faint mono" style="font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em;">group by</span>
     <div class="seg">
@@ -214,3 +251,24 @@
     </section>
   {/each}
 </div>
+
+<style>
+  /* Project filter dropdown — mirrors the .toolbar input styling so it sits
+     naturally next to the scope segment buttons. */
+  .proj-select {
+    padding: 7px 10px;
+    background: var(--ad-panel);
+    border: 1px solid var(--ad-border-soft);
+    color: var(--ad-fg);
+    border-radius: 7px;
+    font-size: 12.5px;
+    outline: none;
+    font-family: var(--ad-font);
+    max-width: 200px;
+    cursor: pointer;
+  }
+  .proj-select:focus {
+    border-color: var(--ad-accent);
+    box-shadow: 0 0 0 3px color-mix(in oklch, var(--ad-accent) 16%, transparent);
+  }
+</style>
