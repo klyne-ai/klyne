@@ -145,3 +145,12 @@ func TestListStopSummariesForSession(t *testing.T) {
 		t.Errorf("missing session returned %d rows, want 0", len(none))
 	}
 }
+
+func TestListStopSummariesForSession_EmptyIDRejected(t *testing.T) {
+	db := openStopSummariesDB(t)
+	ctx := context.Background()
+	_, err := store.ListStopSummariesForSession(ctx, db, "", 10)
+	if err == nil {
+		t.Fatal("expected error for empty session_id, got nil")
+	}
+}
