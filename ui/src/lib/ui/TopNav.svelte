@@ -30,9 +30,11 @@
 
   function currentRoute(): string {
     const p = $page.url.pathname;
+    // Order matters: check /worklog before /work since startsWith('/work') would
+    // match both.
+    if (p.startsWith('/worklog')) return 'worklog';
     if (p === '/' || p.startsWith('/work') || p.startsWith('/cockpit') || p.startsWith('/projects') || p.startsWith('/sessions')) return 'work';
     if (p.startsWith('/memory')) return 'memory';
-    if (p.startsWith('/worklog')) return 'worklog';
     if (p.startsWith('/insights') || p.startsWith('/stats')) return 'insights';
     return '';
   }
