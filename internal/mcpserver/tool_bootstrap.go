@@ -87,8 +87,8 @@ type BootstrapOutput struct {
 	ClaudeAutoMemory      ClaudeAutoMemory        `json:"claude_auto_memory" jsonschema:"on-disk Claude auto-memory for this project (~/.claude/projects/<encoded-cwd>/memory/) — separate store, separate writer"`
 	LatestHealth          *BootstrapHealthSummary `json:"latest_health,omitempty" jsonschema:"context-health verdict for the most-recently modified session, when one exists"`
 	WorklogEntries        []RecapEntry            `json:"worklog_entries" jsonschema:"recent worklog entries from both Claude and Codex sessions in this project (capped, newest-first)"`
-	Reflections           []ReflectionSummary     `json:"reflections,omitempty" jsonschema:"latest synthesized weekly reflections for this project"`
-	ReflectionDue         bool                    `json:"reflection_due" jsonschema:"true when importance-sum threshold or weekly-cron trigger fires — host should suggest /klyne:reflect"`
+	Reflections           []ReflectionSummary     `json:"reflections,omitempty" jsonschema:"latest synthesized daily reflections for this project"`
+	ReflectionDue         bool                    `json:"reflection_due" jsonschema:"true when importance-sum threshold or weekly-cron trigger fires; host should suggest /klyne:reflect to write per-day reflections"`
 	Markdown              string                  `json:"markdown" jsonschema:"slash-prompt-ready markdown rendering (verbatim-echo target)"`
 }
 
@@ -194,7 +194,7 @@ func HandleBootstrap(ctx context.Context, _ *mcp.CallToolRequest, in BootstrapIn
 	// handle — opening a second one would race against this defer
 	// db.Close() above. Failures are silent: missing worklog entries
 	// are not a bootstrap failure (fresh project or pre-migration DB).
-	const bootstrapReflectionLimit = 2
+	const bootstrapReflectionLimit = 7
 	recapOut, recapErr := handleRecapProject(ctx, db, RecapProjectArgs{
 		ProjectPath: projectPath,
 		SinceDays:   7,
@@ -206,7 +206,7 @@ func HandleBootstrap(ctx context.Context, _ *mcp.CallToolRequest, in BootstrapIn
 		}
 		out.WorklogEntries = entries
 	}
-	// Reflections use a wider lookback because they're synthesized weekly.
+	// Reflections list a recent window of daily synthesis (limit 7 ≈ one week).
 	reflOut, reflErr := handleRecapProject(ctx, db, RecapProjectArgs{
 		ProjectPath: projectPath,
 		SinceDays:   14,
@@ -347,8 +347,8 @@ func formatBootstrapAsMarkdown(out BootstrapOutput) string {
 	}
 	b.WriteString(RenderClaudeAutoMemoryAsMarkdown(out.ClaudeAutoMemory))
 
-	// --- weekly reflections (cross-AI synthesis) -------------------
-	b.WriteString("## Weekly reflections\n\n")
+	// --- daily reflections (cross-AI synthesis) --------------------
+	b.WriteString("## Recent reflections\n\n")
 	if len(out.Reflections) == 0 {
 		b.WriteString("_(none)_\n\n")
 	} else {

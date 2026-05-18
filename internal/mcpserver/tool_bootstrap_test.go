@@ -74,7 +74,7 @@ func TestHandleBootstrap_EmptyProject(t *testing.T) {
 	}
 	// Every section must show `_(none)_` so the agent renders a
 	// stable shape even on a brand-new project.
-	for _, section := range []string{"Recent sessions", "klyne memory (SQLite store)", "Claude auto-memory", "Weekly reflections", "Recent worklog entries (cross-AI)"} {
+	for _, section := range []string{"Recent sessions", "klyne memory (SQLite store)", "Claude auto-memory", "Recent reflections", "Recent worklog entries (cross-AI)"} {
 		if !strings.Contains(out.Markdown, "## "+section) {
 			t.Errorf("Markdown missing section %q\n%s", section, out.Markdown)
 		}
@@ -329,8 +329,8 @@ func TestBootstrapInjectsLatestReflection(t *testing.T) {
 	if len(out.Reflections) == 0 {
 		t.Errorf("bootstrap must surface latest reflection")
 	}
-	if !strings.Contains(out.Markdown, "## Weekly reflections") {
-		t.Errorf("markdown missing weekly reflections section\n%s", out.Markdown)
+	if !strings.Contains(out.Markdown, "## Recent reflections") {
+		t.Errorf("markdown missing recent reflections section\n%s", out.Markdown)
 	}
 	if !strings.Contains(out.Markdown, "shipped auth refactor") {
 		t.Errorf("markdown should include reflection title:\n%s", out.Markdown)
