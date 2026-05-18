@@ -53,6 +53,10 @@ const (
 	// route (same pattern as /cockpit/threads and /usage/stats).
 	RouteMemory              = "/memory/items"
 	RouteMemoryItem          = "/memory/items/{id}"
+	// Worklog: SPA page lives at `/worklog`, so the API uses a
+	// /worklog/items subpath to avoid colliding with the SPA route
+	// (same pattern as /memory/items).
+	RouteWorklog             = "/worklog/items"
 	// Insights: per-project rollup powering the Insights dashboard.
 	// Returns one rich record per project with agent split, cache hit %,
 	// efficiency, /compact pain signal, top sessions, daily sparkline,
@@ -85,6 +89,7 @@ func AllRoutes() []string {
 		RouteCodeReviewContext,
 		RouteMemory,
 		RouteMemoryItem,
+		RouteWorklog,
 		RouteInsightsProjects,
 	}
 }
@@ -834,4 +839,22 @@ type ProjectInsightsResponse struct {
 	// them at this level would just duplicate work the UI never
 	// requested.
 	Totals ProjectInsight `json:"totals"`
+}
+
+// ---------------------------------------------------------------------------
+// /worklog  — per-project reflection rollup (v2)
+// ---------------------------------------------------------------------------
+//
+// v1 returned raw stop_summaries rows (suppression audit view). v2 surfaces
+// the synthesized reflection tier instead: one row per project showing the
+// latest worklog_reflection plus a count of visible stop_summaries written
+// after it (pending entries that should trigger a re-run of /klyne:reflect).
+
+// WorklogResponse is GET /worklog/items. One entry per project that has
+// either a reflection or at least one visible stop_summaries row.
+//
+// Sort is the handler's responsibility (stale-with-reflection first, then
+// never-reflected, then fresh). Empty when neither table has any data.
+type WorklogResponse struct {
+	Projects []store.WorklogProjectRollup `json:"projects"`
 }

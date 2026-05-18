@@ -120,6 +120,12 @@ func (m *Mounter) Mount(r chi.Router) {
 	r.Get(api.RouteMemory, hMemory.List)
 	r.Delete(api.RouteMemoryItem, hMemory.Delete)
 
+	// /worklog — project-scoped browser over the stop_summaries table.
+	// Read-only; both visible and suppressed rows returned so users can
+	// audit suppression behavior.
+	hWorklog := NewWorklogHandler(m.deps.DB)
+	r.Get(api.RouteWorklog, hWorklog.List)
+
 	// /insights/projects — per-project rollup powering the Insights
 	// dashboard. Reads from sessions + messages + compact_events; no
 	// dollar figures (subscription users don't pay per-token).

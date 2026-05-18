@@ -246,3 +246,182 @@ func ListStopSummariesForSession(ctx context.Context, db *DB, sessionID string, 
 	return out, nil
 }
 
+// WorklogEntry is a stop_summaries row including the migration-015
+// worklog columns. Returned by ListWorklogEntries for the /worklog
+// UI — distinct from StopSummary which is the deterministic core
+// the Stop hook writes.
+type WorklogEntry struct {
+	SessionID    string   `json:"session_id"`
+	Ts           int64    `json:"ts"`
+	ProjectPath  string   `json:"project_path"`
+	CLI          string   `json:"cli"`
+	Summary      string   `json:"summary"`
+	LastUser     string   `json:"last_user"`
+	LastBash     string   `json:"last_bash"`
+	Files        []string `json:"files"`
+	RecapVisible int      `json:"recap_visible"`
+	RecapTopic   string   `json:"recap_topic"`
+	Importance   int      `json:"importance"`
+	Signature    string   `json:"signature"`
+}
+
+// ListWorklogEntriesOpts scopes ListWorklogEntries queries.
+type ListWorklogEntriesOpts struct {
+	// ProjectPath narrows to one project. Empty returns all projects.
+	ProjectPath string
+	// Limit caps the result set. Defaults to 500 when zero.
+	Limit int
+}
+
+// ListWorklogEntries returns stop_summaries rows (with worklog metadata)
+// ordered by ts DESC. Includes both visible and suppressed rows.
+//
+// Uses idx_stop_summaries_project_ts when ProjectPath != "", otherwise
+// idx_stop_summaries_ts.
+func ListWorklogEntries(ctx context.Context, db *DB, opts ListWorklogEntriesOpts) ([]WorklogEntry, error) {
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 500
+	}
+	q := `
+SELECT session_id, ts, project_path, cli, summary, last_user, last_bash,
+       files_json, recap_visible, COALESCE(recap_topic,''), importance,
+       COALESCE(signature,'')
+  FROM stop_summaries
+ WHERE 1=1`
+	args := make([]any, 0, 2)
+	if opts.ProjectPath != "" {
+		q += ` AND project_path = ?`
+		args = append(args, opts.ProjectPath)
+	}
+	q += ` ORDER BY ts DESC LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := db.Read().QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("store: list worklog entries: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+
+	out := make([]WorklogEntry, 0)
+	for rows.Next() {
+		var e WorklogEntry
+		var filesJSON string
+		if err := rows.Scan(
+			&e.SessionID, &e.Ts, &e.ProjectPath, &e.CLI, &e.Summary,
+			&e.LastUser, &e.LastBash, &filesJSON,
+			&e.RecapVisible, &e.RecapTopic, &e.Importance, &e.Signature,
+		); err != nil {
+			return nil, fmt.Errorf("store: scan worklog entry: %w", err)
+		}
+		if filesJSON != "" {
+			if err := json.Unmarshal([]byte(filesJSON), &e.Files); err != nil {
+				// Don't fail the whole query on one bad row — return empty files
+				// list. Matches the defensive read pattern above.
+				e.Files = nil
+			}
+		}
+		if e.Files == nil {
+			e.Files = []string{}
+		}
+		out = append(out, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: iterate worklog entries: %w", err)
+	}
+	return out, nil
+}
+
+// WorklogProjectRollup is one row of the /worklog view — per-project summary
+// of reflection coverage and pending-entry pressure.
+type WorklogProjectRollup struct {
+	ProjectPath      string      `json:"project_path"`
+	Name             string      `json:"name"`
+	LatestReflection *Reflection `json:"latest_reflection"` // nil if never synthesized
+	PendingEntries   int         `json:"pending_entries"`   // visible stop_summaries since latest_reflection.ts (or total visible if never)
+	LatestEntryTs    int64       `json:"latest_entry_ts"`   // newest visible entry timestamp (0 if none)
+	Stale            bool        `json:"stale"`             // PendingEntries > 0
+}
+
+// ListWorklogRollup returns one row per project that has at least one visible
+// stop_summaries entry OR at least one worklog_reflections row. Rows are NOT
+// sorted by this function — the handler is responsible for the display order.
+//
+// Cold-start friendly: returns rollups for projects that have entries but no
+// reflection yet (PendingEntries set to total visible count, LatestReflection nil).
+func ListWorklogRollup(ctx context.Context, db *DB) ([]WorklogProjectRollup, error) {
+	// Step 1: collect every project_path that has any visible stop_summaries
+	// row OR any worklog_reflections row. UNION avoids the cold-start case
+	// where a project has reflections but its entries got cleaned up.
+	const projectsQ = `
+SELECT DISTINCT project_path FROM stop_summaries WHERE recap_visible = 1 AND project_path <> ''
+UNION
+SELECT DISTINCT project_path FROM worklog_reflections WHERE project_path <> ''`
+	rows, err := db.Read().QueryContext(ctx, projectsQ)
+	if err != nil {
+		return nil, fmt.Errorf("store: worklog rollup projects: %w", err)
+	}
+	projects := make([]string, 0)
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			rows.Close() //nolint:errcheck
+			return nil, fmt.Errorf("store: scan project_path: %w", err)
+		}
+		projects = append(projects, p)
+	}
+	rows.Close() //nolint:errcheck
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: iterate project_paths: %w", err)
+	}
+
+	out := make([]WorklogProjectRollup, 0, len(projects))
+	for _, p := range projects {
+		row := WorklogProjectRollup{ProjectPath: p, Name: basename(p)}
+
+		// Latest reflection for this project (may be nil).
+		refs, err := ListReflectionsForProject(ctx, db, p, 1)
+		if err != nil {
+			return nil, fmt.Errorf("store: rollup reflections for %s: %w", p, err)
+		}
+		var sinceTs int64
+		if len(refs) > 0 {
+			r := refs[0]
+			row.LatestReflection = &r
+			sinceTs = r.TS
+		}
+
+		// Count visible entries newer than the latest reflection (or all if none).
+		// Also fetch the newest entry's ts for display.
+		const statsQ = `
+SELECT
+  COALESCE(SUM(CASE WHEN ts > ? THEN 1 ELSE 0 END), 0) AS pending,
+  COALESCE(MAX(ts), 0) AS latest_ts
+FROM stop_summaries
+WHERE project_path = ? AND recap_visible = 1`
+		var pending int
+		var latestTs int64
+		if err := db.Read().QueryRowContext(ctx, statsQ, sinceTs, p).Scan(&pending, &latestTs); err != nil {
+			return nil, fmt.Errorf("store: rollup stats for %s: %w", p, err)
+		}
+		row.PendingEntries = pending
+		row.LatestEntryTs = latestTs
+		row.Stale = pending > 0
+
+		out = append(out, row)
+	}
+	return out, nil
+}
+
+// basename returns the last "/"-separated segment of p. Inline to avoid
+// pulling in path/filepath for this single use; filepath.Base also collapses
+// trailing slashes which we don't want here.
+func basename(p string) string {
+	for i := len(p) - 1; i >= 0; i-- {
+		if p[i] == '/' {
+			return p[i+1:]
+		}
+	}
+	return p
+}
+

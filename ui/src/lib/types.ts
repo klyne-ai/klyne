@@ -575,6 +575,39 @@ export interface MemoryResponse {
   total: number;
 }
 
+// --- /worklog/items (v2 — per-project reflection rollup) ---
+
+/** Reflection mirrors store.Reflection — one row of worklog_reflections. */
+export interface Reflection {
+  id: string;
+  ts: number;
+  project_path: string;
+  title: string;
+  body_md: string;
+  summary_source: string;       // "ai" | "user" | "hybrid"
+  state: string;                // "proposed" | "accepted" | "dismissed"
+  tier: number;                 // 1=daily, 2=weekly, 3=quarterly
+  importance: number;
+  state_changed_at: number;
+  evidence_entry_ids: string[];
+  evidence_reflection_ids: string[];
+}
+
+/** WorklogProjectRollup is one project's reflection coverage. */
+export interface WorklogProjectRollup {
+  project_path: string;
+  name: string;
+  latest_reflection: Reflection | null;  // null = never synthesized
+  pending_entries: number;                // visible stop_summaries since latest reflection (or all visible if none)
+  latest_entry_ts: number;                // newest visible entry timestamp (0 if none)
+  stale: boolean;                         // pending_entries > 0
+}
+
+/** WorklogResponse is GET /worklog/items. */
+export interface WorklogResponse {
+  projects: WorklogProjectRollup[];
+}
+
 // --- /insights/projects ---
 
 /** AgentSlice is one CLI's contribution within a project bucket. */

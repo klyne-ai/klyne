@@ -1,117 +1,164 @@
-# Showcase Harness — Overnight Build Handoff
+# klyne worklog session — handoff
 
-**Branch:** `worktree-showcase-harness` (worktree at `.claude/worktrees/showcase-harness/`)
 **Date:** 2026-05-18
-**No PR opened, no push.** Review locally first.
+**Active worktrees on disk:**
 
-## What got built
+| Worktree | Branch | Purpose |
+|---|---|---|
+| `.claude/worktrees/showcase-harness` | `worktree-showcase-harness` | Node test harness driving real `claude -p` sessions; validates worklog / memory / reflection / runbooks end-to-end |
+| `.claude/worktrees/worklog-ui` | `worktree-worklog-ui` | `/worklog` cockpit page — per-project reflection rollup (v2) |
 
-A Node test harness at `test/scenarios/` that drives real `claude -p` sessions
-through multi-turn flows and asserts klyne's features work end-to-end.
-Pure Node (no npm deps), uses `sqlite3` CLI for DB inspection.
+**No PR opened, no push** on either branch. Local review only.
 
+---
+
+## What's shipped
+
+### 1. Showcase harness (`worktree-showcase-harness`)
+
+Pure Node test harness at `test/scenarios/` (no npm deps, uses `sqlite3` CLI). Drives real `claude -p` sessions to verify klyne features end-to-end. 5 scenarios, all PASS or SKIP cleanly:
+
+| # | Feature | Last status |
+|---|---------|------|
+| 01 | Worklog signal-not-noise | PASS |
+| 02 | Suppression rules | PASS |
+| 03 | Memory cross-session | PASS |
+| 04 | Reflection synthesis | PASS |
+| 05 | Runbooks ("planning") | SKIP (soft — no hard fail) |
+
+Run with `cd test/scenarios && npm test`. Full sweep ~$2 of API spend.
+
+Commits:
+- `7a82267` initial harness scaffold + 5 scenarios
+- `990336c` macOS path canonicalization fix (`/var/folders/` → `/private/var/folders/`)
+- `16a5518` MCP server registration + tool-name-agnostic memory prompts
+
+### 2. Worklog UI v2 (`worktree-worklog-ui`)
+
+Pivoted twice — final shape:
+
+- New route `/worklog` shows **one card per project** displaying the latest synthesized `worklog_reflections` body inline (no click).
+- Sort: most-recent activity first (entry OR reflection timestamp).
+- Cards show status pill (`fresh` / `stale` / `cold-start`) and a copy-able command `cd <project> && claude -p --permission-mode bypassPermissions '/klyne:reflect'` when synthesis is needed.
+- v1 (raw `stop_summaries` audit grid) was discarded — see commit `60a7198`.
+
+Backend additions:
+- `internal/store/stop_summaries.go`: `ListWorklogRollup` + `WorklogProjectRollup` type
+- `internal/store/worklog_reflections.go`: added JSON tags to `Reflection` for clean API output
+- `internal/api/contracts.go`: `RouteWorklog` + `WorklogResponse`
+- `internal/api/handlers/worklog.go`: `List` handler with tier-aware sort
+- `internal/api/handlers/mounter.go`: route registration
+
+Frontend additions:
+- `ui/src/lib/types.ts`: `Reflection`, `WorklogProjectRollup`, `WorklogResponse`
+- `ui/src/lib/api.ts`: `fetchWorklog()`
+- `ui/src/routes/worklog/+page.svelte`: the page
+- `ui/src/lib/ui/TopNav.svelte`: Worklog tab + route detection (fixed `/work` prefix collision)
+
+Spec: `docs/superpowers/specs/2026-05-18-worklog-ui-design.md` (v1 + v2 update sections).
+Plan: `docs/superpowers/plans/2026-05-18-worklog-ui.md` (v1 plan — v2 was inline-executed, not re-planned).
+
+Tests: 4 store + 4 handler subtests, all PASS.
+
+Latest commit: `8fae7e8`.
+
+---
+
+## Open product decision — daily reflections
+
+User confirmed direction: **daily reflections as the foundational unit; weekly derived from days.** Reason: weekly-only doesn't surface day-to-day productivity.
+
+**Today's reality:** `internal/worklog/reflection_recorder.go:59` hardcodes `Tier: 2` (weekly). Daily reflections don't exist yet in the data.
+
+**Agreed approach (Option A) — auto-bucket by day:** when user runs `/klyne:reflect`, the slash command groups pending entries by date and produces ONE daily reflection per date. A single run can write 1–N daily reflections, covering all unreflected days.
+
+**Work remaining to ship this:**
+
+1. **Backend:**
+   - `RecordReflection` accepts a date param; writes `Tier: 1`, title `"Daily reflection — YYYY-MM-DD"`
+   - `/klyne:reflect` slash command prompt rewritten: bucket entries by date, call `record_reflection` once per date
+   - `WorklogProjectRollup` (or a new `WorklogProjectDays`) exposes per-day reflection list, not just latest
+   - Optional: `WeeklyFromDailies(projectPath, isoWeek)` helper (concatenate bodies, no AI)
+
+2. **Frontend:**
+   - `/worklog/[project]` per-project drill-in route showing daily reflections newest-first
+   - ISO-week collapsible headers grouping days within a week
+   - Top-level `/worklog` list keeps current shape — card per project, showing most-recent daily (instead of latest weekly)
+
+3. **Testing:**
+   - Smoke via showcase harness scenario 04 — already validates the reflection citation invariant, just need to assert tier=1 + title format
+
+Estimated size: roughly the same as the v2 worklog UI rebuild (~10 commits, ~600 LOC, half a day with breaks).
+
+---
+
+## Active issue — worklog not capturing your current sessions
+
+You mentioned worklog stopped logging. Almost certainly the same root cause we found earlier:
+
+**Your `~/.claude.json` has klyne's MCP server registered at a binary path that doesn't exist:**
 ```
-test/scenarios/
-├── package.json          # type:module, no deps
-├── README.md             # full usage + scenario table
-├── runner.js             # discovers + runs scenarios, writes report
-├── lib/
-│   ├── claude.js         # spawn claude -p, parse JSON, capture cost
-│   ├── klyne.js          # SQLite query/cleanup helpers via sqlite3 CLI
-│   ├── tmpdir.js         # mktemp + git init + seed klyne hook
-│   ├── assert.js         # rich-error assertions
-│   └── report.js         # markdown report renderer
-├── scenarios/
-│   ├── 01-worklog-signal-not-noise.js   # trivial vs meaningful → suppression behavior
-│   ├── 02-worklog-suppression-rules.js  # read-only rule
-│   ├── 03-memory-cross-session.js       # remember in A, recall in B
-│   ├── 04-reflection-synthesis.js       # /klyne:reflect citation invariant
-│   └── 05-runbooks-recurring-commands.js  # /klyne:runbooks (treated as "planning")
-└── reports/              # generated per run (gitignored)
+mcpServers.klyne.command = "/Users/mohitpatel/Desktop/Project/klyne-worklog-research/bin/klyne"
 ```
+That path is gone. Whenever Claude tries to spin up klyne's MCP server, the spawn fails silently → no `propose_reflection`, no `remember_memory`, etc.
 
-Plan doc: `docs/superpowers/plans/2026-05-18-claude-scenario-harness.md`.
+**Separately, the Stop hook coverage is patchy** — verified earlier that oms-service sessions only fire `${CLAUDE_PLUGIN_ROOT}/hooks/stop-hook.sh` (some other plugin), NOT `klyne session-end`. Some projects have it, some don't, and we never pinned down exactly where it's wired.
 
-## How to run
+**One-line fix for the MCP path:**
 
 ```bash
-cd test/scenarios
-npm run test:smoke       # one cheap scenario (~$0.25)
-npm test                 # full sweep (~$2-3)
-npm run test:dry         # no claude calls, just print intent
-npm run test:keep        # keep tmp dirs for debugging
+klyne mcp install
 ```
 
-Reports land in `test/scenarios/reports/<ISO>.md`. Exit 0 = all PASS, 1 = any non-PASS.
+Re-runs the registration using the current `klyne` binary on PATH (`/Users/mohitpatel/.local/bin/klyne`), overwriting the broken path in `~/.claude.json`. Then `/mcp` in any Claude session should flip klyne from ✘ failed to connected.
 
-## What I tested overnight
+If Stop hook coverage stays patchy after that, run `klyne mcp install` from inside each project root that should be covered (the showcase harness seeds `.claude/settings.json` per-project for exactly this reason — same pattern can be applied to real projects).
 
-Ran Scenario 01 (worklog signal-not-noise) three times with iterations.
-Total spend: ~$0.85.
+---
 
-**Confirmed working at the DB level:**
-- klyne Stop hook fires for `claude -p` invocations when seeded via project-level
-  `.claude/settings.json` (the harness auto-seeds this in every tmp project)
-- Suppression rules behave correctly: trivial sessions produce `recap_visible=0`
-  rows or no rows at all; sessions that produce a `git commit` produce
-  `recap_visible=1` rows with importance≥5
-- Example real row from a harness run:
-  `klyne-showcase-meaningful-V8wfNL · recap_visible=1 · importance=5`
+## Daemon state when this handoff was written
 
-**Three real findings:**
+- Running on `http://127.0.0.1:7878`
+- Binary: `.claude/worktrees/worklog-ui/bin/klyne` (built from v2 worklog UI branch)
+- Stop with `./bin/klyne stop` from that worktree
+- DB unchanged: `~/.klyne/klyne.db`
 
-1. **Project-level hooks need `--settings <file>` in `-p` mode.** The default
-   `claude -p` does not load project `.claude/settings.json` hooks unless you
-   pass `--settings <path>` and `--setting-sources user,project,local`. The harness
-   does both. Without this, klyne's worklog never captures `-p` sessions in
-   ephemeral dirs. Worth verifying whether real users hitting `-p` get hook
-   coverage in their normal flow.
-2. **Suppression rules are stricter than "files were edited".** A meaningful-looking
-   session that edits 2 files but doesn't commit can still get suppressed (no
-   qualifying signal tag). Worth confirming this matches your intent — it may
-   surprise users.
-3. **Hook latency vs harness polling.** Stop hooks fire *asynchronously* after
-   `claude -p` exits. Rows can take 5–60s to appear in SQLite. Scenario 01's poll
-   was bumped to 90s with 1s intervals; even so I observed runs where the row
-   appeared just outside the window. Added a `finalRows` diagnostic in the
-   report so you can distinguish "hook never fired" from "hook fired late".
+---
 
-## Open question for you
+## How to resume next session
 
-**Requirements said "planning" was one of three features shipped, but no
-`planning` surface exists in klyne** (verified via grep across the repo,
-slash commands, MCP tools, and skill listings). Scenario 05 currently tests
-**`/klyne:runbooks`** as the closest match (recurring command capture).
-If that's wrong, tell me what "planning" was supposed to mean and I'll add the
-right scenario.
+1. **Open this handoff** first: `.claude/worktrees/worklog-ui/HANDOFF.md`
+2. **If continuing worklog UI work**, enter the worktree: cd `.claude/worktrees/worklog-ui` and re-read `docs/superpowers/specs/2026-05-18-worklog-ui-design.md` for full design context.
+3. **If implementing daily reflections**, start with `internal/worklog/reflection_recorder.go:59` (the hardcoded tier).
+4. **If touching showcase harness**, the other worktree at `.claude/worktrees/showcase-harness` has its own README.
 
-## Status per scenario
+To bring an AI session up to speed quickly, paste this exact prompt:
+> "I'm continuing the klyne worklog UI work. Read `HANDOFF.md` at the worktree root, then `docs/superpowers/specs/2026-05-18-worklog-ui-design.md` for full context. We agreed to ship daily reflections (tier=1, auto-bucket by date). Don't restart the design conversation — pick up at the implementation."
 
-| #  | Scenario               | Status                          | Notes |
-|----|------------------------|---------------------------------|-------|
-| 01 | worklog signal/noise   | Built; smoke run inconclusive   | DB shows correct rows after run; harness poll sometimes misses them. See finding 3 above. |
-| 02 | suppression rules      | Built; not smoke-tested yet     | Cheap to run (~$0.05); minimal risk. |
-| 03 | memory cross-session   | Built; not smoke-tested yet     | Will SKIP if klyne MCP not registered for the harness's `claude -p` runs — diagnostic message included. |
-| 04 | reflection synthesis   | Built; not smoke-tested yet     | Costliest scenario (3 seed sessions + reflect = ~$0.80). Run only when ready. |
-| 05 | runbooks ("planning")  | Built; not smoke-tested yet     | First step is a SKIP that surfaces the planning-vs-runbooks ambiguity. |
+---
 
-## What I'd do next (when you wake)
+## File index for fast scanning
 
-1. **Confirm the "planning" feature** so Scenario 05 can be corrected.
-2. **Run `npm run test:smoke`** yourself — verify the finalRows diagnostic surfaces
-   the meaningful row even when the poll window misses it. If it does, we can
-   either bump the poll window further or switch to "wait until cleanup" semantics.
-3. **Run full sweep** (`npm test`) for the first complete pass. Budget ~$2-3.
-4. **Decide on long-term home for the harness** — currently at `test/scenarios/`.
-   Could move to `examples/scenarios/` if you prefer.
+**Backend (worklog UI v2):**
+- `internal/store/stop_summaries.go` — `WorklogProjectRollup` + `ListWorklogRollup`
+- `internal/store/worklog_reflections.go` — `Reflection` (with JSON tags) + `ListReflectionsForProject`
+- `internal/api/contracts.go` — `RouteWorklog`, `WorklogResponse`
+- `internal/api/handlers/worklog.go` — `WorklogHandler.List`
+- `internal/api/handlers/mounter.go` — route registration
+- `internal/worklog/reflection_recorder.go:59` — **edit point for daily reflections**
 
-## Files I touched
+**Frontend (worklog UI v2):**
+- `ui/src/lib/types.ts` — three new interfaces
+- `ui/src/lib/api.ts` — `fetchWorklog()`
+- `ui/src/routes/worklog/+page.svelte` — the page
+- `ui/src/lib/ui/TopNav.svelte` — nav tab
 
-Created:
-- `docs/superpowers/plans/2026-05-18-claude-scenario-harness.md`
-- `test/scenarios/**` (12 files)
-- `HANDOFF.md` (this file)
+**Showcase harness:**
+- `test/scenarios/runner.js` — entry point
+- `test/scenarios/scenarios/*.js` — 5 scenarios
+- `test/scenarios/lib/{claude,klyne,tmpdir,assert,report}.js` — primitives
 
-No existing files were modified. The pre-existing UI changes on `init` were
-not touched — they're on the original branch, this work is on
-`worktree-showcase-harness`.
+**Docs:**
+- `docs/superpowers/specs/2026-05-18-worklog-ui-design.md` — v1 + v2 design
+- `docs/superpowers/plans/2026-05-18-worklog-ui.md` — v1 implementation plan (v2 was inline)
+- `docs/superpowers/plans/2026-05-18-claude-scenario-harness.md` — harness plan

@@ -31,6 +31,7 @@ import type {
   UsageResponse,
   UsageStatsQuery,
   UsageStatsResponse,
+  WorklogResponse,
 } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -342,6 +343,21 @@ export async function deleteMemory(id: string): Promise<void> {
     try { body = await res.json(); } catch { body = await res.text(); }
     throw new ApiError(res.status, body);
   }
+}
+
+// ---------------------------------------------------------------------------
+// /worklog/items
+// ---------------------------------------------------------------------------
+
+/**
+ * GET /worklog/items — per-project reflection rollup.
+ *
+ * Returns one entry per project that has either a reflection or at least one
+ * visible stop_summaries row. Sorted server-side: stale-with-reflection first,
+ * then cold-start (no reflection yet), then fresh.
+ */
+export async function fetchWorklog(): Promise<WorklogResponse> {
+  return get<WorklogResponse>('/worklog/items');
 }
 
 // ---------------------------------------------------------------------------
