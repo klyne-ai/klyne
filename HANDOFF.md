@@ -64,31 +64,19 @@ Latest commit: `8fae7e8`.
 
 ---
 
-## Open product decision — daily reflections
+## Shipped — daily reflections
 
-User confirmed direction: **daily reflections as the foundational unit; weekly derived from days.** Reason: weekly-only doesn't surface day-to-day productivity.
+Daily reflections (tier=1) are now the foundational unit. `/klyne:reflect`
+auto-buckets pending entries by UTC date and writes one
+`"Daily reflection — YYYY-MM-DD"` reflection per date in a single run.
 
-**Today's reality:** `internal/worklog/reflection_recorder.go:59` hardcodes `Tier: 2` (weekly). Daily reflections don't exist yet in the data.
+Files: `internal/worklog/reflection_recorder.go`,
+`internal/mcpserver/tool_record_reflection.go`,
+`internal/mcpserver/slashcommands/reflect.md`. The new drill-in lives at
+`/worklog/project?path=<abs>` (backend: `RouteWorklogProject` →
+`internal/api/handlers/worklog.go::Project`).
 
-**Agreed approach (Option A) — auto-bucket by day:** when user runs `/klyne:reflect`, the slash command groups pending entries by date and produces ONE daily reflection per date. A single run can write 1–N daily reflections, covering all unreflected days.
-
-**Work remaining to ship this:**
-
-1. **Backend:**
-   - `RecordReflection` accepts a date param; writes `Tier: 1`, title `"Daily reflection — YYYY-MM-DD"`
-   - `/klyne:reflect` slash command prompt rewritten: bucket entries by date, call `record_reflection` once per date
-   - `WorklogProjectRollup` (or a new `WorklogProjectDays`) exposes per-day reflection list, not just latest
-   - Optional: `WeeklyFromDailies(projectPath, isoWeek)` helper (concatenate bodies, no AI)
-
-2. **Frontend:**
-   - `/worklog/[project]` per-project drill-in route showing daily reflections newest-first
-   - ISO-week collapsible headers grouping days within a week
-   - Top-level `/worklog` list keeps current shape — card per project, showing most-recent daily (instead of latest weekly)
-
-3. **Testing:**
-   - Smoke via showcase harness scenario 04 — already validates the reflection citation invariant, just need to assert tier=1 + title format
-
-Estimated size: roughly the same as the v2 worklog UI rebuild (~10 commits, ~600 LOC, half a day with breaks).
+Plan: `docs/superpowers/plans/2026-05-18-daily-reflections.md`.
 
 ---
 
