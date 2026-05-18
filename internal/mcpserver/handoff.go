@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -499,4 +500,101 @@ func commandStem(cmd string) string {
 	default:
 		return parts[0] + " " + parts[1]
 	}
+}
+
+// ticketRegex matches a Linear/Jira/GitHub-style key like CLI-1362.
+// At least two uppercase letters keeps single-letter false positives
+// (A-1, X-3) out of the results.
+var ticketRegex = regexp.MustCompile(`\b[A-Z]{2,}-\d+\b`)
+
+// urlRegex pulls pasted http(s) URLs out of message text. Trailing
+// punctuation is trimmed after the match to avoid swallowing
+// sentence-end punctuation into the URL.
+var urlRegex = regexp.MustCompile(`https?://[^\s<>"']+`)
+
+// ticketMinMentions is the minimum user-turn occurrence count a
+// ticket key must clear to land in LikelyTickets via mentions
+// alone. Keys appearing inside a pasted URL bypass the threshold
+// (FromURL=true qualifies independently).
+const ticketMinMentions = 2
+
+// extractTicketHints scans only user-role messages for the ticket
+// regex, plus all user-message URLs for embedded keys. Returns
+// keys that either meet ticketMinMentions OR appear inside any URL.
+// Sort is stable by Key so callers can rely on deterministic order.
+func extractTicketHints(msgs []*connectors.Message) []TicketHint {
+	inURL := map[string]bool{}
+	for _, m := range msgs {
+		if m == nil || m.Role != connectors.RoleUser {
+			continue
+		}
+		for _, u := range urlRegex.FindAllString(m.Content, -1) {
+			for _, k := range ticketRegex.FindAllString(u, -1) {
+				inURL[k] = true
+			}
+		}
+	}
+	// Prose mentions exclude substrings that appear inside URLs.
+	proseOnly := map[string]int{}
+	for _, m := range msgs {
+		if m == nil || m.Role != connectors.RoleUser {
+			continue
+		}
+		stripped := urlRegex.ReplaceAllString(m.Content, "")
+		for _, k := range ticketRegex.FindAllString(stripped, -1) {
+			proseOnly[k]++
+		}
+	}
+	keys := map[string]bool{}
+	for k, c := range proseOnly {
+		if c >= ticketMinMentions {
+			keys[k] = true
+		}
+	}
+	for k := range inURL {
+		keys[k] = true
+	}
+	out := make([]TicketHint, 0, len(keys))
+	for k := range keys {
+		out = append(out, TicketHint{
+			Key:      k,
+			Mentions: proseOnly[k],
+			FromURL:  inURL[k],
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
+	return out
+}
+
+// extractLinkedURLs returns user-pasted URLs, deduplicated and in
+// first-seen order. Trailing common punctuation (commas, periods,
+// closing brackets) is stripped because the regex is greedy.
+func extractLinkedURLs(msgs []*connectors.Message) []string {
+	seen := map[string]bool{}
+	var out []string
+	trim := func(u string) string {
+		for len(u) > 0 {
+			last := u[len(u)-1]
+			if last == '.' || last == ',' || last == ')' || last == ']' || last == ';' || last == ':' {
+				u = u[:len(u)-1]
+				continue
+			}
+			break
+		}
+		return u
+	}
+	for _, m := range msgs {
+		if m == nil || m.Role != connectors.RoleUser {
+			continue
+		}
+		for _, u := range urlRegex.FindAllString(m.Content, -1) {
+			u = trim(u)
+			if seen[u] {
+				continue
+			}
+			seen[u] = true
+			out = append(out, u)
+		}
+	}
+	return out
 }
