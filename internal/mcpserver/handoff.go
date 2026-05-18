@@ -756,3 +756,14 @@ func extractTodos(msgs []*connectors.Message) (inProgress, pending []TodoItem) {
 	}
 	return nil, nil
 }
+
+// branchFromMessages returns the first non-empty GitBranch field
+// across the snapshot. Empty when no message carried one.
+func branchFromMessages(msgs []*connectors.Message) string {
+	for _, m := range msgs {
+		if m != nil && m.GitBranch != "" {
+			return m.GitBranch
+		}
+	}
+	return ""
+}

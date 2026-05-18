@@ -180,3 +180,21 @@ func TestExtractTodos_MalformedJSONReturnsEmpty(t *testing.T) {
 		t.Fatalf("expected empty on bad JSON, got in=%v pend=%v", in, pend)
 	}
 }
+
+func TestBranchFromMessages_FirstNonEmptyWins(t *testing.T) {
+	msgs := []*connectors.Message{
+		{Role: connectors.RoleUser},
+		{Role: connectors.RoleAssistant, GitBranch: "feat/labstack-integration"},
+		{Role: connectors.RoleUser, GitBranch: "other"},
+	}
+	if got := branchFromMessages(msgs); got != "feat/labstack-integration" {
+		t.Fatalf("got %q, want feat/labstack-integration", got)
+	}
+}
+
+func TestBranchFromMessages_EmptyOnNoBranch(t *testing.T) {
+	msgs := []*connectors.Message{{Role: connectors.RoleUser}}
+	if got := branchFromMessages(msgs); got != "" {
+		t.Fatalf("got %q, want empty", got)
+	}
+}
