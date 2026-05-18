@@ -255,3 +255,41 @@ func TestBuildAnchorFiles_CapsAtSix(t *testing.T) {
 		t.Fatalf("got %d, want cap of 6", len(got))
 	}
 }
+
+// compactBoundaryMsg builds the canonical Message shape the Claude
+// parser emits for a `subtype:"compact_boundary"` line: a system-role
+// message with a non-nil CompactBoundary struct attached.
+func compactBoundaryMsg() *connectors.Message {
+	return &connectors.Message{
+		Role:            connectors.RoleSystem,
+		CompactBoundary: &connectors.CompactBoundary{Trigger: "manual"},
+	}
+}
+
+func TestDetectPostCompact_ShortTailFlagsTrue(t *testing.T) {
+	msgs := []*connectors.Message{
+		msgUser("turn 1"), msgUser("turn 2"),
+		compactBoundaryMsg(),
+		msgUser("turn 3"), msgAssistant("turn 4"),
+	}
+	if !detectPostCompact(msgs) {
+		t.Fatal("expected PostCompact=true with short tail")
+	}
+}
+
+func TestDetectPostCompact_LongTailFlagsFalse(t *testing.T) {
+	msgs := []*connectors.Message{msgUser("start"), compactBoundaryMsg()}
+	for i := 0; i < postCompactTailThreshold+5; i++ {
+		msgs = append(msgs, msgUser(fmt.Sprintf("after %d", i)))
+	}
+	if detectPostCompact(msgs) {
+		t.Fatal("expected PostCompact=false with long tail")
+	}
+}
+
+func TestDetectPostCompact_NoCompactReturnsFalse(t *testing.T) {
+	msgs := []*connectors.Message{msgUser("hi"), msgAssistant("hello")}
+	if detectPostCompact(msgs) {
+		t.Fatal("expected false with no compact boundary")
+	}
+}

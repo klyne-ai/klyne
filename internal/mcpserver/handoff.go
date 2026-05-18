@@ -820,3 +820,45 @@ func branchFromMessages(msgs []*connectors.Message) string {
 	}
 	return ""
 }
+
+// postCompactTailThreshold is the maximum number of post-boundary
+// user+assistant turns allowed before we conclude the model has
+// rebuilt enough context to write reliable narrative. Below this
+// count we suppress narrative authoring and emit skeleton-only.
+const postCompactTailThreshold = 50
+
+// detectPostCompact returns true when the most recent compact
+// boundary in the snapshot is followed by fewer than
+// postCompactTailThreshold user+assistant turns. False when no
+// boundary exists at all.
+//
+// Compact boundaries are recognised via the canonical
+// connectors.CompactBoundary attachment that the Claude parser
+// emits for `subtype:"compact_boundary"` JSONL lines. Codex
+// transcripts currently never carry this attachment, so this
+// helper always returns false for Codex sessions — Codex
+// post-compact detection is a separate follow-up that needs the
+// Codex parser to surface its `type:"compacted"` events as
+// synthetic boundary messages.
+func detectPostCompact(msgs []*connectors.Message) bool {
+	lastBoundary := -1
+	for i, m := range msgs {
+		if m != nil && m.CompactBoundary != nil {
+			lastBoundary = i
+		}
+	}
+	if lastBoundary < 0 {
+		return false
+	}
+	tail := 0
+	for i := lastBoundary + 1; i < len(msgs); i++ {
+		m := msgs[i]
+		if m == nil {
+			continue
+		}
+		if m.Role == connectors.RoleUser || m.Role == connectors.RoleAssistant {
+			tail++
+		}
+	}
+	return tail < postCompactTailThreshold
+}
