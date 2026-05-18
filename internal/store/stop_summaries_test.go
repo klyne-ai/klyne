@@ -273,3 +273,109 @@ func TestUpsertStopSummaryWithWorklog(t *testing.T) {
 		}
 	})
 }
+
+func TestListWorklogEntries_ReturnsBothVisibleAndSuppressed(t *testing.T) {
+	ctx := context.Background()
+	db := openStopSummariesDB(t)
+
+	// Anchor timestamps as plain int64 (file deliberately avoids time import).
+	const tsNewest = int64(30_000)
+	const tsMid = int64(20_000)
+	const tsOldest = int64(10_000)
+
+	rows := []struct {
+		row store.StopSummary
+		w   store.WorklogColumns
+	}{
+		// Visible meaningful session in project A (most recent).
+		{
+			row: store.StopSummary{
+				SessionID: "s-a-visible", Ts: tsNewest, ProjectPath: "/proj/a",
+				CLI: "claude", Summary: "## did stuff", LastUser: "create hello.js",
+				Files: []string{"hello.js"},
+			},
+			w: store.WorklogColumns{RecapVisible: 1, Importance: 7, RecapTopic: "feature", DraftState: "accepted"},
+		},
+		// Suppressed trivial session in project A (oldest).
+		{
+			row: store.StopSummary{
+				SessionID: "s-a-suppressed", Ts: tsOldest, ProjectPath: "/proj/a",
+				CLI: "claude", Summary: "## what is 2+2", LastUser: "what is 2+2",
+			},
+			w: store.WorklogColumns{RecapVisible: 0, Importance: 2, DraftState: "proposed"},
+		},
+		// Visible session in a different project (middle).
+		{
+			row: store.StopSummary{
+				SessionID: "s-b-visible", Ts: tsMid, ProjectPath: "/proj/b",
+				CLI: "codex", Summary: "## codex did stuff", LastUser: "fix bug",
+				Files: []string{"main.go"},
+			},
+			w: store.WorklogColumns{RecapVisible: 1, Importance: 5, DraftState: "accepted"},
+		},
+	}
+	for _, r := range rows {
+		if err := store.UpsertStopSummaryWithWorklog(ctx, db, r.row, r.w); err != nil {
+			t.Fatalf("seed %s: %v", r.row.SessionID, err)
+		}
+	}
+
+	t.Run("all projects, newest first", func(t *testing.T) {
+		got, err := store.ListWorklogEntries(ctx, db, store.ListWorklogEntriesOpts{})
+		if err != nil {
+			t.Fatalf("list all: %v", err)
+		}
+		if len(got) != 3 {
+			t.Fatalf("len=%d, want 3", len(got))
+		}
+		if got[0].SessionID != "s-a-visible" {
+			t.Errorf("got[0]=%s, want s-a-visible (newest)", got[0].SessionID)
+		}
+		if got[2].SessionID != "s-a-suppressed" {
+			t.Errorf("got[2]=%s, want s-a-suppressed (oldest)", got[2].SessionID)
+		}
+	})
+
+	t.Run("includes suppressed rows", func(t *testing.T) {
+		got, err := store.ListWorklogEntries(ctx, db, store.ListWorklogEntriesOpts{})
+		if err != nil {
+			t.Fatalf("list: %v", err)
+		}
+		var anySuppressed bool
+		for _, e := range got {
+			if e.RecapVisible == 0 {
+				anySuppressed = true
+				break
+			}
+		}
+		if !anySuppressed {
+			t.Error("expected at least one suppressed row in result")
+		}
+	})
+
+	t.Run("scoped by project_path", func(t *testing.T) {
+		got, err := store.ListWorklogEntries(ctx, db, store.ListWorklogEntriesOpts{ProjectPath: "/proj/a"})
+		if err != nil {
+			t.Fatalf("list /proj/a: %v", err)
+		}
+		if len(got) != 2 {
+			t.Fatalf("len=%d, want 2 for /proj/a", len(got))
+		}
+		for _, e := range got {
+			if e.ProjectPath != "/proj/a" {
+				t.Errorf("project_path=%s, want /proj/a", e.ProjectPath)
+			}
+		}
+	})
+
+	t.Run("populates files from files_json", func(t *testing.T) {
+		got, err := store.ListWorklogEntries(ctx, db, store.ListWorklogEntriesOpts{ProjectPath: "/proj/a"})
+		if err != nil {
+			t.Fatalf("list: %v", err)
+		}
+		// Newest first = s-a-visible which had Files=["hello.js"].
+		if len(got) == 0 || len(got[0].Files) != 1 || got[0].Files[0] != "hello.js" {
+			t.Errorf("got[0].Files=%v, want [hello.js]", got[0].Files)
+		}
+	})
+}

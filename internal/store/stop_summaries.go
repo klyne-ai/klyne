@@ -246,3 +246,89 @@ func ListStopSummariesForSession(ctx context.Context, db *DB, sessionID string, 
 	return out, nil
 }
 
+// WorklogEntry is a stop_summaries row including the migration-015
+// worklog columns. Returned by ListWorklogEntries for the /worklog
+// UI — distinct from StopSummary which is the deterministic core
+// the Stop hook writes.
+type WorklogEntry struct {
+	SessionID    string   `json:"session_id"`
+	Ts           int64    `json:"ts"`
+	ProjectPath  string   `json:"project_path"`
+	CLI          string   `json:"cli"`
+	Summary      string   `json:"summary"`
+	LastUser     string   `json:"last_user"`
+	LastBash     string   `json:"last_bash"`
+	Files        []string `json:"files"`
+	RecapVisible int      `json:"recap_visible"`
+	RecapTopic   string   `json:"recap_topic"`
+	Importance   int      `json:"importance"`
+	Signature    string   `json:"signature"`
+}
+
+// ListWorklogEntriesOpts scopes ListWorklogEntries queries.
+type ListWorklogEntriesOpts struct {
+	// ProjectPath narrows to one project. Empty returns all projects.
+	ProjectPath string
+	// Limit caps the result set. Defaults to 500 when zero.
+	Limit int
+}
+
+// ListWorklogEntries returns stop_summaries rows (with worklog metadata)
+// ordered by ts DESC. Includes both visible and suppressed rows.
+//
+// Uses idx_stop_summaries_project_ts when ProjectPath != "", otherwise
+// idx_stop_summaries_ts.
+func ListWorklogEntries(ctx context.Context, db *DB, opts ListWorklogEntriesOpts) ([]WorklogEntry, error) {
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 500
+	}
+	q := `
+SELECT session_id, ts, project_path, cli, summary, last_user, last_bash,
+       files_json, recap_visible, COALESCE(recap_topic,''), importance,
+       COALESCE(signature,'')
+  FROM stop_summaries
+ WHERE 1=1`
+	args := make([]any, 0, 2)
+	if opts.ProjectPath != "" {
+		q += ` AND project_path = ?`
+		args = append(args, opts.ProjectPath)
+	}
+	q += ` ORDER BY ts DESC LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := db.Read().QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("store: list worklog entries: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+
+	out := make([]WorklogEntry, 0)
+	for rows.Next() {
+		var e WorklogEntry
+		var filesJSON string
+		if err := rows.Scan(
+			&e.SessionID, &e.Ts, &e.ProjectPath, &e.CLI, &e.Summary,
+			&e.LastUser, &e.LastBash, &filesJSON,
+			&e.RecapVisible, &e.RecapTopic, &e.Importance, &e.Signature,
+		); err != nil {
+			return nil, fmt.Errorf("store: scan worklog entry: %w", err)
+		}
+		if filesJSON != "" {
+			if err := json.Unmarshal([]byte(filesJSON), &e.Files); err != nil {
+				// Don't fail the whole query on one bad row — return empty files
+				// list. Matches the defensive read pattern above.
+				e.Files = nil
+			}
+		}
+		if e.Files == nil {
+			e.Files = []string{}
+		}
+		out = append(out, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: iterate worklog entries: %w", err)
+	}
+	return out, nil
+}
+
