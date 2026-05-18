@@ -31,6 +31,7 @@ import type {
   UsageResponse,
   UsageStatsQuery,
   UsageStatsResponse,
+  WorklogResponse,
 } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -342,6 +343,21 @@ export async function deleteMemory(id: string): Promise<void> {
     try { body = await res.json(); } catch { body = await res.text(); }
     throw new ApiError(res.status, body);
   }
+}
+
+// ---------------------------------------------------------------------------
+// /worklog/items
+// ---------------------------------------------------------------------------
+
+/**
+ * GET /worklog/items — every worklog entry grouped by global vs project.
+ * Returns both visible (recap_visible=1) and suppressed (recap_visible=0).
+ *
+ * @param project Optional absolute project path. Omit for all projects.
+ */
+export async function fetchWorklog(project?: string): Promise<WorklogResponse> {
+  const qs = project ? `?project=${encodeURIComponent(project)}` : '';
+  return get<WorklogResponse>(`/worklog/items${qs}`);
 }
 
 // ---------------------------------------------------------------------------
