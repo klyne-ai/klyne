@@ -377,7 +377,7 @@ SELECT DISTINCT project_path FROM worklog_reflections WHERE project_path <> ''`
 
 	out := make([]WorklogProjectRollup, 0, len(projects))
 	for _, p := range projects {
-		row := WorklogProjectRollup{ProjectPath: p, Name: basename(p)}
+		row := WorklogProjectRollup{ProjectPath: p, Name: Basename(p)}
 
 		// Latest reflection for this project (may be nil).
 		refs, err := ListReflectionsForProject(ctx, db, p, 1)
@@ -413,10 +413,11 @@ WHERE project_path = ? AND recap_visible = 1`
 	return out, nil
 }
 
-// basename returns the last "/"-separated segment of p. Inline to avoid
-// pulling in path/filepath for this single use; filepath.Base also collapses
-// trailing slashes which we don't want here.
-func basename(p string) string {
+// Basename returns the last "/"-separated segment of p. Defined here
+// (not in path/filepath) so the worklog code has no implicit dep on the
+// OS-aware filepath cleaner — projects use raw absolute Unix-style paths
+// inside klyne regardless of host OS.
+func Basename(p string) string {
 	for i := len(p) - 1; i >= 0; i-- {
 		if p[i] == '/' {
 			return p[i+1:]

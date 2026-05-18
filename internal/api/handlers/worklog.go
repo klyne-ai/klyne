@@ -84,6 +84,9 @@ func (h *WorklogHandler) Project(w http.ResponseWriter, r *http.Request) {
 	// place. For projects with no rows the rollup returns nothing — we
 	// fall back to a zero-valued rollup so the response shape stays
 	// predictable for the UI's empty state.
+	// O(N projects) per drill-in: we reuse ListWorklogRollup so the
+	// staleness math stays in one place. Fine for local SQLite; if
+	// project counts grow large, extract a single-project rollup variant.
 	rollup, err := store.ListWorklogRollup(r.Context(), h.db)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -101,7 +104,7 @@ func (h *WorklogHandler) Project(w http.ResponseWriter, r *http.Request) {
 	if !found {
 		project = store.WorklogProjectRollup{
 			ProjectPath: projectPath,
-			Name:        basenameProjectPath(projectPath),
+			Name:        store.Basename(projectPath),
 		}
 	}
 
@@ -117,14 +120,3 @@ func (h *WorklogHandler) Project(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// basenameProjectPath returns the last "/"-separated segment of p. Inline
-// because store.basename is unexported; duplicating one tiny helper avoids
-// widening that file's API surface for one caller.
-func basenameProjectPath(p string) string {
-	for i := len(p) - 1; i >= 0; i-- {
-		if p[i] == '/' {
-			return p[i+1:]
-		}
-	}
-	return p
-}
