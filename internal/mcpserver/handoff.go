@@ -665,6 +665,13 @@ func detectPostCompact(msgs []*connectors.Message) bool {
 	return tail < postCompactTailThreshold
 }
 
+// DetectPostCompactExported is the public entry the determinism
+// proof uses to assert PostCompact-flagging behaviour without
+// pulling in the full HandleGenerateHandoff plumbing.
+func DetectPostCompactExported(msgs []*connectors.Message) bool {
+	return detectPostCompact(msgs)
+}
+
 // buildSkeleton converts the snapshot into the structured Skeleton
 // form returned alongside Markdown. Pulls the same fields the
 // renderer prints, so consumers can pick by structure or by
