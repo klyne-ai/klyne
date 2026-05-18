@@ -703,3 +703,56 @@ func formatRelativeAgo(now, earlier int64) string {
 		return fmt.Sprintf("%dd", int(delta/(24*time.Hour)))
 	}
 }
+
+// handoffMaxTodos caps the rendered count of in_progress + pending
+// items each. The TodoWrite tool itself doesn't impose a cap, so
+// we apply our own to keep the handoff bounded.
+const handoffMaxTodos = 8
+
+// extractTodos returns (in_progress, pending) items from the MOST
+// RECENT TodoWrite tool call in the snapshot. Older TodoWrites are
+// ignored because the model overwrites the full list on each call.
+// Returns (nil, nil) when no TodoWrite was used or the most recent
+// one's input fails to parse.
+func extractTodos(msgs []*connectors.Message) (inProgress, pending []TodoItem) {
+	// Walk backward to find the most recent TodoWrite.
+	for i := len(msgs) - 1; i >= 0; i-- {
+		m := msgs[i]
+		if m == nil {
+			continue
+		}
+		for j := len(m.ToolCalls) - 1; j >= 0; j-- {
+			tc := m.ToolCalls[j]
+			if !strings.EqualFold(tc.Name, "TodoWrite") {
+				continue
+			}
+			var raw struct {
+				Todos []struct {
+					Content string `json:"content"`
+					Status  string `json:"status"`
+				} `json:"todos"`
+			}
+			if err := json.Unmarshal([]byte(tc.Input), &raw); err != nil {
+				return nil, nil
+			}
+			for _, t := range raw.Todos {
+				item := TodoItem{Content: strings.TrimSpace(t.Content), Status: t.Status}
+				if item.Content == "" {
+					continue
+				}
+				switch t.Status {
+				case "in_progress":
+					if len(inProgress) < handoffMaxTodos {
+						inProgress = append(inProgress, item)
+					}
+				case "pending":
+					if len(pending) < handoffMaxTodos {
+						pending = append(pending, item)
+					}
+				}
+			}
+			return inProgress, pending
+		}
+	}
+	return nil, nil
+}

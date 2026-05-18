@@ -121,3 +121,62 @@ func TestExtractPlanOfRecord_AlsoMatchesResearchAnd00Plan(t *testing.T) {
 		t.Fatalf("got %+v, want 00-plan.md", got)
 	}
 }
+
+// todoWriteCall builds a Message carrying a single TodoWrite
+// tool call. Items is marshalled into the standard Claude Code
+// shape: {"todos": [{"content": "...", "status": "..."}, ...]}.
+func todoWriteCall(items []TodoItem) *connectors.Message {
+	type wireItem struct {
+		Content string `json:"content"`
+		Status  string `json:"status"`
+	}
+	wire := make([]wireItem, 0, len(items))
+	for _, it := range items {
+		wire = append(wire, wireItem{Content: it.Content, Status: it.Status})
+	}
+	payload, _ := json.Marshal(map[string]any{"todos": wire})
+	return &connectors.Message{
+		Role: connectors.RoleAssistant,
+		ToolCalls: []connectors.ToolCall{
+			{Name: "TodoWrite", Input: string(payload)},
+		},
+	}
+}
+
+func TestExtractTodos_PicksMostRecentTodoWrite(t *testing.T) {
+	older := todoWriteCall([]TodoItem{
+		{Content: "stale", Status: "pending"},
+	})
+	newer := todoWriteCall([]TodoItem{
+		{Content: "wire role gate", Status: "in_progress"},
+		{Content: "add short-circuit", Status: "pending"},
+		{Content: "ship docs", Status: "completed"},
+	})
+	in, pend := extractTodos([]*connectors.Message{older, newer})
+	if len(in) != 1 || in[0].Content != "wire role gate" {
+		t.Errorf("in_progress = %+v, want one entry 'wire role gate'", in)
+	}
+	if len(pend) != 1 || pend[0].Content != "add short-circuit" {
+		t.Errorf("pending = %+v, want one entry 'add short-circuit'", pend)
+	}
+}
+
+func TestExtractTodos_NoTodoWriteReturnsEmpty(t *testing.T) {
+	in, pend := extractTodos([]*connectors.Message{msgUser("hi")})
+	if len(in) != 0 || len(pend) != 0 {
+		t.Fatalf("expected empty, got in=%v pend=%v", in, pend)
+	}
+}
+
+func TestExtractTodos_MalformedJSONReturnsEmpty(t *testing.T) {
+	bad := &connectors.Message{
+		Role: connectors.RoleAssistant,
+		ToolCalls: []connectors.ToolCall{
+			{Name: "TodoWrite", Input: "{not json"},
+		},
+	}
+	in, pend := extractTodos([]*connectors.Message{bad})
+	if len(in) != 0 || len(pend) != 0 {
+		t.Fatalf("expected empty on bad JSON, got in=%v pend=%v", in, pend)
+	}
+}
