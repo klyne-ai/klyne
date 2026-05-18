@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -28,7 +29,10 @@ type RecordReflectionOutput struct {
 }
 
 func handleRecordReflection(ctx context.Context, db *store.DB, in RecordReflectionInput) (*RecordReflectionOutput, error) {
-	refl, err := worklog.RecordReflection(ctx, db, in.ProjectPath, in.Insights)
+	// NOTE: Task 3 will add a Day field to RecordReflectionInput and pass it
+	// here. For now, pass a zero time so the recorder falls back to time.Now(),
+	// preserving today's "always file under today" MCP behavior.
+	refl, err := worklog.RecordReflection(ctx, db, in.ProjectPath, time.Time{}, in.Insights)
 	if err != nil {
 		return nil, err
 	}

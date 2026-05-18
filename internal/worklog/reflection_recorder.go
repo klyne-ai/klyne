@@ -1,10 +1,13 @@
 // Package-level helper for the record_reflection MCP tool.
 //
-// RecordReflection persists a synthesized weekly reflection produced by
-// the AI host (Claude / Codex via its slash command). The citation
-// invariant is enforced here AND in store.InsertReflection — we keep
-// the AI-facing check tight so the host gets an immediate, descriptive
-// error before the row is even attempted.
+// RecordReflection persists a synthesized DAILY reflection (tier=1)
+// produced by the AI host (Claude / Codex via its slash command).
+// The host buckets pending entries by date and calls this once per
+// date so a single /klyne:reflect run can catch up across N days.
+//
+// The citation invariant is enforced here AND in store.InsertReflection
+// — we keep the AI-facing check tight so the host gets an immediate,
+// descriptive error before the row is even attempted.
 
 package worklog
 
@@ -33,7 +36,7 @@ type Insight struct {
 //
 // Called by the record_reflection MCP tool (which is invoked by Claude
 // after the /klyne:reflect slash command produces insights).
-func RecordReflection(ctx context.Context, db *store.DB, projectPath string, insights []Insight) (store.Reflection, error) {
+func RecordReflection(ctx context.Context, db *store.DB, projectPath string, day time.Time, insights []Insight) (store.Reflection, error) {
 	if strings.TrimSpace(projectPath) == "" {
 		return store.Reflection{}, errors.New("worklog: project_path required")
 	}
@@ -57,16 +60,20 @@ func RecordReflection(ctx context.Context, db *store.DB, projectPath string, ins
 		body.WriteString(fmt.Sprintf("- %s (evidence: %s)\n", ins.Text, strings.Join(ins.Evidence, ", ")))
 	}
 	now := time.Now()
+	if day.IsZero() {
+		day = now
+	}
+	dayLabel := day.UTC().Format("2006-01-02")
 	refl := store.Reflection{
-		ID:               fmt.Sprintf("ref-%d", now.UnixNano()),
+		ID:               fmt.Sprintf("ref-%s-%d", dayLabel, now.UnixNano()),
 		TS:               now.UnixMilli(),
 		ProjectPath:      projectPath,
-		Tier:             2, // weekly
-		Title:            fmt.Sprintf("Weekly reflection — %s", IsoWeek(now)),
+		Tier:             1, // daily
+		Title:            fmt.Sprintf("Daily reflection — %s", dayLabel),
 		BodyMD:           body.String(),
 		EvidenceEntryIDs: allEvidence,
 		Importance:       7,
-		SummarySource:    "ai", // synthesized by the AI host that called record_reflection
+		SummarySource:    "ai",
 		State:            "proposed",
 		StateChangedAt:   now.UnixMilli(),
 	}

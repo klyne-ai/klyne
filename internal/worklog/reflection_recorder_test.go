@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/klyne-ai/klyne/internal/store"
 )
@@ -25,7 +26,8 @@ func TestRecordReflection_RoundTrip(t *testing.T) {
 		{Text: "User shipped auth refactor", Evidence: []string{"entry-1", "entry-2"}},
 		{Text: "Test coverage improved", Evidence: []string{"entry-3"}},
 	}
-	refl, err := RecordReflection(context.Background(), db, "/p", insights)
+	day := time.Date(2026, 5, 17, 0, 0, 0, 0, time.UTC)
+	refl, err := RecordReflection(context.Background(), db, "/p", day, insights)
 	if err != nil {
 		t.Fatalf("record: %v", err)
 	}
@@ -35,8 +37,11 @@ func TestRecordReflection_RoundTrip(t *testing.T) {
 	if refl.ProjectPath != "/p" {
 		t.Errorf("project_path lost: %q", refl.ProjectPath)
 	}
-	if refl.Tier != 2 {
-		t.Errorf("expected tier=2 (weekly), got %d", refl.Tier)
+	if refl.Tier != 1 {
+		t.Errorf("expected tier=1 (daily), got %d", refl.Tier)
+	}
+	if refl.Title != "Daily reflection — 2026-05-17" {
+		t.Errorf("expected daily title, got %q", refl.Title)
 	}
 	if refl.SummarySource != "ai" {
 		t.Errorf("expected summary_source=ai, got %q", refl.SummarySource)
@@ -51,7 +56,6 @@ func TestRecordReflection_RoundTrip(t *testing.T) {
 		t.Errorf("body should embed comma-joined evidence, got %q", refl.BodyMD)
 	}
 
-	// Confirm round-trip through the store.
 	rows, err := store.ListReflectionsForProject(context.Background(), db, "/p", 10)
 	if err != nil {
 		t.Fatalf("list: %v", err)
@@ -63,7 +67,7 @@ func TestRecordReflection_RoundTrip(t *testing.T) {
 
 func TestRecordReflection_RejectsEmptyInsights(t *testing.T) {
 	db := newRecorderTestDB(t)
-	_, err := RecordReflection(context.Background(), db, "/p", nil)
+	_, err := RecordReflection(context.Background(), db, "/p", time.Time{}, nil)
 	if err == nil {
 		t.Errorf("expected error on nil insights")
 	}
@@ -77,7 +81,7 @@ func TestRecordReflection_RejectsMissingEvidence(t *testing.T) {
 	insights := []Insight{
 		{Text: "vague claim", Evidence: nil},
 	}
-	_, err := RecordReflection(context.Background(), db, "/p", insights)
+	_, err := RecordReflection(context.Background(), db, "/p", time.Time{}, insights)
 	if err == nil {
 		t.Errorf("expected citation-invariant error, got nil")
 	}
@@ -91,7 +95,7 @@ func TestRecordReflection_RejectsEmptyText(t *testing.T) {
 	insights := []Insight{
 		{Text: "   ", Evidence: []string{"e1"}},
 	}
-	_, err := RecordReflection(context.Background(), db, "/p", insights)
+	_, err := RecordReflection(context.Background(), db, "/p", time.Time{}, insights)
 	if err == nil {
 		t.Errorf("expected error on empty insight text")
 	}
@@ -105,7 +109,7 @@ func TestRecordReflection_CanonicalizesWorktreePath(t *testing.T) {
 	db := newRecorderTestDB(t)
 	insights := []Insight{{Text: "shipped", Evidence: []string{"e1"}}}
 
-	refl, err := RecordReflection(context.Background(), db, wt, insights)
+	refl, err := RecordReflection(context.Background(), db, wt, time.Time{}, insights)
 	if err != nil {
 		t.Fatalf("record: %v", err)
 	}
@@ -119,7 +123,7 @@ func TestRecordReflection_CanonicalizesWorktreePath(t *testing.T) {
 func TestRecordReflection_RejectsEmptyProject(t *testing.T) {
 	db := newRecorderTestDB(t)
 	insights := []Insight{{Text: "x", Evidence: []string{"e"}}}
-	_, err := RecordReflection(context.Background(), db, "", insights)
+	_, err := RecordReflection(context.Background(), db, "", time.Time{}, insights)
 	if err == nil {
 		t.Errorf("expected error on empty project_path")
 	}
