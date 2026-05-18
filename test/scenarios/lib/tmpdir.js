@@ -6,34 +6,45 @@ import path from "node:path";
 const KLYNE_BIN = process.env.KLYNE_BIN || "/Users/mohitpatel/.local/bin/klyne";
 
 /**
- * Seed `.claude/settings.json` inside the project dir with klyne's Stop hook.
+ * Seed two config files inside the project dir:
+ *   .claude/settings.json — registers klyne's Stop hook (per-turn worklog write)
+ *   .claude/mcp.json      — registers klyne as an MCP server so /klyne:reflect,
+ *                            /klyne:runbooks, remember_memory, recall_memory etc.
+ *                            actually resolve to live tools
  *
- * Why: `claude -p` only fires Stop hooks that are registered in a settings file
- * Claude Code can see for that cwd. Klyne's regular install wires the hook in
- * the user's primary config (location varies), but ephemeral tmp dirs don't
- * inherit it. Writing a project-level settings file makes the harness
- * self-sufficient: it works as long as the `klyne` binary is on disk.
+ * Why both: in `claude -p`, hooks fire from settings but MCP servers must be
+ * registered via --mcp-config OR a project-level mcp.json that Claude auto-loads.
+ * Without the MCP config, `klyne MCP` tools silently aren't available (which is
+ * the exact failure mode scenarios 03/04/05 hit in the first full sweep).
  */
-function seedKlyneHook(dir) {
+function seedKlyneConfig(dir) {
   const settings = {
     hooks: {
       Stop: [
         {
           hooks: [
-            {
-              type: "command",
-              command: KLYNE_BIN + " session-end",
-              timeout: 30,
-            },
+            { type: "command", command: KLYNE_BIN + " session-end", timeout: 30 },
           ],
         },
       ],
+    },
+  };
+  const mcp = {
+    mcpServers: {
+      klyne: {
+        command: KLYNE_BIN,
+        args: ["mcp"],
+      },
     },
   };
   mkdirSync(path.join(dir, ".claude"), { recursive: true });
   writeFileSync(
     path.join(dir, ".claude/settings.json"),
     JSON.stringify(settings, null, 2),
+  );
+  writeFileSync(
+    path.join(dir, ".mcp.json"),
+    JSON.stringify(mcp, null, 2),
   );
 }
 
@@ -51,7 +62,7 @@ export function makeProject(name) {
   execFileSync("git", ["init", "-q"], { cwd: dir });
   execFileSync("git", ["config", "user.email", "showcase@klyne.test"], { cwd: dir });
   execFileSync("git", ["config", "user.name", "showcase"], { cwd: dir });
-  seedKlyneHook(dir);
+  seedKlyneConfig(dir);
   writeFileSync(
     path.join(dir, "README.md"),
     `# ${safe}\n\nThrowaway project for klyne scenario harness.\n`,

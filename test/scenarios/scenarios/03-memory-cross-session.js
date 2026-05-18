@@ -18,12 +18,16 @@ import { STATUS } from "../lib/report.js";
 export const name = "03-memory-cross-session";
 
 const FACT_TOKEN = "STAGING_API_URL_https_api_staging_acme_test";
+// Tool-name-agnostic prompts: klyne exposes record_decision / list_decisions
+// (not remember_memory / recall_memory), and tool names may evolve. Let Claude
+// pick the right MCP tool from the klyne server.
 const FACT_PROMPT_STORE =
-  `Use the klyne MCP tool 'remember_memory' to save the following text exactly: "${FACT_TOKEN}". ` +
-  `Tag it as 'config'. After calling the tool, reply with the single word DONE.`;
+  `Use the klyne MCP server to record a project-scoped note for this directory ` +
+  `containing the EXACT text: "${FACT_TOKEN}". After calling the tool, reply with the single word DONE.`;
 const FACT_PROMPT_RECALL =
-  `Use the klyne MCP tool 'recall_memory' or 'list_memories' to look up any saved memory tagged 'config' for this project. ` +
-  `Then reply with the exact text of the memory you found. Reply only with the memory text.`;
+  `Use the klyne MCP server to list / search all notes (decisions or memories) stored for ` +
+  `this project's directory. Reply ONLY with the text of any matching note. ` +
+  `If you find a note containing 'STAGING_API_URL', reply with its full text verbatim.`;
 
 export async function run({ keepTmp = false, noClaude = false } = {}) {
   const steps = [];

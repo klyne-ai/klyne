@@ -42,6 +42,13 @@ export async function runClaude(opts) {
     if (existsSync(candidate)) effectiveSettingsPath = candidate;
   }
 
+  // Auto-detect a project-level .mcp.json (where tmpdir.js seeds the klyne
+  // MCP server config) so klyne tools like remember_memory / propose_reflection
+  // are actually available to scenarios 03/04/05.
+  let mcpConfigPath = null;
+  const mcpCandidate = path.join(cwd, ".mcp.json");
+  if (existsSync(mcpCandidate)) mcpConfigPath = mcpCandidate;
+
   const args = [
     "-p",
     "--output-format",
@@ -59,6 +66,12 @@ export async function runClaude(opts) {
     // `--settings <file>` adds an additional, fully-trusted settings file.
     // This is how we inject the klyne Stop hook into ephemeral test projects.
     args.push("--settings", effectiveSettingsPath);
+  }
+  if (mcpConfigPath) {
+    // `--mcp-config <file>` loads project-scoped MCP servers. We pair it with
+    // `--strict-mcp-config` so the user's (possibly broken) global ~/.claude.json
+    // klyne entry doesn't conflict with the one we just seeded.
+    args.push("--mcp-config", mcpConfigPath, "--strict-mcp-config");
   }
   if (model) args.push("--model", model);
   if (allowedTools && allowedTools.length > 0) {
