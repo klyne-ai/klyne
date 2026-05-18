@@ -22,80 +22,79 @@ func newWorklogRouter(t *testing.T, db *store.DB) http.Handler {
 	return r
 }
 
-func seedWorklogRows(t *testing.T, db *store.DB) {
+// seedWorklogScenarios populates one project per tier so the sort order can
+// be asserted end-to-end.
+func seedWorklogScenarios(t *testing.T, db *store.DB) {
 	t.Helper()
 	ctx := context.Background()
-	// Plain int timestamps — mirrors stop_summaries_test.go which avoids
-	// the time import on purpose. tsNewest is the most recent.
-	const tsNewest = int64(30_000)
-	const tsMid = int64(20_000)
-	const tsOldest = int64(10_000)
 
-	rows := []struct {
-		row store.StopSummary
-		w   store.WorklogColumns
-	}{
-		{
-			row: store.StopSummary{SessionID: "wl-a-visible", Ts: tsNewest, ProjectPath: "/proj/a", CLI: "claude", Summary: "## did stuff", LastUser: "create hello.js", Files: []string{"hello.js"}},
-			w:   store.WorklogColumns{RecapVisible: 1, Importance: 7, RecapTopic: "feature", DraftState: "accepted"},
-		},
-		{
-			row: store.StopSummary{SessionID: "wl-a-suppressed", Ts: tsOldest, ProjectPath: "/proj/a", CLI: "claude", Summary: "## trivia", LastUser: "what is 2+2"},
-			w:   store.WorklogColumns{RecapVisible: 0, Importance: 2, DraftState: "proposed"},
-		},
-		{
-			row: store.StopSummary{SessionID: "wl-b-visible", Ts: tsMid, ProjectPath: "/proj/b", CLI: "codex", Summary: "## fix", LastUser: "fix bug"},
-			w:   store.WorklogColumns{RecapVisible: 1, Importance: 5, DraftState: "accepted"},
-		},
-	}
-	for _, r := range rows {
-		if err := store.UpsertStopSummaryWithWorklog(ctx, db, r.row, r.w); err != nil {
-			t.Fatalf("seed %s: %v", r.row.SessionID, err)
-		}
+	// Stale-with-reflection: /proj/stale — reflection at ts=20_000, new entries after.
+	mustUpsert(t, ctx, db, "stale-old", 10_000, "/proj/stale", 1)
+	mustReflect(t, ctx, db, "stale-r", 20_000, "/proj/stale", "stale-old")
+	mustUpsert(t, ctx, db, "stale-new1", 30_000, "/proj/stale", 1)
+	mustUpsert(t, ctx, db, "stale-new2", 31_000, "/proj/stale", 1)
+
+	// Cold-start: /proj/cold — visible entry, no reflection.
+	mustUpsert(t, ctx, db, "cold-1", 25_000, "/proj/cold", 1)
+
+	// Fresh: /proj/fresh — reflection AFTER the only entry (no pending).
+	mustUpsert(t, ctx, db, "fresh-e", 5_000, "/proj/fresh", 1)
+	mustReflect(t, ctx, db, "fresh-r", 15_000, "/proj/fresh", "fresh-e")
+}
+
+func mustUpsert(t *testing.T, ctx context.Context, db *store.DB, sid string, ts int64, project string, visible int) {
+	t.Helper()
+	err := store.UpsertStopSummaryWithWorklog(ctx, db,
+		store.StopSummary{SessionID: sid, Ts: ts, ProjectPath: project, CLI: "claude", Summary: "x", LastUser: "y"},
+		store.WorklogColumns{RecapVisible: visible, Importance: 5, DraftState: "accepted"},
+	)
+	if err != nil {
+		t.Fatalf("upsert %s: %v", sid, err)
 	}
 }
 
-func TestWorklog_List_GroupsByProject(t *testing.T) {
+func mustReflect(t *testing.T, ctx context.Context, db *store.DB, id string, ts int64, project, evidenceID string) {
+	t.Helper()
+	err := store.InsertReflection(ctx, db, store.Reflection{
+		ID: id, TS: ts, ProjectPath: project, Tier: 2, Title: "test reflection",
+		BodyMD: "did things", State: "accepted", SummarySource: "ai", Importance: 5,
+		EvidenceEntryIDs: []string{evidenceID},
+	})
+	if err != nil {
+		t.Fatalf("insert reflection %s: %v", id, err)
+	}
+}
+
+func TestWorklog_List_ReturnsOnePerProject(t *testing.T) {
 	t.Parallel()
 	db := newTestStore(t)
-	seedWorklogRows(t, db)
+	seedWorklogScenarios(t, db)
 
 	srv := httptest.NewServer(newWorklogRouter(t, db))
 	t.Cleanup(srv.Close)
 
 	resp, err := http.Get(srv.URL + "/worklog/items")
 	if err != nil {
-		t.Fatalf("GET /worklog/items: %v", err)
+		t.Fatalf("GET: %v", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200, got %d", resp.StatusCode)
+		t.Fatalf("status %d", resp.StatusCode)
 	}
 
 	var body api.WorklogResponse
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-
-	if body.GlobalCount != 0 {
-		t.Errorf("GlobalCount = %d, want 0 (no project_path='' rows seeded)", body.GlobalCount)
-	}
-	if body.ProjectCount != 2 {
-		t.Errorf("ProjectCount = %d, want 2 (/proj/a + /proj/b)", body.ProjectCount)
-	}
-	if body.Total != 3 {
-		t.Errorf("Total = %d, want 3", body.Total)
-	}
-	// /proj/a should sort first (has the newest entry, tsNewest=30_000).
-	if len(body.ByProject) == 0 || body.ByProject[0].ProjectPath != "/proj/a" {
-		t.Errorf("ByProject[0]=%v, want /proj/a first", body.ByProject)
+	if len(body.Projects) != 3 {
+		t.Fatalf("Projects len=%d, want 3 (stale, cold, fresh)", len(body.Projects))
 	}
 }
 
-func TestWorklog_List_IncludesSuppressedRows(t *testing.T) {
+func TestWorklog_List_SortsByTierThenActivity(t *testing.T) {
 	t.Parallel()
 	db := newTestStore(t)
-	seedWorklogRows(t, db)
+	seedWorklogScenarios(t, db)
 
 	srv := httptest.NewServer(newWorklogRouter(t, db))
 	t.Cleanup(srv.Close)
@@ -111,28 +110,24 @@ func TestWorklog_List_IncludesSuppressedRows(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 
-	var anySuppressed bool
-	for _, g := range body.ByProject {
-		for _, e := range g.Entries {
-			if e.RecapVisible == 0 {
-				anySuppressed = true
-			}
+	// Tier order: stale-with-reflection (0) → cold (1) → fresh (2).
+	wantOrder := []string{"/proj/stale", "/proj/cold", "/proj/fresh"}
+	for i, want := range wantOrder {
+		if body.Projects[i].ProjectPath != want {
+			t.Errorf("Projects[%d].ProjectPath=%s, want %s", i, body.Projects[i].ProjectPath, want)
 		}
-	}
-	if !anySuppressed {
-		t.Error("expected suppressed rows in response; got none")
 	}
 }
 
-func TestWorklog_List_ScopedByProject(t *testing.T) {
+func TestWorklog_List_StalenessAndPendingCount(t *testing.T) {
 	t.Parallel()
 	db := newTestStore(t)
-	seedWorklogRows(t, db)
+	seedWorklogScenarios(t, db)
 
 	srv := httptest.NewServer(newWorklogRouter(t, db))
 	t.Cleanup(srv.Close)
 
-	resp, err := http.Get(srv.URL + "/worklog/items?project=/proj/a")
+	resp, err := http.Get(srv.URL + "/worklog/items")
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
@@ -143,10 +138,46 @@ func TestWorklog_List_ScopedByProject(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 
-	if body.ProjectCount != 1 {
-		t.Errorf("ProjectCount = %d, want 1 (only /proj/a)", body.ProjectCount)
+	byPath := map[string]store.WorklogProjectRollup{}
+	for _, p := range body.Projects {
+		byPath[p.ProjectPath] = p
 	}
-	if body.Total != 2 {
-		t.Errorf("Total = %d, want 2 (/proj/a has 2 rows)", body.Total)
+
+	stale := byPath["/proj/stale"]
+	if !stale.Stale || stale.PendingEntries != 2 || stale.LatestReflection == nil {
+		t.Errorf("stale: stale=%v pending=%d hasRefl=%v",
+			stale.Stale, stale.PendingEntries, stale.LatestReflection != nil)
+	}
+	cold := byPath["/proj/cold"]
+	if !cold.Stale || cold.PendingEntries != 1 || cold.LatestReflection != nil {
+		t.Errorf("cold: stale=%v pending=%d hasRefl=%v",
+			cold.Stale, cold.PendingEntries, cold.LatestReflection != nil)
+	}
+	fresh := byPath["/proj/fresh"]
+	if fresh.Stale || fresh.PendingEntries != 0 || fresh.LatestReflection == nil {
+		t.Errorf("fresh: stale=%v pending=%d hasRefl=%v",
+			fresh.Stale, fresh.PendingEntries, fresh.LatestReflection != nil)
+	}
+}
+
+func TestWorklog_List_EmptyDB(t *testing.T) {
+	t.Parallel()
+	db := newTestStore(t)
+
+	srv := httptest.NewServer(newWorklogRouter(t, db))
+	t.Cleanup(srv.Close)
+
+	resp, err := http.Get(srv.URL + "/worklog/items")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var body api.WorklogResponse
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body.Projects) != 0 {
+		t.Errorf("Projects len=%d, want 0 for empty DB", len(body.Projects))
 	}
 }

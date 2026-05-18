@@ -1,27 +1,34 @@
 <!--
-  Worklog view — project-scoped browser over the /worklog/items endpoint.
-  Card grid showing every stop_summaries row including suppressed (recap_visible=0)
-  ones, so users can audit klyne's worklog signal-vs-noise behavior in one glance.
+  Worklog v2 — per-project reflection rollup.
 
-  v1 scope: project filter dropdown only. No tag chips, group-by, search, or delete.
+  Each project card shows the latest synthesized reflection (klyne's
+  worklog_reflections row, written by `/klyne:reflect`). Cards surface
+  one of three states:
+
+    stale   — reflection exists, but N new visible entries arrived after it
+    cold    — no reflection yet for this project (visible entries waiting)
+    fresh   — reflection covers everything; nothing to do
+
+  When stale or cold, the card shows a copy-able command the user can run in
+  their own Claude session to (re)trigger reflection synthesis. The UI itself
+  cannot trigger the AI synth step — that's by design (no daemon-side LLM call).
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { page } from '$app/stores';
   import { fetchWorklog } from '$lib/api.js';
-  import type { WorklogEntry, WorklogProjectGroup, WorklogResponse } from '$lib/types.js';
+  import type { Reflection, WorklogProjectRollup, WorklogResponse } from '$lib/types.js';
   import { relTime } from '$lib/format.js';
 
   let resp = $state<WorklogResponse | null>(null);
   let loading = $state(true);
   let error = $state<string | null>(null);
-  let selectedProject = $state<string>(''); // '' = all
   let expanded = $state<Record<string, boolean>>({});
+  let copied = $state<string | null>(null); // project_path of last-copied cmd
 
   async function load(): Promise<void> {
     loading = true;
     try {
-      resp = await fetchWorklog(selectedProject || undefined);
+      resp = await fetchWorklog();
       error = null;
     } catch (e: unknown) {
       error = e instanceof Error ? e.message : 'failed to load worklog';
@@ -31,59 +38,48 @@
   }
 
   onMount(() => {
-    selectedProject = $page.url.searchParams.get('project') ?? '';
     void load();
   });
 
-  function onSelectProject(next: string): void {
-    selectedProject = next;
-    const url = new URL(window.location.href);
-    if (next) url.searchParams.set('project', next);
-    else url.searchParams.delete('project');
-    window.history.replaceState({}, '', url.toString());
-    void load();
+  function toggle(projectPath: string): void {
+    expanded[projectPath] = !expanded[projectPath];
   }
 
-  function entryKey(e: WorklogEntry): string {
-    return `${e.session_id}:${e.ts}`;
+  function reflectCmd(projectPath: string): string {
+    // Quote the path to handle spaces in directory names.
+    return `cd "${projectPath}" && claude -p '/klyne:reflect'`;
   }
 
-  function toggle(e: WorklogEntry): void {
-    const k = entryKey(e);
-    expanded[k] = !expanded[k];
-  }
-
-  function title(e: WorklogEntry): string {
-    const t = (e.last_user || e.summary || '(no prompt)').trim();
-    return t.length > 120 ? t.slice(0, 117) + '…' : t;
-  }
-
-  // Flatten by_project + global into a single list of [groupName, entries] pairs
-  // so the template stays simple. Global comes first if present.
-  function buckets(r: WorklogResponse): WorklogProjectGroup[] {
-    const out: WorklogProjectGroup[] = [];
-    if (r.global.length > 0) {
-      out.push({ project_path: '', name: 'Global', entries: r.global, count: r.global.length });
+  async function copyCmd(projectPath: string): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(reflectCmd(projectPath));
+      copied = projectPath;
+      setTimeout(() => { if (copied === projectPath) copied = null; }, 2000);
+    } catch {
+      // Clipboard may be denied — leave silently; the cmd is visible on screen.
     }
-    for (const g of r.by_project) out.push(g);
-    return out;
   }
 
-  // Project options for the dropdown — current response groups + an "All" choice.
-  function projectOptions(r: WorklogResponse): { value: string; label: string }[] {
-    return [
-      { value: '', label: 'All projects' },
-      ...r.by_project.map((g) => ({ value: g.project_path, label: g.name })),
-    ];
+  // Tier classification for badge text + color.
+  function status(p: WorklogProjectRollup): { label: string; klass: 'stale' | 'cold' | 'fresh' } {
+    const n = p.pending_entries;
+    const ent = n === 1 ? 'entry' : 'entries';
+    if (p.stale && p.latest_reflection) return { label: `${n} new ${ent} since reflection`, klass: 'stale' };
+    if (!p.latest_reflection) return { label: `${n} ${ent} · no reflection yet`, klass: 'cold' };
+    return { label: 'fresh', klass: 'fresh' };
+  }
+
+  function reflectionAge(r: Reflection | null): string {
+    return r ? `reflected ${relTime(r.ts)}` : 'never reflected';
   }
 </script>
 
-<div class="worklog-page">
-  <header class="worklog-header">
+<div class="page">
+  <header class="head">
     <h1>Worklog</h1>
     <p class="muted">
-      Everything klyne's Stop hook captured. Suppressed rows are shown so you can
-      see what signal vs noise the suppression rules filter.
+      Daily reflections per project. When new sessions land on top of the last reflection,
+      that project gets flagged stale — run <code>/klyne:reflect</code> in the project to refresh.
     </p>
   </header>
 
@@ -93,138 +89,138 @@
     <p class="error">⚠ {error}</p>
     <p class="muted">Is the klyne daemon running?</p>
   {:else if resp}
-    <div class="filter-bar">
-      <label>
-        Project:
-        <select value={selectedProject} onchange={(e) => onSelectProject((e.currentTarget as HTMLSelectElement).value)}>
-          {#each projectOptions(resp) as opt}
-            <option value={opt.value}>{opt.label}</option>
-          {/each}
-        </select>
-      </label>
-      <span class="muted">{resp.total} {resp.total === 1 ? 'entry' : 'entries'}</span>
-    </div>
-
-    {#if resp.total === 0}
-      <p class="muted empty">No worklog entries yet for this scope.</p>
+    {#if resp.projects.length === 0}
+      <p class="muted empty">
+        Nothing here yet. As soon as klyne's Stop hook captures meaningful work in any
+        project, you'll see it show up here. Then run <code>/klyne:reflect</code> to synthesize.
+      </p>
     {:else}
-      {#each buckets(resp) as group (group.project_path || '__global__')}
-        <section class="group">
-          <h2>{group.name} <span class="count">({group.count})</span></h2>
-          <div class="grid">
-            {#each group.entries as entry (entryKey(entry))}
-              <article class="card" class:suppressed={entry.recap_visible === 0}>
-                <header class="card-head">
-                  <span class="badge cli">[{entry.cli}]</span>
-                  <span class="muted">{relTime(entry.ts)}</span>
-                  <span class="dot">·</span>
-                  <span class="muted">imp {entry.importance}</span>
-                  {#if entry.recap_visible === 1}
-                    <span class="pill visible">★ visible</span>
-                  {:else}
-                    <span class="pill suppressed">✗ suppressed</span>
-                  {/if}
-                </header>
-                <p class="title">{title(entry)}</p>
-                <button class="expand" onclick={() => toggle(entry)} aria-expanded={!!expanded[entryKey(entry)]}>
-                  {expanded[entryKey(entry)] ? '▾ Hide' : '▸ Expand'}
-                </button>
-                {#if expanded[entryKey(entry)]}
-                  <div class="card-detail">
-                    {#if entry.last_bash}
-                      <p class="muted small">Last bash:</p>
-                      <pre>{entry.last_bash}</pre>
-                    {/if}
-                    {#if entry.files.length > 0}
-                      <p class="muted small">Files touched:</p>
-                      <ul class="files">
-                        {#each entry.files as f}<li><code>{f}</code></li>{/each}
-                      </ul>
-                    {/if}
-                    <p class="muted small">Summary:</p>
-                    <pre class="summary">{entry.summary}</pre>
-                    <p class="muted small footer">
-                      <code>{entry.session_id}</code>
-                      {#if entry.signature}· sig <code>{entry.signature}</code>{/if}
-                    </p>
-                  </div>
-                {/if}
-              </article>
-            {/each}
-          </div>
-        </section>
-      {/each}
+      <p class="counter muted">{resp.projects.length} project{resp.projects.length === 1 ? '' : 's'}</p>
+      <div class="list">
+        {#each resp.projects as p (p.project_path)}
+          {@const s = status(p)}
+          <article class="card" class:stale={s.klass === 'stale'} class:cold={s.klass === 'cold'} class:fresh={s.klass === 'fresh'}>
+            <header class="card-head">
+              <h2>{p.name}</h2>
+              <span class="status {s.klass}">{s.label}</span>
+            </header>
+            <p class="meta muted">
+              {reflectionAge(p.latest_reflection)}
+              {#if p.latest_entry_ts > 0}· last activity {relTime(p.latest_entry_ts)}{/if}
+            </p>
+            <p class="path muted small"><code>{p.project_path}</code></p>
+
+            {#if p.latest_reflection}
+              <button class="expand" onclick={() => toggle(p.project_path)} aria-expanded={!!expanded[p.project_path]}>
+                {expanded[p.project_path] ? '▾ Hide reflection' : '▸ Show reflection'}
+                <span class="muted small">· {p.latest_reflection.title}</span>
+              </button>
+              {#if expanded[p.project_path]}
+                <pre class="body">{p.latest_reflection.body_md}</pre>
+                <p class="muted small footer">
+                  {p.latest_reflection.evidence_entry_ids.length} evidence
+                  · tier {p.latest_reflection.tier}
+                  · {p.latest_reflection.summary_source}
+                </p>
+              {/if}
+            {/if}
+
+            {#if s.klass === 'stale' || s.klass === 'cold'}
+              <div class="cta">
+                <p class="muted small">
+                  {s.klass === 'cold' ? 'Generate the first reflection:' : 'Refresh with the latest entries:'}
+                </p>
+                <div class="cmd-row">
+                  <code class="cmd">{reflectCmd(p.project_path)}</code>
+                  <button class="copy" onclick={() => copyCmd(p.project_path)}>
+                    {copied === p.project_path ? '✓ copied' : 'copy'}
+                  </button>
+                </div>
+              </div>
+            {/if}
+          </article>
+        {/each}
+      </div>
     {/if}
   {/if}
 </div>
 
 <style>
-  .worklog-page { padding: 1.5rem; max-width: 1400px; margin: 0 auto; }
-  .worklog-header h1 { margin: 0 0 0.25rem; }
+  .page { padding: 1.5rem; max-width: 1100px; margin: 0 auto; }
+  .head h1 { margin: 0 0 0.25rem; }
   .muted { color: var(--text-muted, #888); }
   .small { font-size: 0.85em; }
   .error { color: var(--text-error, #c33); }
-  .filter-bar {
-    display: flex; align-items: center; gap: 1rem;
-    padding: 0.75rem 0; border-bottom: 1px solid var(--border, #2a2a2a); margin-bottom: 1rem;
-  }
-  .filter-bar select {
-    padding: 0.25rem 0.5rem; background: var(--surface, #1a1a1a);
-    color: var(--text, #eee); border: 1px solid var(--border, #2a2a2a);
-    border-radius: 4px;
-  }
-  .group { margin-bottom: 2rem; }
-  .group h2 { margin: 0 0 0.75rem; font-size: 1.1rem; }
-  .count { color: var(--text-muted, #888); font-weight: normal; font-size: 0.9em; }
-  .grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-    gap: 1rem;
-  }
+  .empty { text-align: center; padding: 2rem; }
+  .counter { margin: 1rem 0 0.5rem; }
+
+  .list { display: flex; flex-direction: column; gap: 1rem; }
+
   .card {
     background: var(--surface, #1a1a1a);
     border: 1px solid var(--border, #2a2a2a);
+    border-left-width: 3px;
     border-radius: 6px;
-    padding: 0.75rem;
+    padding: 1rem 1.25rem;
   }
-  .card.suppressed { opacity: 0.65; }
+  .card.stale { border-left-color: #d97a4a; }
+  .card.cold  { border-left-color: #888;   }
+  .card.fresh { border-left-color: #4a9d5b; }
+
   .card-head {
-    display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;
-    font-size: 0.85em; margin-bottom: 0.5rem;
+    display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;
   }
-  .badge.cli {
-    padding: 0.1rem 0.4rem; border-radius: 3px;
-    background: var(--surface-2, #222); font-family: monospace;
+  .card-head h2 {
+    margin: 0; font-size: 1.1rem;
   }
-  .dot { color: var(--text-muted, #666); }
-  .pill {
-    padding: 0.1rem 0.4rem; border-radius: 999px; font-size: 0.75em;
+  .status {
+    padding: 0.1rem 0.55rem; border-radius: 999px; font-size: 0.75em;
+    text-transform: uppercase; letter-spacing: 0.04em;
   }
-  .pill.visible { background: #1e3a1e; color: #8ec98e; }
-  .pill.suppressed { background: #3a1e1e; color: #c98e8e; }
-  .title {
-    margin: 0.25rem 0;
-    font-weight: 500;
-    line-height: 1.4;
-  }
+  .status.stale { background: #3a2818; color: #e6a878; }
+  .status.cold  { background: #232323; color: #aaa; }
+  .status.fresh { background: #1e3a1e; color: #8ec98e; }
+
+  .meta { margin: 0.25rem 0; font-size: 0.9em; }
+  .path { margin: 0 0 0.5rem; font-family: monospace; font-size: 0.8em; word-break: break-all; }
+
   .expand {
-    background: none; border: none; color: var(--text-muted, #888);
-    padding: 0.25rem 0; cursor: pointer; font-size: 0.85em;
+    background: none; border: none; padding: 0.4rem 0;
+    color: var(--text, #ddd); cursor: pointer; text-align: left;
+    font-size: 0.95em; display: block; width: 100%;
   }
-  .expand:hover { color: var(--text, #eee); }
-  .card-detail {
-    border-top: 1px solid var(--border, #2a2a2a);
-    margin-top: 0.5rem; padding-top: 0.5rem;
-  }
-  pre {
+  .expand:hover { color: #fff; }
+
+  .body {
     white-space: pre-wrap; word-break: break-word;
     background: var(--surface-2, #0d0d0d);
-    padding: 0.5rem; border-radius: 4px; font-size: 0.85em;
-    margin: 0.25rem 0 0.5rem;
+    padding: 0.75rem; border-radius: 4px;
+    font-size: 0.9em; margin: 0.5rem 0;
+    max-height: 500px; overflow: auto;
+    line-height: 1.5;
   }
-  .summary { max-height: 300px; overflow: auto; }
-  .files { margin: 0.25rem 0 0.5rem 1rem; padding: 0; }
-  .files li { list-style: disc; }
-  .footer { margin-top: 0.5rem; }
-  .empty { text-align: center; padding: 2rem; }
+  .footer { margin: 0.25rem 0 0; }
+
+  .cta {
+    margin-top: 0.75rem; padding-top: 0.75rem;
+    border-top: 1px dashed var(--border, #2a2a2a);
+  }
+  .cta p { margin: 0 0 0.4rem; }
+  .cmd-row {
+    display: flex; align-items: center; gap: 0.5rem;
+  }
+  .cmd {
+    flex: 1; padding: 0.5rem 0.75rem;
+    background: var(--surface-2, #0d0d0d);
+    border-radius: 4px; font-size: 0.85em;
+    word-break: break-all;
+  }
+  .copy {
+    padding: 0.4rem 0.75rem;
+    background: var(--surface-2, #0d0d0d);
+    border: 1px solid var(--border, #2a2a2a);
+    color: var(--text, #ddd); cursor: pointer; border-radius: 4px;
+    font-size: 0.85em; white-space: nowrap;
+  }
+  .copy:hover { background: var(--border, #2a2a2a); }
 </style>

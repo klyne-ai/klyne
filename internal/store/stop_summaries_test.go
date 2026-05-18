@@ -379,3 +379,158 @@ func TestListWorklogEntries_ReturnsBothVisibleAndSuppressed(t *testing.T) {
 		}
 	})
 }
+
+func TestListWorklogRollup_NoReflectionsYet(t *testing.T) {
+	ctx := context.Background()
+	db := openStopSummariesDB(t)
+
+	// Two visible entries in /proj/cold, no reflection.
+	for _, sid := range []string{"cold-1", "cold-2"} {
+		if err := store.UpsertStopSummaryWithWorklog(ctx, db,
+			store.StopSummary{SessionID: sid, Ts: 10_000, ProjectPath: "/proj/cold", CLI: "claude", Summary: "x", LastUser: "y"},
+			store.WorklogColumns{RecapVisible: 1, Importance: 5, DraftState: "accepted"},
+		); err != nil {
+			t.Fatalf("seed %s: %v", sid, err)
+		}
+	}
+
+	got, err := store.ListWorklogRollup(ctx, db)
+	if err != nil {
+		t.Fatalf("rollup: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len=%d, want 1", len(got))
+	}
+	r := got[0]
+	if r.ProjectPath != "/proj/cold" || r.Name != "cold" {
+		t.Errorf("ProjectPath=%s Name=%s", r.ProjectPath, r.Name)
+	}
+	if r.LatestReflection != nil {
+		t.Errorf("LatestReflection=%v, want nil (cold start)", r.LatestReflection)
+	}
+	// All visible entries are 'pending' when there's no reflection yet.
+	if r.PendingEntries != 2 {
+		t.Errorf("PendingEntries=%d, want 2", r.PendingEntries)
+	}
+	if !r.Stale {
+		t.Error("Stale=false, want true (has pending entries)")
+	}
+}
+
+func TestListWorklogRollup_FreshAfterReflection(t *testing.T) {
+	ctx := context.Background()
+	db := openStopSummariesDB(t)
+
+	// Visible entry at ts=10_000.
+	if err := store.UpsertStopSummaryWithWorklog(ctx, db,
+		store.StopSummary{SessionID: "e-1", Ts: 10_000, ProjectPath: "/proj/fresh", CLI: "claude", Summary: "x", LastUser: "y"},
+		store.WorklogColumns{RecapVisible: 1, Importance: 5, DraftState: "accepted"},
+	); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	// Reflection AFTER the entry (ts=20_000).
+	if err := store.InsertReflection(ctx, db, store.Reflection{
+		ID: "r-1", TS: 20_000, ProjectPath: "/proj/fresh", Tier: 2, Title: "weekly",
+		BodyMD: "did stuff", State: "accepted", SummarySource: "ai", Importance: 5,
+		EvidenceEntryIDs: []string{"e-1"},
+	}); err != nil {
+		t.Fatalf("insert reflection: %v", err)
+	}
+
+	got, err := store.ListWorklogRollup(ctx, db)
+	if err != nil {
+		t.Fatalf("rollup: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len=%d, want 1", len(got))
+	}
+	r := got[0]
+	if r.LatestReflection == nil {
+		t.Fatal("LatestReflection nil, want reflection")
+	}
+	if r.PendingEntries != 0 {
+		t.Errorf("PendingEntries=%d, want 0 (reflection covers all entries)", r.PendingEntries)
+	}
+	if r.Stale {
+		t.Error("Stale=true, want false")
+	}
+}
+
+func TestListWorklogRollup_StaleAfterNewEntry(t *testing.T) {
+	ctx := context.Background()
+	db := openStopSummariesDB(t)
+
+	// Old visible entry (ts=10_000), reflection (ts=20_000), then 2 new entries (ts=30_000+).
+	if err := store.UpsertStopSummaryWithWorklog(ctx, db,
+		store.StopSummary{SessionID: "old-1", Ts: 10_000, ProjectPath: "/proj/stale", CLI: "claude", Summary: "x", LastUser: "y"},
+		store.WorklogColumns{RecapVisible: 1, Importance: 5, DraftState: "accepted"},
+	); err != nil {
+		t.Fatalf("seed old: %v", err)
+	}
+	if err := store.InsertReflection(ctx, db, store.Reflection{
+		ID: "r-1", TS: 20_000, ProjectPath: "/proj/stale", Tier: 2, Title: "first",
+		BodyMD: "first reflection", State: "accepted", SummarySource: "ai", Importance: 5,
+		EvidenceEntryIDs: []string{"old-1"},
+	}); err != nil {
+		t.Fatalf("insert reflection: %v", err)
+	}
+	for _, ts := range []int64{30_000, 31_000} {
+		if err := store.UpsertStopSummaryWithWorklog(ctx, db,
+			store.StopSummary{SessionID: "new", Ts: ts, ProjectPath: "/proj/stale", CLI: "claude", Summary: "x", LastUser: "y"},
+			store.WorklogColumns{RecapVisible: 1, Importance: 5, DraftState: "accepted"},
+		); err != nil {
+			t.Fatalf("seed new %d: %v", ts, err)
+		}
+	}
+
+	got, err := store.ListWorklogRollup(ctx, db)
+	if err != nil {
+		t.Fatalf("rollup: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len=%d, want 1", len(got))
+	}
+	r := got[0]
+	if r.LatestReflection == nil {
+		t.Fatal("LatestReflection nil, want reflection")
+	}
+	if r.PendingEntries != 2 {
+		t.Errorf("PendingEntries=%d, want 2 (two new entries after reflection)", r.PendingEntries)
+	}
+	if !r.Stale {
+		t.Error("Stale=false, want true (has pending)")
+	}
+	if r.LatestEntryTs != 31_000 {
+		t.Errorf("LatestEntryTs=%d, want 31000", r.LatestEntryTs)
+	}
+}
+
+func TestListWorklogRollup_SuppressedRowsDoNotCount(t *testing.T) {
+	ctx := context.Background()
+	db := openStopSummariesDB(t)
+
+	// One visible and one suppressed entry; rollup should count only the visible.
+	if err := store.UpsertStopSummaryWithWorklog(ctx, db,
+		store.StopSummary{SessionID: "v", Ts: 10_000, ProjectPath: "/proj/mix", CLI: "claude", Summary: "x", LastUser: "y"},
+		store.WorklogColumns{RecapVisible: 1, Importance: 5, DraftState: "accepted"},
+	); err != nil {
+		t.Fatalf("seed visible: %v", err)
+	}
+	if err := store.UpsertStopSummaryWithWorklog(ctx, db,
+		store.StopSummary{SessionID: "s", Ts: 11_000, ProjectPath: "/proj/mix", CLI: "claude", Summary: "x", LastUser: "y"},
+		store.WorklogColumns{RecapVisible: 0, Importance: 2, DraftState: "proposed"},
+	); err != nil {
+		t.Fatalf("seed suppressed: %v", err)
+	}
+
+	got, err := store.ListWorklogRollup(ctx, db)
+	if err != nil {
+		t.Fatalf("rollup: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len=%d, want 1", len(got))
+	}
+	if got[0].PendingEntries != 1 {
+		t.Errorf("PendingEntries=%d, want 1 (suppressed should not count)", got[0].PendingEntries)
+	}
+}

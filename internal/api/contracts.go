@@ -842,27 +842,19 @@ type ProjectInsightsResponse struct {
 }
 
 // ---------------------------------------------------------------------------
-// /worklog  — project-scoped browser over the stop_summaries table
+// /worklog  — per-project reflection rollup (v2)
 // ---------------------------------------------------------------------------
+//
+// v1 returned raw stop_summaries rows (suppression audit view). v2 surfaces
+// the synthesized reflection tier instead: one row per project showing the
+// latest worklog_reflection plus a count of visible stop_summaries written
+// after it (pending entries that should trigger a re-run of /klyne:reflect).
 
-// WorklogProjectGroup is one bucket in WorklogResponse.ByProject —
-// every worklog entry under the same project_path, grouped for the
-// dashboard's per-service view.
-type WorklogProjectGroup struct {
-	ProjectPath string               `json:"project_path"`
-	Name        string               `json:"name"`
-	Entries     []store.WorklogEntry `json:"entries"`
-	Count       int                  `json:"count"`
-}
-
-// WorklogResponse is GET /worklog/items. Splits worklog rows into one
-// "global" list (project_path == "") and one group per project, newest
-// first within each. Both visible (recap_visible=1) and suppressed
-// (recap_visible=0) rows are returned so users can audit suppression.
+// WorklogResponse is GET /worklog/items. One entry per project that has
+// either a reflection or at least one visible stop_summaries row.
+//
+// Sort is the handler's responsibility (stale-with-reflection first, then
+// never-reflected, then fresh). Empty when neither table has any data.
 type WorklogResponse struct {
-	Global       []store.WorklogEntry  `json:"global"`
-	ByProject    []WorklogProjectGroup `json:"by_project"`
-	GlobalCount  int                   `json:"global_count"`
-	ProjectCount int                   `json:"project_count"`
-	Total        int                   `json:"total"`
+	Projects []store.WorklogProjectRollup `json:"projects"`
 }

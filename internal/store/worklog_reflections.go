@@ -13,18 +13,18 @@ import (
 // EvidenceEntryID or EvidenceReflectionID must be non-empty. The
 // underlying CHECK constraint enforces this at write time too.
 type Reflection struct {
-	ID                    string
-	ProjectPath           string
-	Title                 string
-	BodyMD                string
-	SummarySource         string // "ai" | "user" | "hybrid"
-	State                 string // "proposed" | "accepted" | "dismissed"
-	Tier                  int    // 1=daily, 2=weekly, 3=quarterly
-	Importance            int
-	TS                    int64
-	StateChangedAt        int64
-	EvidenceEntryIDs      []string
-	EvidenceReflectionIDs []string
+	ID                    string   `json:"id"`
+	ProjectPath           string   `json:"project_path"`
+	Title                 string   `json:"title"`
+	BodyMD                string   `json:"body_md"`
+	SummarySource         string   `json:"summary_source"`         // "ai" | "user" | "hybrid"
+	State                 string   `json:"state"`                  // "proposed" | "accepted" | "dismissed"
+	Tier                  int      `json:"tier"`                   // 1=daily, 2=weekly, 3=quarterly
+	Importance            int      `json:"importance"`
+	TS                    int64    `json:"ts"`
+	StateChangedAt        int64    `json:"state_changed_at"`
+	EvidenceEntryIDs      []string `json:"evidence_entry_ids"`
+	EvidenceReflectionIDs []string `json:"evidence_reflection_ids"`
 }
 
 // InsertReflection writes one synthesized reflection. Enforces the

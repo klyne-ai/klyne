@@ -575,39 +575,37 @@ export interface MemoryResponse {
   total: number;
 }
 
-// --- /worklog/items ---
+// --- /worklog/items (v2 — per-project reflection rollup) ---
 
-/** WorklogEntry mirrors store.WorklogEntry — one stop_summaries row with worklog metadata. */
-export interface WorklogEntry {
-  session_id: string;
+/** Reflection mirrors store.Reflection — one row of worklog_reflections. */
+export interface Reflection {
+  id: string;
   ts: number;
   project_path: string;
-  cli: string;
-  summary: string;
-  last_user: string;
-  last_bash: string;
-  files: string[];
-  recap_visible: number;       // 0 = suppressed, 1 = visible
-  recap_topic: string;
-  importance: number;          // 1..10
-  signature: string;
+  title: string;
+  body_md: string;
+  summary_source: string;       // "ai" | "user" | "hybrid"
+  state: string;                // "proposed" | "accepted" | "dismissed"
+  tier: number;                 // 1=daily, 2=weekly, 3=quarterly
+  importance: number;
+  state_changed_at: number;
+  evidence_entry_ids: string[];
+  evidence_reflection_ids: string[];
 }
 
-/** WorklogProjectGroup is one bucket of entries under the same project. */
-export interface WorklogProjectGroup {
+/** WorklogProjectRollup is one project's reflection coverage. */
+export interface WorklogProjectRollup {
   project_path: string;
   name: string;
-  entries: WorklogEntry[];
-  count: number;
+  latest_reflection: Reflection | null;  // null = never synthesized
+  pending_entries: number;                // visible stop_summaries since latest reflection (or all visible if none)
+  latest_entry_ts: number;                // newest visible entry timestamp (0 if none)
+  stale: boolean;                         // pending_entries > 0
 }
 
 /** WorklogResponse is GET /worklog/items. */
 export interface WorklogResponse {
-  global: WorklogEntry[];
-  by_project: WorklogProjectGroup[];
-  global_count: number;
-  project_count: number;
-  total: number;
+  projects: WorklogProjectRollup[];
 }
 
 // --- /insights/projects ---

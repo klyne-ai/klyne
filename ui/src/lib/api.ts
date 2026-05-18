@@ -350,14 +350,14 @@ export async function deleteMemory(id: string): Promise<void> {
 // ---------------------------------------------------------------------------
 
 /**
- * GET /worklog/items — every worklog entry grouped by global vs project.
- * Returns both visible (recap_visible=1) and suppressed (recap_visible=0).
+ * GET /worklog/items — per-project reflection rollup.
  *
- * @param project Optional absolute project path. Omit for all projects.
+ * Returns one entry per project that has either a reflection or at least one
+ * visible stop_summaries row. Sorted server-side: stale-with-reflection first,
+ * then cold-start (no reflection yet), then fresh.
  */
-export async function fetchWorklog(project?: string): Promise<WorklogResponse> {
-  const qs = project ? `?project=${encodeURIComponent(project)}` : '';
-  return get<WorklogResponse>(`/worklog/items${qs}`);
+export async function fetchWorklog(): Promise<WorklogResponse> {
+  return get<WorklogResponse>('/worklog/items');
 }
 
 // ---------------------------------------------------------------------------

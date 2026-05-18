@@ -1,8 +1,68 @@
 # Worklog UI — project-scoped browser
 
-**Status:** Approved (brainstorming complete, ready for implementation plan)
+**Status:** v2 — reflection-centric rebuild (v1 stop_summaries view discarded)
 **Date:** 2026-05-18
 **Branch:** `worktree-worklog-ui`
+
+---
+
+## v2 update (2026-05-18, after first smoke)
+
+v1 shipped a raw `stop_summaries` card grid as a suppression-audit tool. User
+feedback after seeing it live: *"this is not readable, what conclusion are we
+getting, the whole point was a log easy to read by human and AI, daily basis."*
+
+Pivot: drop the raw view entirely. The same `/worklog` route now surfaces
+**`worklog_reflections`** — klyne's already-synthesized narrative tier — grouped
+by project, with stale-ness signals when new visible `stop_summaries` exist
+since the latest reflection.
+
+### v2 data shape
+
+`GET /worklog/items` now returns:
+
+```json
+{
+  "projects": [
+    {
+      "project_path": "/abs/path",
+      "name": "oms-service",
+      "latest_reflection": { ...Reflection... },   // null if never synthesized
+      "pending_entries": 5,                         // visible stop_summaries since latest_reflection.ts (or total visible if never)
+      "latest_entry_ts": 1779090754058,             // newest visible entry timestamp (0 if none)
+      "stale": true                                 // pending_entries > 0
+    },
+    ...
+  ]
+}
+```
+
+Sort order: **stale-with-prior-reflection** first (most actionable), then
+**never-reflected-with-entries**, then **fresh** (reflection covers everything).
+
+### v2 UI
+
+Per-project card list (not a grid). Each card:
+
+- **Header**: project name · status pill (`fresh` / `stale` / `no reflection yet`) · timestamp
+- **Body** when expanded: rendered markdown of `latest_reflection.body_md`
+- **Footer**: cold-start or stale instruction with copy-able command:
+  - Cold start: *"No reflection yet. Run `cd <project> && claude -p '/klyne:reflect'` to generate one."*
+  - Stale: *"5 new entries since last reflection. Run `cd <project> && claude -p '/klyne:reflect'` to refresh."*
+  - Fresh: no instruction.
+
+### v2 scope changes
+
+- **Drop** the v1 stop_summaries audit view entirely (route now serves reflection data only).
+- **Drop** project-filter dropdown — all projects are shown stacked, since the page
+  is now a per-project list, not a grid.
+- **Keep** the Worklog tab in TopNav and the `/worklog` URL.
+- **No "Synthesize" button** — UI cannot trigger AI synthesis itself. User
+  copies the command and runs it in their own Claude session.
+
+### v1 sections below are kept for historical context only.
+
+---
 
 ## Why
 
