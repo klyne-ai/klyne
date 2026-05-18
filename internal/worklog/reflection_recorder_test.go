@@ -2,6 +2,7 @@ package worklog
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -126,5 +127,48 @@ func TestRecordReflection_RejectsEmptyProject(t *testing.T) {
 	_, err := RecordReflection(context.Background(), db, "", time.Time{}, insights)
 	if err == nil {
 		t.Errorf("expected error on empty project_path")
+	}
+}
+
+func TestRecordReflection_WritesOnePerDay(t *testing.T) {
+	db := newRecorderTestDB(t)
+	days := []time.Time{
+		time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC),
+		time.Date(2026, 5, 16, 12, 0, 0, 0, time.UTC),
+		time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC),
+	}
+	for i, d := range days {
+		insights := []Insight{
+			{Text: fmt.Sprintf("did something on day %d", i), Evidence: []string{fmt.Sprintf("e%d", i)}},
+		}
+		if _, err := RecordReflection(context.Background(), db, "/p", d, insights); err != nil {
+			t.Fatalf("day %d: %v", i, err)
+		}
+	}
+	rows, err := store.ListReflectionsForProject(context.Background(), db, "/p", 10)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(rows) != 3 {
+		t.Fatalf("expected 3 rows (one per day), got %d", len(rows))
+	}
+	wantTitles := map[string]bool{
+		"Daily reflection — 2026-05-15": false,
+		"Daily reflection — 2026-05-16": false,
+		"Daily reflection — 2026-05-17": false,
+	}
+	for _, r := range rows {
+		if _, ok := wantTitles[r.Title]; !ok {
+			t.Errorf("unexpected title %q", r.Title)
+		}
+		wantTitles[r.Title] = true
+		if r.Tier != 1 {
+			t.Errorf("row %s: tier=%d, want 1", r.Title, r.Tier)
+		}
+	}
+	for title, seen := range wantTitles {
+		if !seen {
+			t.Errorf("missing reflection for %s", title)
+		}
 	}
 }
