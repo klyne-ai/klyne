@@ -100,8 +100,13 @@
     {:else}
       {#each byWeek(resp.reflections) as bucket (bucket.week)}
         <section class="week">
-          <button class="week-head" onclick={() => toggle(bucket.week)}>
-            <span class="caret">{collapsed[bucket.week] ? '▸' : '▾'}</span>
+          <button
+            class="week-head"
+            type="button"
+            aria-expanded={!collapsed[bucket.week]}
+            onclick={() => toggle(bucket.week)}
+          >
+            <span class="caret" aria-hidden="true">{collapsed[bucket.week] ? '▸' : '▾'}</span>
             <span class="week-label">{bucket.week}</span>
             <span class="muted small">{bucket.rows.length} day{bucket.rows.length === 1 ? '' : 's'}</span>
           </button>
