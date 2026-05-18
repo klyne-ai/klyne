@@ -135,6 +135,27 @@ export async function run({ keepTmp = false, noClaude = false } = {}) {
           ? "All bodies are non-trivial."
           : `${tooShort.length} reflection(s) with body_md < 50 chars.`,
       });
+
+      // Tier invariant — daily reflections (tier=1), not weekly (tier=2).
+      const wrongTier = reflections.filter((r) => Number(r.tier) !== 1);
+      steps.push({
+        name: "tier invariant: every reflection is tier=1 (daily)",
+        status: wrongTier.length === 0 ? STATUS.PASS : STATUS.FAIL,
+        detail: wrongTier.length === 0
+          ? "All reflections are tier=1."
+          : `${wrongTier.length} reflection(s) wrote a non-daily tier.`,
+      });
+
+      // Title format — "Daily reflection — YYYY-MM-DD".
+      const dailyTitle = /^Daily reflection — \d{4}-\d{2}-\d{2}$/;
+      const wrongTitle = reflections.filter((r) => !dailyTitle.test(r.title || ""));
+      steps.push({
+        name: "title format: 'Daily reflection — YYYY-MM-DD'",
+        status: wrongTitle.length === 0 ? STATUS.PASS : STATUS.FAIL,
+        detail: wrongTitle.length === 0
+          ? "All titles match the daily format."
+          : `${wrongTitle.length} reflection(s) with non-matching title (e.g. ${JSON.stringify(wrongTitle[0]?.title || "")}).`,
+      });
     }
   } finally {
     if (!keepTmp) {
