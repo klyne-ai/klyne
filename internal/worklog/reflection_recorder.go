@@ -34,6 +34,11 @@ type Insight struct {
 // and the overall reflection must cite at least one entry id total.
 // Returns the persisted store.Reflection so callers can echo the id back.
 //
+// day is the calendar day the reflection covers. A zero day defaults
+// to time.Now() — convenient for the legacy single-day call path but
+// every new caller (the /klyne:reflect slash command in particular)
+// should pass an explicit day so multi-day catch-up works.
+//
 // Called by the record_reflection MCP tool (which is invoked by Claude
 // after the /klyne:reflect slash command produces insights).
 func RecordReflection(ctx context.Context, db *store.DB, projectPath string, day time.Time, insights []Insight) (store.Reflection, error) {
@@ -65,6 +70,7 @@ func RecordReflection(ctx context.Context, db *store.DB, projectPath string, day
 	}
 	dayLabel := day.UTC().Format("2006-01-02")
 	refl := store.Reflection{
+		// Date prefix is a debugging aid (grep-friendly); uniqueness comes from UnixNano.
 		ID:               fmt.Sprintf("ref-%s-%d", dayLabel, now.UnixNano()),
 		TS:               now.UnixMilli(),
 		ProjectPath:      projectPath,
