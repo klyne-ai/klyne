@@ -575,6 +575,41 @@ export interface MemoryResponse {
   total: number;
 }
 
+// --- /worklog/items ---
+
+/** WorklogEntry mirrors store.WorklogEntry — one stop_summaries row with worklog metadata. */
+export interface WorklogEntry {
+  session_id: string;
+  ts: number;
+  project_path: string;
+  cli: string;
+  summary: string;
+  last_user: string;
+  last_bash: string;
+  files: string[];
+  recap_visible: number;       // 0 = suppressed, 1 = visible
+  recap_topic: string;
+  importance: number;          // 1..10
+  signature: string;
+}
+
+/** WorklogProjectGroup is one bucket of entries under the same project. */
+export interface WorklogProjectGroup {
+  project_path: string;
+  name: string;
+  entries: WorklogEntry[];
+  count: number;
+}
+
+/** WorklogResponse is GET /worklog/items. */
+export interface WorklogResponse {
+  global: WorklogEntry[];
+  by_project: WorklogProjectGroup[];
+  global_count: number;
+  project_count: number;
+  total: number;
+}
+
 // --- /insights/projects ---
 
 /** AgentSlice is one CLI's contribution within a project bucket. */
