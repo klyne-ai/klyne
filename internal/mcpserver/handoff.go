@@ -207,14 +207,6 @@ func oneLine(s string) string {
 	return s
 }
 
-// occurrenceSuffix produces "" for n==1 and " (×N)" otherwise.
-func occurrenceSuffix(n int) string {
-	if n <= 1 {
-		return ""
-	}
-	return fmt.Sprintf(" (×%d)", n)
-}
-
 // --- shared helpers ported from contexthealth so the handoff renderer
 //     stays self-contained. Duplicating these tiny functions is
 //     cheaper than introducing a circular package dependency or a new
