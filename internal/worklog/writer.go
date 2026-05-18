@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/klyne-ai/klyne/internal/projectpath"
 	"github.com/klyne-ai/klyne/internal/store"
 )
 
@@ -37,6 +38,10 @@ type UpsertFunc func(ctx context.Context, db *store.DB, row store.StopSummary, w
 // dismissed is the per-project set of signatures the user has explicitly
 // dismissed (nil-safe).
 func WriteEntry(ctx context.Context, db *store.DB, e Entry, dismissed map[string]bool, upsert UpsertFunc) (WriteResult, error) {
+	// Roll worktrees up to the canonical main-repo path so the worklog
+	// shows one project per repo, not one per worktree. Safe no-op for
+	// non-git or already-canonical paths.
+	e.ProjectPath = projectpath.Canonical(e.ProjectPath)
 	cleaned, depLock := FilterFiles(e.Files)
 	e.Files = cleaned
 	if depLock && !e.Has(TagDependencyChange) {

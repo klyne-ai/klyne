@@ -15,6 +15,7 @@ import (
 	"github.com/klyne-ai/klyne/internal/config"
 	"github.com/klyne-ai/klyne/internal/connectors"
 	"github.com/klyne-ai/klyne/internal/mcpserver"
+	"github.com/klyne-ai/klyne/internal/projectpath"
 	"github.com/klyne-ai/klyne/internal/store"
 	"github.com/klyne-ai/klyne/internal/worklog"
 )
@@ -146,7 +147,7 @@ func computeAndPersistSessionEnd(ctx context.Context, stdin io.Reader) error {
 	// Canonicalize to the main repo path so worklog entries from a
 	// worktree session land under the same project_path as the main
 	// checkout. Non-git dirs and git failures pass through unchanged.
-	projectPath := mcpserver.CanonicalProjectPath(cwd)
+	projectPath := projectpath.Canonical(cwd)
 
 	summary := buildSessionEndSummary(snap, projectPath)
 	if summary.Summary == "" {

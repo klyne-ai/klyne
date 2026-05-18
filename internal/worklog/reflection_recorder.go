@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/klyne-ai/klyne/internal/projectpath"
 	"github.com/klyne-ai/klyne/internal/store"
 )
 
@@ -36,6 +37,10 @@ func RecordReflection(ctx context.Context, db *store.DB, projectPath string, ins
 	if strings.TrimSpace(projectPath) == "" {
 		return store.Reflection{}, errors.New("worklog: project_path required")
 	}
+	// Roll worktrees up to the canonical main-repo path so reflections
+	// triggered from a worktree appear under that repo's project, not
+	// as a sibling card on the worklog page.
+	projectPath = projectpath.Canonical(projectPath)
 	if len(insights) == 0 {
 		return store.Reflection{}, errors.New("worklog: at least one insight required")
 	}

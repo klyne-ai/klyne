@@ -10,6 +10,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/klyne-ai/klyne/internal/config"
+	"github.com/klyne-ai/klyne/internal/projectpath"
 	"github.com/klyne-ai/klyne/internal/store"
 )
 
@@ -198,7 +199,7 @@ func HandleListMemories(ctx context.Context, _ *mcp.CallToolRequest, in ListMemo
 	if projectPath == "" {
 		cwd := strings.TrimSpace(in.CWD)
 		if cwd != "" {
-			projectPath = CanonicalProjectPath(cwd)
+			projectPath = projectpath.Canonical(cwd)
 		}
 	}
 

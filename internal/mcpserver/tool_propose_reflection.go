@@ -9,6 +9,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/klyne-ai/klyne/internal/config"
+	"github.com/klyne-ai/klyne/internal/projectpath"
 	"github.com/klyne-ai/klyne/internal/store"
 	"github.com/klyne-ai/klyne/internal/worklog"
 )
@@ -36,6 +37,9 @@ type ProposeReflectionOutput struct {
 }
 
 func handleProposeReflection(ctx context.Context, db *store.DB, in ProposeReflectionInput) (*ProposeReflectionOutput, error) {
+	// Roll worktrees up to the canonical main-repo path so /klyne:reflect
+	// from a worktree finds the entries seeded under that repo.
+	in.ProjectPath = projectpath.Canonical(in.ProjectPath)
 	entries, reason, err := worklog.LoadPendingEntries(ctx, db, in.ProjectPath, in.Threshold, time.Now())
 	if err != nil {
 		return nil, err

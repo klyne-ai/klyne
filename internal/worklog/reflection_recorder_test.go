@@ -97,6 +97,25 @@ func TestRecordReflection_RejectsEmptyText(t *testing.T) {
 	}
 }
 
+func TestRecordReflection_CanonicalizesWorktreePath(t *testing.T) {
+	// A reflection triggered from a worktree must land under the main
+	// repo's project_path so it appears alongside that repo's other
+	// entries, not as a sibling card on the worklog page.
+	main, wt := newRepoWithWorktree(t)
+	db := newRecorderTestDB(t)
+	insights := []Insight{{Text: "shipped", Evidence: []string{"e1"}}}
+
+	refl, err := RecordReflection(context.Background(), db, wt, insights)
+	if err != nil {
+		t.Fatalf("record: %v", err)
+	}
+	wantAbs, _ := filepath.EvalSymlinks(main)
+	gotAbs, _ := filepath.EvalSymlinks(refl.ProjectPath)
+	if gotAbs != wantAbs {
+		t.Errorf("project_path = %q, want canonical %q (worktree input %q must roll up)", gotAbs, wantAbs, wt)
+	}
+}
+
 func TestRecordReflection_RejectsEmptyProject(t *testing.T) {
 	db := newRecorderTestDB(t)
 	insights := []Insight{{Text: "x", Evidence: []string{"e"}}}

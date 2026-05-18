@@ -12,6 +12,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/klyne-ai/klyne/internal/config"
+	"github.com/klyne-ai/klyne/internal/projectpath"
 	"github.com/klyne-ai/klyne/internal/store"
 )
 
@@ -95,7 +96,7 @@ func HandleRecordDecision(ctx context.Context, _ *mcp.CallToolRequest, in Record
 	}
 	proj := in.ProjectPath
 	if proj == "" && in.CWD != "" {
-		proj = CanonicalProjectPath(in.CWD)
+		proj = projectpath.Canonical(in.CWD)
 	}
 	db, err := store.Open(config.DBPath())
 	if err != nil {
@@ -125,7 +126,7 @@ func HandleRecordDecision(ctx context.Context, _ *mcp.CallToolRequest, in Record
 func HandleListDecisions(ctx context.Context, _ *mcp.CallToolRequest, in ListDecisionsInput) (*mcp.CallToolResult, DecisionsListOutput, error) {
 	proj := in.ProjectPath
 	if !in.AllProjects && proj == "" && in.CWD != "" {
-		proj = CanonicalProjectPath(in.CWD)
+		proj = projectpath.Canonical(in.CWD)
 	}
 	if in.AllProjects {
 		proj = ""
@@ -161,7 +162,7 @@ func HandleSearchDecisions(ctx context.Context, _ *mcp.CallToolRequest, in Searc
 	}
 	proj := in.ProjectPath
 	if !in.AllProjects && proj == "" && in.CWD != "" {
-		proj = CanonicalProjectPath(in.CWD)
+		proj = projectpath.Canonical(in.CWD)
 	}
 	if in.AllProjects {
 		proj = ""

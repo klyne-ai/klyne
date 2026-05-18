@@ -10,6 +10,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/klyne-ai/klyne/internal/config"
+	"github.com/klyne-ai/klyne/internal/projectpath"
 	"github.com/klyne-ai/klyne/internal/store"
 	"github.com/klyne-ai/klyne/internal/worklog"
 )
@@ -116,7 +117,7 @@ func HandleBootstrap(ctx context.Context, _ *mcp.CallToolRequest, in BootstrapIn
 	// Preserve the literal cwd for the user-facing echo, but use the
 	// canonical project root for every downstream query so worktrees of
 	// the same repo share project-scoped memory/decisions/worklog.
-	projectPath := CanonicalProjectPath(cwd)
+	projectPath := projectpath.Canonical(cwd)
 
 	out := BootstrapOutput{CWD: cwd}
 

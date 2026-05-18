@@ -1,4 +1,4 @@
-package mcpserver
+package projectpath
 
 import (
 	"os"
@@ -7,21 +7,21 @@ import (
 	"testing"
 )
 
-func TestCanonicalProjectPath_NonGitDir(t *testing.T) {
+func TestCanonical_NonGitDir(t *testing.T) {
 	tmp := t.TempDir()
-	got := CanonicalProjectPath(tmp)
+	got := Canonical(tmp)
 	if got != tmp {
 		t.Errorf("got %q, want %q (non-git dir must return cwd)", got, tmp)
 	}
 }
 
-func TestCanonicalProjectPath_RegularRepo(t *testing.T) {
+func TestCanonical_RegularRepo(t *testing.T) {
 	repo := t.TempDir()
 	cmd := exec.Command("git", "-C", repo, "init")
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("git init: %v", err)
 	}
-	got := CanonicalProjectPath(repo)
+	got := Canonical(repo)
 	// EvalSymlinks because macOS /var → /private/var.
 	wantAbs, _ := filepath.EvalSymlinks(repo)
 	gotAbs, _ := filepath.EvalSymlinks(got)
@@ -30,9 +30,9 @@ func TestCanonicalProjectPath_RegularRepo(t *testing.T) {
 	}
 }
 
-func TestCanonicalProjectPath_Worktree(t *testing.T) {
+func TestCanonical_Worktree(t *testing.T) {
 	// Create a main repo with one commit, then add a worktree.
-	// Assert CanonicalProjectPath(worktree) == main_repo path.
+	// Assert Canonical(worktree) == main_repo path.
 	main := t.TempDir()
 	run := func(args ...string) {
 		t.Helper()
@@ -61,7 +61,7 @@ func TestCanonicalProjectPath_Worktree(t *testing.T) {
 		t.Fatalf("worktree add: %v\n%s", err, out)
 	}
 
-	got := CanonicalProjectPath(wt)
+	got := Canonical(wt)
 	wantAbs, _ := filepath.EvalSymlinks(main)
 	gotAbs, _ := filepath.EvalSymlinks(got)
 	if gotAbs != wantAbs {
@@ -69,8 +69,8 @@ func TestCanonicalProjectPath_Worktree(t *testing.T) {
 	}
 }
 
-func TestCanonicalProjectPath_EmptyCWD(t *testing.T) {
-	if got := CanonicalProjectPath(""); got != "" {
+func TestCanonical_EmptyCWD(t *testing.T) {
+	if got := Canonical(""); got != "" {
 		t.Errorf("empty cwd should return empty, got %q", got)
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/klyne-ai/klyne/internal/config"
+	"github.com/klyne-ai/klyne/internal/projectpath"
 	"github.com/klyne-ai/klyne/internal/store"
 )
 
@@ -149,7 +150,7 @@ func HandleRememberMemory(ctx context.Context, _ *mcp.CallToolRequest, in Rememb
 		if projectPath == "" {
 			cwd := strings.TrimSpace(in.CWD)
 			if cwd != "" {
-				projectPath = CanonicalProjectPath(cwd)
+				projectPath = projectpath.Canonical(cwd)
 			}
 		}
 		if projectPath == "" {
@@ -195,7 +196,7 @@ func HandleRecallMemory(ctx context.Context, _ *mcp.CallToolRequest, in RecallMe
 	if projectPath == "" {
 		cwd := strings.TrimSpace(in.CWD)
 		if cwd != "" {
-			projectPath = CanonicalProjectPath(cwd)
+			projectPath = projectpath.Canonical(cwd)
 		}
 	}
 	// projectPath may still be "" — that's fine. recall then returns

@@ -2,6 +2,9 @@ package mcpserver
 
 import (
 	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -53,6 +56,62 @@ func TestHandleProposeReflection_ImportanceSumReason(t *testing.T) {
 	if !strings.Contains(out.Markdown, "importance-sum") {
 		t.Errorf("markdown should surface trigger reason: %s", out.Markdown)
 	}
+}
+
+func TestHandleProposeReflection_CanonicalizesWorktreePath(t *testing.T) {
+	// Entries seeded under the main repo's canonical path must still
+	// surface when the MCP caller passes a worktree cwd as project_path
+	// — otherwise /klyne:reflect from a worktree returns "nothing
+	// pending" even though the canonical repo has entries.
+	withFakeHome(t)
+	db := withBootstrapDB(t)
+	main, wt := newRepoWithWorktreeForMCP(t)
+	mainAbs, _ := filepath.EvalSymlinks(main)
+	seedStopSummary(t, db, mainAbs, "claude", "s1", true, 8, time.Now().Add(-1*time.Hour))
+	seedStopSummary(t, db, mainAbs, "codex", "s2", true, 7, time.Now().Add(-30*time.Minute))
+
+	out, err := handleProposeReflection(context.Background(), db, ProposeReflectionInput{ProjectPath: wt})
+	if err != nil {
+		t.Fatalf("propose: %v", err)
+	}
+	if len(out.Entries) != 2 {
+		t.Errorf("expected 2 pending entries via worktree→canonical rollup, got %d", len(out.Entries))
+	}
+}
+
+// newRepoWithWorktreeForMCP creates a main git repo with one commit
+// plus a linked worktree, returning both absolute paths. Local copy of
+// the worklog-package helper to keep the test package self-contained.
+func newRepoWithWorktreeForMCP(t *testing.T) (mainRepo, worktree string) {
+	t.Helper()
+	main := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", main}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run("init")
+	if err := os.WriteFile(filepath.Join(main, "README"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run("add", "README")
+	run("commit", "-m", "init")
+	wt := t.TempDir() + "/wt"
+	cmd := exec.Command("git", "-C", main, "worktree", "add", wt)
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
+		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t",
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("worktree add: %v\n%s", err, out)
+	}
+	return main, wt
 }
 
 func TestHandleProposeReflection_EmptyProject(t *testing.T) {
