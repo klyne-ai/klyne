@@ -33,27 +33,40 @@ const handoffMaxBlockers = 3
 type HandoffInput struct {
 	SessionID string `json:"session_id,omitempty" jsonschema:"explicit Claude Code session id; defaults to latest session in current working directory"`
 	CWD       string `json:"cwd,omitempty" jsonschema:"override the working directory used to resolve the latest session"`
-	// Scope controls which files and exchanges land in the handoff:
-	//   "" or "full"          — every file the session touched plus
-	//                            the recent exchanges (default).
-	//   "current-topic"       — only files whose anchor matches the
-	//                            user's most recent direction (per
-	//                            contexthealth.ScoreFiles), and the
-	//                            last 10 user/assistant exchanges
-	//                            instead of the default 5.
-	Scope string `json:"scope,omitempty" jsonschema:"full (default) | current-topic — current-topic carries forward only files relevant to the user's current direction"`
+	// Scope is accepted for back-compat with pre-v2 callers but
+	// ignored by the renderer. The v2 skeleton already filters anchor
+	// files via the relevance verdict, making the old "current-topic"
+	// mode redundant. Field removal scheduled for v3.
+	Scope string `json:"scope,omitempty" jsonschema:"DEPRECATED — accepted but ignored as of v2; anchor files always use relevance-verdict filtering"`
 }
 
-// HandoffOutput carries the generated handoff Markdown plus enough
-// context for the AI to cite its provenance to the user.
+// HandoffOutput carries the generated handoff plus structured
+// fields the slashcommand uses to drive the in-session model's
+// narrative authoring (or to suppress it when post-compact).
 type HandoffOutput struct {
 	SessionID    string `json:"session_id,omitempty" jsonschema:"the session id the handoff was generated from"`
 	Path         string `json:"path,omitempty" jsonschema:"absolute path of the source transcript"`
 	ProjectPath  string `json:"project_path,omitempty" jsonschema:"absolute project directory the session ran in"`
-	Markdown     string `json:"markdown" jsonschema:"slash-prompt-ready markdown rendering (verbatim-echo target) — the generated handoff prompt, the ambiguous candidates list, or the no-session message"`
+	Markdown     string `json:"markdown" jsonschema:"deterministic skeleton render — also a valid standalone handoff for programmatic callers and post-compact mode"`
 	TokensSource int64  `json:"tokens_source,omitempty" jsonschema:"approximate cache-aware token size of the source session at the latest assistant turn"`
-	Ambiguous    bool   `json:"ambiguous,omitempty" jsonschema:"true when multiple sessions in this cwd require explicit session_id disambiguation"`
-	Candidates   []CandidateRow `json:"candidates,omitempty" jsonschema:"sessions to choose from when ambiguous"`
+
+	// Skeleton is the structured form of Markdown — same data, broken
+	// into typed fields so the slashcommand prompt and any tool consumer
+	// can pull individual sections without re-parsing.
+	Skeleton Skeleton `json:"skeleton,omitempty"`
+
+	// PostCompact is true when the most recent compact_boundary in the
+	// JSONL is followed by fewer than postCompactTailThreshold turns —
+	// in which case the slashcommand suppresses narrative authoring
+	// and emits skeleton-only with a banner.
+	PostCompact bool `json:"post_compact,omitempty" jsonschema:"true when the model can no longer be trusted to author narrative because a compact event recently ran"`
+
+	// NarrativeSlots lists the section keys the slashcommand should
+	// ask the in-session model to author. Empty when PostCompact=true.
+	NarrativeSlots []string `json:"narrative_slots,omitempty" jsonschema:"section keys the slashcommand should author: continue_from, decided_vs_open, read_first"`
+
+	Ambiguous  bool           `json:"ambiguous,omitempty" jsonschema:"true when multiple sessions in this cwd require explicit session_id disambiguation"`
+	Candidates []CandidateRow `json:"candidates,omitempty" jsonschema:"sessions to choose from when ambiguous"`
 }
 
 // RenderHandoff renders the deterministic skeleton — the body of
@@ -650,4 +663,30 @@ func detectPostCompact(msgs []*connectors.Message) bool {
 		}
 	}
 	return tail < postCompactTailThreshold
+}
+
+// buildSkeleton converts the snapshot into the structured Skeleton
+// form returned alongside Markdown. Pulls the same fields the
+// renderer prints, so consumers can pick by structure or by
+// rendered text without divergence.
+func buildSkeleton(snap *SessionSnapshot) Skeleton {
+	now := time.Now().UnixMilli()
+	verdict := contexthealthScoreFiles(snap.Messages)
+	anchors, staleCount := buildAnchorFiles(verdict, snap.GitDirtyFiles, snap.GitDirtyKnown, now)
+	inProg, pending := extractTodos(snap.Messages)
+	blockers := recentFailures(snap.Messages)
+	for i, b := range blockers {
+		blockers[i] = oneLine(b)
+	}
+	return Skeleton{
+		Branch:          branchFromMessages(snap.Messages),
+		PlanOfRecord:    extractPlanOfRecord(snap.Messages, now),
+		AnchorFiles:     anchors,
+		StaleFilesCount: staleCount,
+		LikelyTickets:   extractTicketHints(snap.Messages),
+		LinkedURLs:      extractLinkedURLs(snap.Messages),
+		InProgressTodos: inProg,
+		PendingTodos:    pending,
+		KnownBlockers:   blockers,
+	}
 }

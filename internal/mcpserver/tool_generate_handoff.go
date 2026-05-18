@@ -61,16 +61,24 @@ func HandleGenerateHandoff(ctx context.Context, _ *mcp.CallToolRequest, in Hando
 	}
 	md := RenderHandoff(snap)
 
-	out := HandoffOutput{
-		SessionID:   snap.SessionID,
-		Path:        snap.Path,
-		ProjectPath: firstCwdFromMessages(snap.Messages),
-		Markdown:    md,
+	skeleton := buildSkeleton(snap)
+	postCompact := detectPostCompact(snap.Messages)
+	var slots []string
+	if !postCompact {
+		slots = []string{"continue_from", "decided_vs_open", "read_first"}
 	}
-	// The Content text is what the AI reads first; surface a one-liner
-	// pointing at the structured Markdown so the AI knows to copy it.
+
+	out := HandoffOutput{
+		SessionID:      snap.SessionID,
+		Path:           snap.Path,
+		ProjectPath:    firstCwdFromMessages(snap.Messages),
+		Markdown:       md,
+		Skeleton:       skeleton,
+		PostCompact:    postCompact,
+		NarrativeSlots: slots,
+	}
 	summary := fmt.Sprintf(
-		"Generated handoff for session %s (~%d messages). The Markdown is in the structured output under `markdown`.",
+		"Generated handoff for session %s (~%d messages). The Markdown is in the structured output under `markdown`; structured fields under `skeleton`.",
 		short(snap.SessionID), snap.MsgCount,
 	)
 	return &mcp.CallToolResult{
