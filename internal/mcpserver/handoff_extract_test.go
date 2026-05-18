@@ -2,12 +2,14 @@ package mcpserver
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"sort"
 	"testing"
 	"time"
 
 	"github.com/klyne-ai/klyne/internal/connectors"
+	"github.com/klyne-ai/klyne/internal/contexthealth"
 )
 
 func msgUser(text string) *connectors.Message {
@@ -196,5 +198,60 @@ func TestBranchFromMessages_EmptyOnNoBranch(t *testing.T) {
 	msgs := []*connectors.Message{{Role: connectors.RoleUser}}
 	if got := branchFromMessages(msgs); got != "" {
 		t.Fatalf("got %q, want empty", got)
+	}
+}
+
+func TestBuildAnchorFiles_HonoursRelevanceOrderAndDirtyLabels(t *testing.T) {
+	verdict := contexthealth.RelevanceVerdict{
+		Files: []contexthealth.FileRelevance{
+			{Path: "/repo/src/a.js", Score: 0.9, LastTouchTs: 100, Stale: false},
+			{Path: "/repo/src/b.js", Score: 0.5, LastTouchTs: 80, Stale: false},
+			{Path: "/repo/docs/stale.md", Score: 0.1, LastTouchTs: 10, Stale: true},
+		},
+	}
+	dirty := map[string]bool{"/repo/src/a.js": true}
+	got, staleCount := buildAnchorFiles(verdict, dirty, true, /*now=*/ 200)
+	if staleCount != 1 {
+		t.Errorf("staleCount = %d, want 1", staleCount)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d anchors, want 2", len(got))
+	}
+	if got[0].Path != "/repo/src/a.js" || !got[0].Dirty || got[0].DirtyUnknown {
+		t.Errorf("first anchor wrong: %+v", got[0])
+	}
+	if got[1].Path != "/repo/src/b.js" || got[1].Dirty || got[1].DirtyUnknown {
+		t.Errorf("second anchor wrong: %+v", got[1])
+	}
+}
+
+func TestBuildAnchorFiles_DirtyUnknownWhenGitFailed(t *testing.T) {
+	verdict := contexthealth.RelevanceVerdict{
+		Files: []contexthealth.FileRelevance{
+			{Path: "/repo/x.js", Score: 0.9, LastTouchTs: 100, Stale: false},
+		},
+	}
+	got, _ := buildAnchorFiles(verdict, nil, false, 200)
+	if len(got) != 1 {
+		t.Fatalf("got %d, want 1", len(got))
+	}
+	if !got[0].DirtyUnknown || got[0].Dirty {
+		t.Errorf("expected DirtyUnknown=true Dirty=false, got %+v", got[0])
+	}
+}
+
+func TestBuildAnchorFiles_CapsAtSix(t *testing.T) {
+	files := make([]contexthealth.FileRelevance, 0, 10)
+	for i := 0; i < 10; i++ {
+		files = append(files, contexthealth.FileRelevance{
+			Path:        fmt.Sprintf("/repo/f%d.js", i),
+			Score:       float64(10-i) / 10.0,
+			LastTouchTs: int64(100 - i),
+		})
+	}
+	verdict := contexthealth.RelevanceVerdict{Files: files}
+	got, _ := buildAnchorFiles(verdict, nil, true, 200)
+	if len(got) != 6 {
+		t.Fatalf("got %d, want cap of 6", len(got))
 	}
 }

@@ -757,6 +757,59 @@ func extractTodos(msgs []*connectors.Message) (inProgress, pending []TodoItem) {
 	return nil, nil
 }
 
+// handoffMaxAnchorFiles caps the visible anchor-file list. Past this
+// point the list becomes noise; the collapsed tail in the rendered
+// markdown still acknowledges the rest exist.
+const handoffMaxAnchorFiles = 6
+
+// buildAnchorFiles converts a contexthealth RelevanceVerdict + the
+// snapshot's captured dirty set into the ordered list rendered in
+// the handoff. Returns (anchors, staleCount); staleCount is the
+// number of touched files dropped from the visible list because
+// they were marked Stale.
+//
+// dirtyKnown=false signals git state couldn't be captured; per-file
+// Dirty defaults to false and DirtyUnknown is set so the renderer
+// labels honestly rather than guessing "clean."
+func buildAnchorFiles(verdict contexthealth.RelevanceVerdict, dirty map[string]bool, dirtyKnown bool, now int64) ([]AnchorFileRef, int) {
+	var fresh []contexthealth.FileRelevance
+	staleCount := 0
+	for _, f := range verdict.Files {
+		if f.Stale {
+			staleCount++
+			continue
+		}
+		fresh = append(fresh, f)
+	}
+	sort.Slice(fresh, func(i, j int) bool {
+		if fresh[i].Score != fresh[j].Score {
+			return fresh[i].Score > fresh[j].Score
+		}
+		if fresh[i].LastTouchTs != fresh[j].LastTouchTs {
+			return fresh[i].LastTouchTs > fresh[j].LastTouchTs
+		}
+		return fresh[i].Path < fresh[j].Path
+	})
+	if len(fresh) > handoffMaxAnchorFiles {
+		fresh = fresh[:handoffMaxAnchorFiles]
+	}
+	out := make([]AnchorFileRef, 0, len(fresh))
+	for _, f := range fresh {
+		ref := AnchorFileRef{
+			Path:         f.Path,
+			LastTouchAgo: formatRelativeAgo(now, f.LastTouchTs),
+			Score:        f.Score,
+		}
+		if dirtyKnown {
+			ref.Dirty = dirty[f.Path]
+		} else {
+			ref.DirtyUnknown = true
+		}
+		out = append(out, ref)
+	}
+	return out, staleCount
+}
+
 // branchFromMessages returns the first non-empty GitBranch field
 // across the snapshot. Empty when no message carried one.
 func branchFromMessages(msgs []*connectors.Message) string {
