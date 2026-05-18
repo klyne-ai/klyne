@@ -159,11 +159,14 @@ Pure SQLite read — no AI call. The AI host (you) performs the synthesis and th
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "record_reflection",
-		Description: `Persist a synthesized weekly reflection for a project. Enforces the citation invariant — every insight must cite at least one entry session_id from the propose_reflection output.
+		Description: `Persist a synthesized DAILY reflection for a project (tier=1, "Daily reflection — YYYY-MM-DD"). Enforces the citation invariant — every insight must cite at least one entry session_id from the propose_reflection output.
 
-Call this AFTER synthesizing insights from propose_reflection's entries. Failures to cite are rejected: a reflection without evidence cannot exist by design.
+Call this AFTER bucketing propose_reflection's entries by date and synthesizing per-day insights. Call it ONCE per distinct date — a single /klyne:reflect run may invoke it N times to catch up across N days.
 
-Inputs: project_path (required), insights ([{text, evidence: [session_id, ...]}, ...]).`,
+Inputs:
+  - project_path (required) absolute project path
+  - day (required for daily synthesis) YYYY-MM-DD in UTC, the calendar day this reflection covers
+  - insights ([{text, evidence: [session_id, ...]}, ...])`,
 	}, HandleRecordReflection)
 
 	mcp.AddTool(srv, &mcp.Tool{
