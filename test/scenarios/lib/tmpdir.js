@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -43,7 +43,11 @@ function seedKlyneHook(dir) {
  */
 export function makeProject(name) {
   const safe = name.replace(/[^a-z0-9-]/gi, "-");
-  const dir = mkdtempSync(path.join(tmpdir(), `klyne-showcase-${safe}-`));
+  const rawDir = mkdtempSync(path.join(tmpdir(), `klyne-showcase-${safe}-`));
+  // On macOS, mkdtempSync returns `/var/folders/...` but klyne (via Claude
+  // Code) stores the canonical `/private/var/folders/...` as project_path.
+  // We must use the canonical form everywhere or our SQL queries miss the row.
+  const dir = realpathSync(rawDir);
   execFileSync("git", ["init", "-q"], { cwd: dir });
   execFileSync("git", ["config", "user.email", "showcase@klyne.test"], { cwd: dir });
   execFileSync("git", ["config", "user.name", "showcase"], { cwd: dir });
@@ -58,7 +62,9 @@ export function makeProject(name) {
 }
 
 export function removeProject(dir) {
-  if (!dir || !dir.startsWith(tmpdir())) {
+  // Allow both `/var/folders/...` and the canonical `/private/var/folders/...`.
+  const canonicalTmp = realpathSync(tmpdir());
+  if (!dir || (!dir.startsWith(tmpdir()) && !dir.startsWith(canonicalTmp))) {
     throw new Error(`refusing to remove non-tmp dir: ${dir}`);
   }
   rmSync(dir, { recursive: true, force: true });
