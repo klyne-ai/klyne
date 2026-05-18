@@ -53,6 +53,10 @@ const (
 	// route (same pattern as /cockpit/threads and /usage/stats).
 	RouteMemory              = "/memory/items"
 	RouteMemoryItem          = "/memory/items/{id}"
+	// Worklog: SPA page lives at `/worklog`, so the API uses a
+	// /worklog/items subpath to avoid colliding with the SPA route
+	// (same pattern as /memory/items).
+	RouteWorklog             = "/worklog/items"
 	// Insights: per-project rollup powering the Insights dashboard.
 	// Returns one rich record per project with agent split, cache hit %,
 	// efficiency, /compact pain signal, top sessions, daily sparkline,
@@ -85,6 +89,7 @@ func AllRoutes() []string {
 		RouteCodeReviewContext,
 		RouteMemory,
 		RouteMemoryItem,
+		RouteWorklog,
 		RouteInsightsProjects,
 	}
 }
@@ -834,4 +839,30 @@ type ProjectInsightsResponse struct {
 	// them at this level would just duplicate work the UI never
 	// requested.
 	Totals ProjectInsight `json:"totals"`
+}
+
+// ---------------------------------------------------------------------------
+// /worklog  — project-scoped browser over the stop_summaries table
+// ---------------------------------------------------------------------------
+
+// WorklogProjectGroup is one bucket in WorklogResponse.ByProject —
+// every worklog entry under the same project_path, grouped for the
+// dashboard's per-service view.
+type WorklogProjectGroup struct {
+	ProjectPath string               `json:"project_path"`
+	Name        string               `json:"name"`
+	Entries     []store.WorklogEntry `json:"entries"`
+	Count       int                  `json:"count"`
+}
+
+// WorklogResponse is GET /worklog/items. Splits worklog rows into one
+// "global" list (project_path == "") and one group per project, newest
+// first within each. Both visible (recap_visible=1) and suppressed
+// (recap_visible=0) rows are returned so users can audit suppression.
+type WorklogResponse struct {
+	Global       []store.WorklogEntry  `json:"global"`
+	ByProject    []WorklogProjectGroup `json:"by_project"`
+	GlobalCount  int                   `json:"global_count"`
+	ProjectCount int                   `json:"project_count"`
+	Total        int                   `json:"total"`
 }

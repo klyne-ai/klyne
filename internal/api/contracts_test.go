@@ -50,6 +50,7 @@ func TestAllRoutesContainsExpected(t *testing.T) {
 		RouteCodeReviewContext,
 		RouteMemory,
 		RouteMemoryItem,
+		RouteWorklog,
 		RouteInsightsProjects,
 	}
 	got := AllRoutes()
