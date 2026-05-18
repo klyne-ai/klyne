@@ -600,9 +600,9 @@ func extractLinkedURLs(msgs []*connectors.Message) []string {
 	return out
 }
 
-// planOfRecordPatterns lists the file-path globs that count as
-// "planning documents" for the purposes of the handoff. Match is
-// case-sensitive substring on the path's lowercased form.
+// planOfRecordPatterns lists the file-path substrings that count
+// as "planning documents" for the handoff. Path is lowercased
+// before the substring check, so matches are case-insensitive.
 var planOfRecordPatterns = []string{
 	"/plans/",    // matches docs/superpowers/plans/*.md, docs/.../plans/*.md
 	"/research/", // matches docs/research/<topic>/*.md
