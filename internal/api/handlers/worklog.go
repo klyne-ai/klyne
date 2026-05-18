@@ -43,40 +43,23 @@ func (h *WorklogHandler) List(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, api.WorklogResponse{Projects: rollup})
 }
 
-// sortWorklogRollup orders rollups in tiers (see List for the rule) and then
-// by newest activity within each tier. Operates in place.
+// sortWorklogRollup orders by most-recent activity (entry OR reflection),
+// newest first. We intentionally don't tier-group because the user expects
+// "what I just did" to be at the top — color/status pills on the card carry
+// the stale/cold/fresh signal without needing to reorder the list.
 func sortWorklogRollup(rows []store.WorklogProjectRollup) {
 	sort.SliceStable(rows, func(i, j int) bool {
-		ti := tierOf(rows[i])
-		tj := tierOf(rows[j])
-		if ti != tj {
-			return ti < tj
-		}
-		// Within tier, newer-active first. activityTs prefers latest entry
-		// when present, falling back to the reflection ts so cold projects
-		// don't all collapse to 0.
 		return activityTs(rows[i]) > activityTs(rows[j])
 	})
 }
 
-// tierOf returns 0=stale-with-reflection, 1=cold-start, 2=fresh.
-func tierOf(r store.WorklogProjectRollup) int {
-	switch {
-	case r.Stale && r.LatestReflection != nil:
-		return 0
-	case r.LatestReflection == nil:
-		return 1
-	default:
-		return 2
-	}
-}
-
+// activityTs returns the most-recent timestamp for the project, preferring
+// the latest entry but falling back to the reflection ts so projects with
+// only a reflection still get ordered correctly.
 func activityTs(r store.WorklogProjectRollup) int64 {
-	if r.LatestEntryTs > 0 {
-		return r.LatestEntryTs
+	ts := r.LatestEntryTs
+	if r.LatestReflection != nil && r.LatestReflection.TS > ts {
+		ts = r.LatestReflection.TS
 	}
-	if r.LatestReflection != nil {
-		return r.LatestReflection.TS
-	}
-	return 0
+	return ts
 }

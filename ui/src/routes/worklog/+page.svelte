@@ -22,7 +22,6 @@
   let resp = $state<WorklogResponse | null>(null);
   let loading = $state(true);
   let error = $state<string | null>(null);
-  let expanded = $state<Record<string, boolean>>({});
   let copied = $state<string | null>(null); // project_path of last-copied cmd
 
   async function load(): Promise<void> {
@@ -41,13 +40,11 @@
     void load();
   });
 
-  function toggle(projectPath: string): void {
-    expanded[projectPath] = !expanded[projectPath];
-  }
-
   function reflectCmd(projectPath: string): string {
-    // Quote the path to handle spaces in directory names.
-    return `cd "${projectPath}" && claude -p '/klyne:reflect'`;
+    // Quote the path to handle spaces. --permission-mode bypassPermissions
+    // is required so /klyne:reflect can call its MCP tools in -p mode
+    // without an interactive approval prompt.
+    return `cd "${projectPath}" && claude -p --permission-mode bypassPermissions '/klyne:reflect'`;
   }
 
   async function copyCmd(projectPath: string): Promise<void> {
@@ -111,18 +108,15 @@
             <p class="path muted small"><code>{p.project_path}</code></p>
 
             {#if p.latest_reflection}
-              <button class="expand" onclick={() => toggle(p.project_path)} aria-expanded={!!expanded[p.project_path]}>
-                {expanded[p.project_path] ? '▾ Hide reflection' : '▸ Show reflection'}
-                <span class="muted small">· {p.latest_reflection.title}</span>
-              </button>
-              {#if expanded[p.project_path]}
+              <div class="reflection">
+                <p class="reflection-title">{p.latest_reflection.title}</p>
                 <pre class="body">{p.latest_reflection.body_md}</pre>
                 <p class="muted small footer">
                   {p.latest_reflection.evidence_entry_ids.length} evidence
                   · tier {p.latest_reflection.tier}
                   · {p.latest_reflection.summary_source}
                 </p>
-              {/if}
+              </div>
             {/if}
 
             {#if s.klass === 'stale' || s.klass === 'cold'}
@@ -184,22 +178,21 @@
   .meta { margin: 0.25rem 0; font-size: 0.9em; }
   .path { margin: 0 0 0.5rem; font-family: monospace; font-size: 0.8em; word-break: break-all; }
 
-  .expand {
-    background: none; border: none; padding: 0.4rem 0;
-    color: var(--text, #ddd); cursor: pointer; text-align: left;
-    font-size: 0.95em; display: block; width: 100%;
+  .reflection { margin: 0.75rem 0 0; }
+  .reflection-title {
+    margin: 0 0 0.35rem; font-weight: 600;
+    font-size: 0.95em; color: var(--text, #ddd);
   }
-  .expand:hover { color: #fff; }
 
   .body {
     white-space: pre-wrap; word-break: break-word;
     background: var(--surface-2, #0d0d0d);
-    padding: 0.75rem; border-radius: 4px;
-    font-size: 0.9em; margin: 0.5rem 0;
-    max-height: 500px; overflow: auto;
-    line-height: 1.5;
+    padding: 0.75rem 1rem; border-radius: 4px;
+    font-size: 0.9em; margin: 0;
+    line-height: 1.6;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   }
-  .footer { margin: 0.25rem 0 0; }
+  .footer { margin: 0.4rem 0 0; }
 
   .cta {
     margin-top: 0.75rem; padding-top: 0.75rem;

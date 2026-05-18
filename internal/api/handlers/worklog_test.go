@@ -91,7 +91,7 @@ func TestWorklog_List_ReturnsOnePerProject(t *testing.T) {
 	}
 }
 
-func TestWorklog_List_SortsByTierThenActivity(t *testing.T) {
+func TestWorklog_List_SortsByMostRecentActivity(t *testing.T) {
 	t.Parallel()
 	db := newTestStore(t)
 	seedWorklogScenarios(t, db)
@@ -110,7 +110,9 @@ func TestWorklog_List_SortsByTierThenActivity(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 
-	// Tier order: stale-with-reflection (0) → cold (1) → fresh (2).
+	// Sort is purely by most-recent activity (entry OR reflection ts),
+	// newest first. Per the seed: /proj/stale has entries at 31_000 (newest),
+	// /proj/cold has an entry at 25_000, /proj/fresh has a reflection at 15_000.
 	wantOrder := []string{"/proj/stale", "/proj/cold", "/proj/fresh"}
 	for i, want := range wantOrder {
 		if body.Projects[i].ProjectPath != want {
