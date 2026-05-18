@@ -8,7 +8,7 @@ The honest answer falls into one of four buckets:
 |---|---|---|
 | **Prevention** | klyne sees a degrading signal Claude can't see and warns *before* it bites | advisor hook, statusline |
 | **Recovery** | the data Claude needs is gone from its context but lives in klyne's store | `/klyne:precompact`, `/klyne:handoff` after compact |
-| **Audit / cross-session** | klyne sees across every session ever indexed; Claude only knows itself | `/klyne:search`, `klyne top`, `klyne files`, `klyne subagents` |
+| **Audit / cross-session** | klyne sees across every session ever indexed; Claude only knows itself | `klyne top`, `klyne files`, `klyne subagents` |
 | **Overlap** | Claude can plausibly do this from live context; klyne is the deterministic option | in-session handoff on a healthy short session |
 
 A klyne feature is only worth the install if it's in the first three buckets. Anything in Overlap needs a better answer than "klyne does it too."
@@ -70,13 +70,6 @@ Each section answers, concretely: what would Claude try if you didn't have klyne
   - Claude can't enumerate "which files in your context are stale."
   - Claude's self-estimate drifts; klyne's number matches what Anthropic actually bills.
 - **Mode**: Audit + Prevention input (advisor reads this verdict).
-
-#### `/klyne:search` (`search_messages`)
-
-- **What Claude could try**: grep the current session only — i.e., what's already in its window.
-- **What klyne does**: FTS5 query against every Claude Code + Codex session ever indexed by the daemon, in any project, on this machine.
-- **Why Claude's version fails**: Claude has access to one session — itself. It cannot answer "did we discuss the OpenBao runbook three weeks ago in the auth-service project?" because that conversation was in a different process that no longer exists.
-- **Mode**: Audit / cross-session.
 
 #### `/klyne:sessions` (`list_sessions`)
 

@@ -13,15 +13,18 @@ import (
 // v0.3.0 — slice 4: Codex parity for all four tools and live MCP
 // prompts surfaced under Claude Code's `/klyne:*` slash menu
 // (older builds: `/mcp__klyne__*`, retired).
-// v0.4.0 — slice 5: search_messages tool + /klyne:search prompt
-// for cross-session full-text search.
 // v0.5.0 — slice 6 (Serena-inspired): bootstrap session brief +
 // memory CRUD (update_memory, delete_memory, list_memories).
 // v0.6.0 — slice 7 (bootstrap integration loop): per-session
 // fetch tools (get_session, summarize_session) + bootstrap now
 // surfaces Claude Code's on-disk auto-memory under a distinct
 // section beside klyne's SQLite memory store.
-const version = "v0.6.0"
+// v0.7.0 — slice 8: removed search_messages, status_snapshot,
+// propose_runbooks, accept_runbook, dismiss_runbook tools and
+// the matching /klyne:search /klyne:status /klyne:resume
+// /klyne:runbooks slash commands. The surfaces collapsed into
+// the remaining handoff / health / recall / bootstrap stack.
+const version = "v0.7.0"
 
 // New constructs the klyne MCP server with every v1 tool
 // registered. The returned server is ready for Run.
@@ -73,21 +76,10 @@ The handoff contains: project path, recent task topic, files touched, commands r
 	}, HandleGenerateHandoff)
 
 	mcp.AddTool(srv, &mcp.Tool{
-		Name: "search_messages",
-		Description: `Full-text search across every Claude Code and Codex session klyne has indexed.
-
-Use this when the user asks "where did we talk about X?" or "find that conversation about Y" — anything that needs cross-session lookup. Returns hits with session_id (so you can drill in via get_pre_compact_context or generate_handoff), project_path, role, snippet (FTS-highlighted), and timestamp.
-
-Sort defaults to "recent" (newest first); pass sort:"relevance" for BM25 best-match. Optional project_path argument filters hits to one repository.
-
-REQUIRES the klyne daemon to be running (the FTS index lives in SQLite). When unreachable the tool returns daemon_down=true with a clear restart hint instead of hanging.`,
-	}, HandleSearchMessages)
-
-	mcp.AddTool(srv, &mcp.Tool{
 		Name: "get_session",
 		Description: `Fetch one session's metadata and ordered messages directly from klyne's SQLite store.
 
-Use when you already know the session_id (typically from bootstrap, list_sessions, or search_messages) and need the actual content of the conversation. Pure SQLite read — no JSONL access, no daemon required.
+Use when you already know the session_id (typically from bootstrap or list_sessions) and need the actual content of the conversation. Pure SQLite read — no JSONL access, no daemon required.
 
 Inputs: session_id (required), optional limit (default 100, max 1000), optional before (epoch-ms cursor for backward pagination), optional since (epoch-ms lower bound), optional order ("asc" default | "desc").
 
@@ -273,60 +265,6 @@ Fire this tool when the user says "klyne list memories" / "klyne what do you rem
 
 Returns two labelled lists (project_memories and global_memories), newest first. Each row carries a derived ` + "`name`" + ` field (first non-empty line of text, ≤ 60 chars, with ` + "`…`" + ` when truncated) so you can present them Serena-style as a named list. Scope: "all" (default — both lists) | "project" | "global". Optional tag filter applies to both lists. Default limit 50 per scope, max 500.`,
 	}, HandleListMemories)
-
-	// --- runbook proposer -------------------------------------------
-	// Pattern → runbook detector. Walks recent sessions for the
-	// resolved project, indexes Bash command sequences that recur
-	// across multiple sessions, and offers them as candidate
-	// memories. The user (or the AI on their behalf) accepts a
-	// candidate via accept_runbook or rejects it via dismiss_runbook.
-	mcp.AddTool(srv, &mcp.Tool{
-		Name: "propose_runbooks",
-		Description: `Surface recurring Bash command sequences in this project as candidate runbooks.
-
-Walks the user's recent Claude/Codex sessions in this project, extracts the shell commands run between consecutive user prompts, normalises them (paths, UUIDs, IPs, timestamps replaced with placeholders), and indexes N-grams that recur across MULTIPLE sessions.
-
-Returns ranked candidates with their occurrence count, distinct-session count, last-seen timestamp, suggested name, and a stable signature. Each candidate is a workflow the user has done at least 3 times across 2+ sessions — strong evidence they'll do it again.
-
-Fire this tool when:
-  * The user asks "what should I save as a runbook?" / "what runbooks do you recommend?"
-  * You notice the user is about to manually re-run a sequence you've seen them run before.
-  * The user wants to clean up repetitive shell workflows.
-
-Returns a markdown rendering plus structured rows. The agent should show the markdown verbatim, then ask before accepting any candidate.`,
-	}, HandleProposeRunbooks)
-
-	mcp.AddTool(srv, &mcp.Tool{
-		Name: "accept_runbook",
-		Description: `Persist a proposed runbook candidate as a project-scoped memory.
-
-Fire this tool ONLY after the user confirms a specific candidate from propose_runbooks. Inputs: the candidate's signature (required), optional name override, optional pre-rendered body, optional extra tags. Writes a row to the same store as remember/record_decision, tagged with "runbook" and "klyne-proposed" so recall can find it again.
-
-Returns the new memory_id. Confirm back to the user.`,
-	}, HandleAcceptRunbook)
-
-	mcp.AddTool(srv, &mcp.Tool{
-		Name: "dismiss_runbook",
-		Description: `Mark a proposed runbook signature so propose_runbooks never re-surfaces it.
-
-Fire when the user explicitly says "no" / "not useful" / "stop suggesting this" to a candidate. Default scope is the current project; pass scope="global" to suppress everywhere. Optional reason is stored for later inspection.`,
-	}, HandleDismissRunbook)
-
-	// --- status snapshot --------------------------------------------
-	// Portable Markdown summary of klyne's installation state for
-	// the current project (or every project on this machine). Useful
-	// for weekly review, teammate handoff, or "is the daemon
-	// actually doing its job?" introspection.
-	mcp.AddTool(srv, &mcp.Tool{
-		Name: "status_snapshot",
-		Description: `Generate a portable Markdown snapshot of klyne's installation state.
-
-Aggregates the last N hours (default 168 = 7 days) of klyne data: sessions ingested, total messages and tokens, top projects by token volume, recent sessions, /compact events, memory counts, and stop-hook session summaries. Different from generate_handoff (per-task) and bootstrap (Day-1 brief) — this is the per-installation "weekly review" view.
-
-Fire when the user asks "what has klyne been doing?", "what's the state of my klyne install?", "how much have I spent this week?", "give me a klyne weekly review", or similar. Pass all_projects=true for a machine-wide view; otherwise the snapshot scopes to the current project's cwd.
-
-Returns structured rollups plus a markdown body suitable for verbatim display.`,
-	}, HandleStatusSnapshot)
 
 	// MCP prompts intentionally NOT registered here. Each tool above
 	// already has a paired static slash command under

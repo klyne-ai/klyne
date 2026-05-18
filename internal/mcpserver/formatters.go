@@ -17,37 +17,6 @@ import (
 // formatters stayed because the tools themselves still emit the
 // markdown body.
 
-// formatSearchAsMarkdown renders a SearchOutput as a hit list. Each
-// row carries enough info (session_id, project_path, role, ts) for
-// the AI to call get_pre_compact_context or generate_handoff on the
-// right session next.
-func formatSearchAsMarkdown(out SearchOutput) string {
-	if out.DaemonDown {
-		return out.Reason
-	}
-	if len(out.Hits) == 0 {
-		if out.Reason != "" {
-			return out.Reason
-		}
-		return fmt.Sprintf("No matches for %q.", out.Query)
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "# Search results for %q\n\n", out.Query)
-	fmt.Fprintf(&b, "%d hit(s)", out.Total)
-	if out.TookMs > 0 {
-		fmt.Fprintf(&b, " · %dms", out.TookMs)
-	}
-	b.WriteString("\n\n")
-	for i, h := range out.Hits {
-		when := time.UnixMilli(h.TS).UTC().Format("2006-01-02 15:04 UTC")
-		fmt.Fprintf(&b, "## %d. `%s` (%s)\n\n", i+1, short(h.SessionID), h.CLI)
-		fmt.Fprintf(&b, "- Project: `%s`\n", h.ProjectPath)
-		fmt.Fprintf(&b, "- Role: %s · %s\n", h.Role, when)
-		fmt.Fprintf(&b, "- Snippet: %s\n\n", oneLine(h.Snippet))
-	}
-	return b.String()
-}
-
 // formatHealthAsMarkdown turns a GetContextHealthOutput into a human
 // (and AI) readable block. Includes the headline verdict, the
 // recommended action, and the top 3 bloat rows when present.

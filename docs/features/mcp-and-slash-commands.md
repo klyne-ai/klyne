@@ -19,7 +19,6 @@ Each slash command calls one MCP tool and prints the tool's `markdown` field byt
 | `/klyne:handoff` | `generate_handoff` | Deterministic handoff prompt for a fresh session | [handoff.md](./handoff.md) |
 | `/klyne:health` | `get_context_health` | Verdict (healthy / drifting / risky / rescue_now) + top bloat sources | [context-health.md](./context-health.md) |
 | `/klyne:precompact` | `get_pre_compact_context` | Messages from immediately before the last `/compact` | [pre-compact-recovery.md](./pre-compact-recovery.md) |
-| `/klyne:search <query>` | `search_messages` | FTS5 search across every indexed session | [search.md](./search.md) |
 | `/klyne:sessions` | `list_sessions` | Every Claude Code + Codex session in the current project | [sessions-list.md](./sessions-list.md) |
 | `/klyne:tokens` | `get_token_timeline` | Per-turn token usage with sparkline + heatmap | [token-timeline.md](./token-timeline.md) |
 

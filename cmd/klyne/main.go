@@ -62,10 +62,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newDecisionsCmd())
 	root.AddCommand(newSubagentsCmd())
 	root.AddCommand(newOtelCmd())
-	// v3 surfaces — runbook proposer, installation snapshot,
 	// Stop-hook session summary writer.
-	root.AddCommand(newRunbooksCmd())
-	root.AddCommand(newStatusCmd())
 	root.AddCommand(newSessionEndCmd())
 	// Cross-AI worklog — weekly digest exports + reflection ops.
 	root.AddCommand(newWorklogCmd())
@@ -74,8 +71,6 @@ func newRootCmd() *cobra.Command {
 	// v0 Pre-Action Safety Net — PreToolUse hook entry + restore.
 	root.AddCommand(newPreToolCmd())
 	root.AddCommand(newRestoreCmd())
-	// v0 Auto-Resume with Receipts — rank + hydrate past sessions.
-	root.AddCommand(newResumeCmd())
 	// v0 Compact Shield — PreCompact hook entry + status.
 	root.AddCommand(newPreCompactCmd())
 	// v0 Cost-Per-Outcome + Waste Digest — attribution batch + weekly digest CLI.

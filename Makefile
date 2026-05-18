@@ -1,4 +1,4 @@
-.PHONY: build build-ui dev test vet lint tidy ci clean release release-snapshot proof eval-contexthealth
+.PHONY: build build-ui build-hook install dev test vet lint tidy ci clean release release-snapshot proof eval-contexthealth
 
 # Default target.
 #
@@ -15,8 +15,31 @@
 # this Makefile) keeps the v0.0.0-bootstrap default in cmd/klyne/main.go.
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
-build: build-ui
+build: build-ui build-hook
 	GOTOOLCHAIN=auto CGO_ENABLED=0 go build -ldflags "-X main.version=$(VERSION)" -o bin/klyne ./cmd/klyne
+
+# Build the lightweight klyne-hook stub binary. This is the binary
+# `klyne mcp install` wires into Claude Code's hook entries (when
+# present); it forwards events to the long-running daemon over a
+# Unix socket so the kernel's jetsam killer doesn't terminate it
+# on memory-pressured machines. See internal/hookrpc/protocol.go.
+#
+# Kept as a separate target so iterating on the stub doesn't
+# require the (slower) UI rebuild.
+build-hook:
+	GOTOOLCHAIN=auto CGO_ENABLED=0 go build -ldflags "-X main.version=$(VERSION)" -o bin/klyne-hook ./cmd/klyne-hook
+
+# Install both binaries into ~/.local/bin (or $(PREFIX)/bin when
+# PREFIX is set). `klyne mcp install` looks for klyne-hook adjacent
+# to klyne in the same directory; installing them together is what
+# unlocks the daemon-RPC fast path for hooks.
+PREFIX ?= $(HOME)/.local
+install: build
+	@mkdir -p $(PREFIX)/bin
+	install -m 0755 bin/klyne      $(PREFIX)/bin/klyne
+	install -m 0755 bin/klyne-hook $(PREFIX)/bin/klyne-hook
+	@echo "installed klyne + klyne-hook to $(PREFIX)/bin"
+	@echo "next: run \`klyne mcp install\` to wire MCP server + hooks, then restart Claude Code."
 
 # Build the SvelteKit UI if ui/package.json exists.
 # The UI build output is embedded via embed.FS (ui/build/).
@@ -62,7 +85,7 @@ ci: vet lint test
 		echo "ui/package.json not found — skipping UI checks"; \
 	fi
 
-# Remove build artifacts.
+# Remove build artifacts. bin/ catches both klyne and klyne-hook.
 clean:
 	rm -rf bin/ cov.out ui/build/
 

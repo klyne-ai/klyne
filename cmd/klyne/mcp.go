@@ -136,7 +136,19 @@ func runMcpInstall(cmd *cobra.Command, platformFlag string) error {
 	// hook surface; the web cockpit advisory is the v1 fallback
 	// for Codex-only users.
 	if shouldInstallAdvisorHook(targets) {
-		report, err := mcpserver.InstallAdvisorHook(exe)
+		// Prefer the lightweight klyne-hook stub when it's installed
+		// alongside the main binary. The stub forwards hook events
+		// to the long-running daemon over a Unix socket and only
+		// falls back to spawning the full binary when the daemon is
+		// unreachable — see internal/hookrpc for the full design.
+		// When the stub isn't installed (older releases, manual go-
+		// build), we transparently use the main binary like before.
+		hookExe := resolveHookBinary(exe)
+		if hookExe != exe {
+			fmt.Fprintf(cmd.OutOrStdout(), "hook stub: using %s (low-memory path)\n", hookExe)
+		}
+
+		report, err := mcpserver.InstallAdvisorHook(hookExe)
 		if err != nil {
 			return fmt.Errorf("install advisor hook: %w", err)
 		}
@@ -145,7 +157,7 @@ func runMcpInstall(cmd *cobra.Command, platformFlag string) error {
 
 		// Install the PreToolUse safety-net hook so klyne snapshots
 		// working-tree state before risky commands run.
-		ptReport, err := mcpserver.InstallPreToolHook(exe)
+		ptReport, err := mcpserver.InstallPreToolHook(hookExe)
 		if err != nil {
 			return fmt.Errorf("install pretool hook: %w", err)
 		}
@@ -154,7 +166,7 @@ func runMcpInstall(cmd *cobra.Command, platformFlag string) error {
 
 		// Install the PreCompact compact-shield hook so klyne intercepts
 		// native compact events and blocks them when a snapshot is armed.
-		csReport, err := mcpserver.InstallPreCompactHook(exe)
+		csReport, err := mcpserver.InstallPreCompactHook(hookExe)
 		if err != nil {
 			return fmt.Errorf("install compact-shield hook: %w", err)
 		}
@@ -165,7 +177,7 @@ func runMcpInstall(cmd *cobra.Command, platformFlag string) error {
 		// settings.json file, separate event ("Stop" vs
 		// "UserPromptSubmit"). Idempotent — re-running only rewrites
 		// when the entry would actually change.
-		stopReport, err := mcpserver.InstallStopHook(exe)
+		stopReport, err := mcpserver.InstallStopHook(hookExe)
 		if err != nil {
 			return fmt.Errorf("install stop hook: %w", err)
 		}
@@ -197,7 +209,72 @@ func runMcpInstall(cmd *cobra.Command, platformFlag string) error {
 		fmt.Fprintln(cmd.OutOrStdout(),
 			"To enable the 5-hour-window advisor, run: klyne config set plan <pro|max-5x|max-20x|team>")
 	}
+
+	printRestartBanner(cmd, targets)
 	return nil
+}
+
+// printRestartBanner emits a visually distinctive footer reminding the
+// user that MCP servers and hook bindings only load at session start —
+// so the host CLI must be restarted before any newly-installed klyne
+// surfaces take effect. Tailors the body to the platforms that were
+// actually installed.
+func printRestartBanner(cmd *cobra.Command, targets []mcpserver.Platform) {
+	var hasClaude, hasCodex bool
+	for _, p := range targets {
+		switch p {
+		case mcpserver.PlatformClaude:
+			hasClaude = true
+		case mcpserver.PlatformCodex:
+			hasCodex = true
+		}
+	}
+	if !hasClaude && !hasCodex {
+		return
+	}
+
+	out := cmd.OutOrStdout()
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "═══════════════════════════════════════════════════════════════")
+	fmt.Fprintln(out, "  ⚠  RESTART YOUR AI CLI NOW")
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "  MCP servers and hooks only load at session start.")
+	fmt.Fprintln(out, "  Until you restart, /klyne:* slash commands will fail and")
+	fmt.Fprintln(out, "  the advisor/snapshot/compact-shield hooks won't fire.")
+	if hasClaude {
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "  Claude Code: quit and relaunch the CLI.")
+	}
+	if hasCodex {
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "  Codex CLI: re-run `codex` to pick up the new MCP server.")
+	}
+	fmt.Fprintln(out, "═══════════════════════════════════════════════════════════════")
+}
+
+// resolveHookBinary picks the binary klyne mcp install should wire
+// into Claude Code's hook entries. It prefers a `klyne-hook` stub
+// sitting next to the main klyne binary (the layout `make install`
+// produces) because the stub is ~4 MB resident vs the full klyne's
+// ~100 MB — small enough that the macOS jetsam killer doesn't
+// reflexively terminate it under memory pressure. When the stub
+// isn't present, we fall back to klyneExe so older installations
+// keep working exactly as before.
+//
+// The stub forwards every event to the long-running daemon over a
+// Unix socket and exec's the full klyne binary when the daemon is
+// unreachable, so users see no behavioural difference — only fewer
+// "Failed with non-blocking status code" hook errors.
+func resolveHookBinary(klyneExe string) string {
+	dir := klyneExe
+	for len(dir) > 0 && dir[len(dir)-1] != '/' && dir[len(dir)-1] != '\\' {
+		dir = dir[:len(dir)-1]
+	}
+	candidate := dir + "klyne-hook"
+	if _, err := os.Stat(candidate); err == nil {
+		return candidate
+	}
+	return klyneExe
 }
 
 // shouldInstallAdvisorHook reports whether the install should also

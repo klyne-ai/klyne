@@ -24,7 +24,6 @@ Use it when the AI loses the thread:
 |---|---|---|
 | `/compact` buried the exact path, command, or decision | `/klyne:precompact` | Original pre-compact turns from JSONL |
 | A task must continue in a fresh Claude/Codex session | `/klyne:handoff` | Touched files, commands, failures, and recent context |
-| You remember a bug, not the session where it happened | `/klyne:search jointLedgerController` | Session id, project, timestamp, and matching discussion |
 | A session starts burning context or cache badly | `/klyne:health` / `/klyne:tokens` | Context health, token timeline, cache reuse, and plan-window burn |
 | A procedure should survive future chats | `klyne remember this ...` | Local project/global memory recalled later with `refer klyne ...` |
 
@@ -32,8 +31,8 @@ Four surfaces, one local engine:
 
 - **MCP server** — Claude Code & Codex CLI can call klyne mid-session.
 - **Proactive advisor** — Claude Code hook warns before the next prompt makes the session worse.
-- **Web cockpit** — `http://127.0.0.1:7878`. Three-tab shell — **Work** (live sessions, projects, compact), **Memory** (project/global runbooks), **Insights** (token spend, models, heatmap). `/` opens a global search overlay.
-- **Memory** — chat-first project/global runbooks stored locally and visible at `/memory`.
+- **Web cockpit** — `http://127.0.0.1:7878`. Three-tab shell — **Work** (live sessions, projects, compact), **Memory** (project/global notes), **Insights** (token spend, models, heatmap). `/` opens a global search overlay.
+- **Memory** — chat-first project/global notes stored locally and visible at `/memory`.
 
 > **Real maintainer machine, 30 days:** 222 sessions, 84,074 messages, 11.7B input tokens, 97 % cache reuse, $27.0K in priced model compute, and one `oms-service` compact event that shrank 793K tokens to 9K (88x). `klyne audit-sessions` checked stored stats against raw JSONL: **17/17 ✓ (100 %)**.
 
@@ -47,9 +46,8 @@ Each row maps to a walkthrough with real output in [`docs/FEATURES.md`](docs/FEA
 |---|---|---|
 | `oms-service` debug session compacted three times | Last boundary: **793,401 tokens -> 9,002** | Run `/klyne:precompact` |
 | README/video work had to survive a fresh chat | Handoff found touched files, commands, failures, and recent turns | Run `/klyne:handoff` |
-| `trackIt` bug came back weeks later | Search found `jointLedgerController` in about 4 ms | Run `/klyne:search jointLedgerController` |
 | Agent work hid its true spend | One session spawned **31 subagents** and rolled up **201M input tokens** | Run `klyne subagents --since=168h` |
-| Service runbook must be reused safely | Memory stores project/global notes in `~/.klyne/klyne.db` | Say `klyne remember this ...`, then `refer klyne ...` |
+| Service note must be reused safely | Memory stores project/global notes in `~/.klyne/klyne.db` | Say `klyne remember this ...`, then `refer klyne ...` |
 | Session drift starts before you notice | Advisor checks stale files, acceleration, plan-window burn, and hard ceiling | Let the hook warn once per state change |
 
 ---
@@ -74,7 +72,8 @@ make build
 ./bin/klyne audit-sessions --limit 20
 ```
 
-Then **restart Claude Code** so it picks up the new MCP server, slash commands, and advisor hook. Existing MCP subprocesses keep their old binary in memory — restart is required for upgrades to take effect.
+> ⚠️ **You MUST restart Claude Code (and Codex CLI) after `klyne mcp install`.**
+> MCP servers and hook bindings are only loaded at session start. Until you restart, `/klyne:*` slash commands will fail with a "tool not available" error and the advisor / pretool-snapshot / compact-shield / session-end hooks will not fire in your current session. This also applies to every klyne binary upgrade — existing MCP subprocesses keep the old binary in memory.
 
 > **Release status (May 2026):** the Homebrew tap, install script, and binary downloads light up with the first tagged release via [goreleaser](.github/workflows/release.yml). Until v0.1 ships, **build-from-source above is the only path that works today.** The release paths are documented in [§ Install — full reference](#install--full-reference) below.
 
@@ -155,7 +154,7 @@ flowchart LR
   DB --> W
 ```
 
-**The MCP server is independent of the daemon.** Every tool reads JSONL directly — it works in fresh sessions before the daemon has had a chance to ingest them. Only `search_messages` depends on the daemon, because full-text search needs SQLite.
+**The MCP server is independent of the daemon.** Every tool reads JSONL or SQLite directly — they work in fresh sessions before the daemon has had a chance to ingest them.
 
 ---
 
@@ -170,16 +169,13 @@ flowchart LR
 | `bootstrap` | Day-1 session brief: last 3 sessions + last 5 project memories + global preview + latest context-health verdict — synthesized in one call so a fresh session has cross-session context on turn 1 |
 | `list_sessions` | Enumerate Claude + Codex sessions in this project |
 | `get_context_health` | Classify a session as `healthy` / `drifting` / `risky` / `rescue_now` + bloat scorecard |
-| `search_messages` | Full-text search across every indexed session (requires daemon) |
 | `generate_handoff` | Deterministic Markdown handoff; optional `scope=current-topic` |
 | `get_pre_compact_context` | Recover messages from before the last `/compact` |
 | `get_token_timeline` | Per-turn token usage — sparkline + table + heatmap, cached vs uncached split |
 | `record_decision` / `list_decisions` / `search_decisions` | Project-scoped immutable decisions log |
-| `remember` / `recall` | Chat-first memory: project/global notes and runbooks that survive across fresh sessions |
+| `remember` / `recall` | Chat-first memory: project/global notes that survive across fresh sessions |
 | `update_memory` / `delete_memory` / `list_memories` | Edit, delete, and browse memories by id — full CRUD parity with derived display names |
 | `code_review_context` | Optional `.code-review-graph/` enrichment when present |
-| `propose_runbooks` / `accept_runbook` / `dismiss_runbook` | Pattern → runbook detector: surfaces Bash command sequences that recur across sessions and saves the user-accepted ones as memories |
-| `status_snapshot` | Portable Markdown summary of klyne's installation state (sessions, /compact events, projects, memories) for the last N hours |
 | `recap_project` | Cross-AI worklog: visible session-end entries for one project in the last N days, tagged `[claude]` / `[codex]` so the agent answers "what did I do here lately?" across tools |
 | `user_recap` | Cross-project, cross-AI rollup: total entries + by-CLI + by-project + top-importance — for "what did I ship this week?" |
 | `propose_reflection` | Returns pending worklog entries + a trigger reason (importance-sum / weekly cron / user-invoked) for the agent to synthesize over |
@@ -192,12 +188,9 @@ flowchart LR
 | `/klyne:bootstrap` | `bootstrap` |
 | `/klyne:health` | `get_context_health` |
 | `/klyne:sessions` | `list_sessions` |
-| `/klyne:search <query>` | `search_messages` |
 | `/klyne:handoff` | `generate_handoff` |
 | `/klyne:precompact` | `get_pre_compact_context` |
 | `/klyne:tokens` | `get_token_timeline` |
-| `/klyne:runbooks` | `propose_runbooks` — see recurring shell workflows klyne thinks belong in memory |
-| `/klyne:status` | `status_snapshot` — installation-state snapshot for the current project |
 | `/klyne:reflect` | Cross-AI worklog synthesis: Claude calls `propose_reflection`, synthesizes 3–5 insights with mandatory citations, then calls `record_reflection`. Uses your Claude subscription — no extra API key |
 
 Installed as Markdown slash commands under `~/.claude/commands/klyne/*.md` — each command file calls the matching MCP tool above. Single surface per command, no `(MCP)` duplicates in the slash menu.
@@ -225,9 +218,7 @@ Installed as Markdown slash commands under `~/.claude/commands/klyne/*.md` — e
 | `klyne roast [--max=N]` | Templated, deterministic zingers. No AI calls. |
 | `klyne subagents [--since=24h]` | Roll up Task-tool subagent spend back to the parent session. |
 | `klyne decisions add\|list\|search\|delete` | Project-scoped immutable decisions log. |
-| `klyne runbooks [list\|accept\|dismiss]` | Surface recurring Bash sequences as candidate runbooks; accept saves to memory, dismiss never re-proposes. |
 | `klyne worklog export-week [--project PATH] [--week YYYY-WW]` | Render `<project>/docs/worklog/YYYY-WW.md` from visible worklog entries — conditional on activity, no file written for quiet weeks. Tags each entry with its source CLI. |
-| `klyne status [--all-projects] [--since=Xh] [--write=PATH]` | Portable Markdown installation snapshot for the current project (or every project on this machine). |
 | Memory via chat | Say *"klyne remember this …"* / *"refer klyne …"* in Claude Code. Uses MCP `remember` / `recall`; no dedicated CLI alias yet. |
 | `klyne statusline [--format=short\|mini\|plain]` | One-line summary for Claude Code's `statusLine` settings hook. |
 | `klyne otel emit [--out=PATH] [--since=24h]` | Emit OTel-shaped JSON spans, one per assistant turn. File-only — never pushes off-host. |
@@ -257,7 +248,7 @@ A fair skeptic question for any rescue layer: if Claude is already in the sessio
 |---|---|---|
 | **Prevention** | The 5-hour cap window, exact token counts, drift signals, cost acceleration — and a push channel to warn the user *before* compact bites | Advisor hook, `klyne statusline` |
 | **Recovery** | The pre-compact JSONL slice (still on disk after Claude's context has dropped it) and the full history of any prior session | `/klyne:precompact`, `/klyne:handoff` after compact, fresh-session restore |
-| **Audit / cross-session** | Every Claude + Codex session ever indexed — files, tool calls, subagent spend, token timelines — all queryable from one local store | `/klyne:search`, `klyne files`, `klyne subagents`, `klyne top`, `klyne audit-sessions` |
+| **Audit / cross-session** | Every Claude + Codex session ever indexed — files, tool calls, subagent spend, token timelines — all queryable from one local store | `klyne files`, `klyne subagents`, `klyne top`, `klyne audit-sessions` |
 
 The two **provably klyne-only** features are `get_pre_compact_context` (the messages are gone from Claude by definition) and the `UserPromptSubmit` advisor (Claude can't intercept its own input, doesn't see the cap window, and only speaks when called). Everything else either sees across sessions or reads `usage` fields Claude doesn't expose.
 
@@ -380,7 +371,6 @@ To stay honest:
 | `bootstrap` | ✅ | ✅ |
 | `list_sessions` | ✅ | ✅ |
 | `get_context_health` | ✅ | ✅ |
-| `search_messages` | ✅ | ✅ |
 | `generate_handoff` | ✅ | ✅ |
 | `get_pre_compact_context` | ✅ via `compact_boundary` | ✅ via embedded `replacement_history` |
 | `get_token_timeline` | ✅ | ✅ |
@@ -400,10 +390,26 @@ For Codex sessions, `pre_tokens` and `trigger` (manual / auto) fields are not ex
 ```bash
 git clone https://github.com/klyne-ai/klyne && cd klyne
 make build
-# Binary lands at ./bin/klyne with the real git version baked in.
+# Produces TWO binaries under ./bin/:
+#   klyne       — the full CLI + daemon + MCP server (~22 MB)
+#   klyne-hook  — lightweight stub (~4 MB) used by Claude Code hooks
 ```
 
 `go.mod` requires Go **1.25+**. If your local Go is older, the Makefile sets `GOTOOLCHAIN=auto`, so `go` will fetch and cache the right toolchain on first build. To force the system Go, run `GOTOOLCHAIN=local make build` and ensure Go ≥ 1.25.
+
+To install both binaries to `~/.local/bin/` (override with `PREFIX=...`):
+
+```bash
+make install
+```
+
+### Why two binaries?
+
+Claude Code spawns a hook subprocess on every tool call, every prompt, every `/compact`, and every session end. The full `klyne` binary is ~100 MB resident at launch — on memory-pressured macOS, the kernel's jetsam killer terminates the subprocess at launch and you see silent "Failed with non-blocking status code" hook errors.
+
+`klyne-hook` is a ~4 MB stub that forwards each event to the long-running `klyne` daemon over a Unix socket at `~/.klyne/hook.sock`. The daemon does the actual work using its already-open SQLite connection, then streams the response back. The stub is small enough that jetsam never kills it. When the daemon isn't running (you haven't started `klyne start` yet), `klyne-hook` transparently exec's the full `klyne` binary as a fallback — so behaviour degrades gracefully instead of failing the hook.
+
+`klyne mcp install` automatically wires hooks to `klyne-hook` when it finds the stub adjacent to the main binary; otherwise it falls back to the full `klyne` path so older installs keep working.
 
 ### Homebrew — once v0.1 ships
 
@@ -442,17 +448,19 @@ klyne config set plan max-5x   # optional: pro / max-5x / max-20x / team / custo
 klyne                          # start daemon + open web UI
 ```
 
-The `mcp install` command auto-detects host configs:
+The `mcp install` command auto-detects host configs and writes every surface idempotently:
 
-| Host | Config | Entry written |
+| Surface | Config file | Entry written |
 |---|---|---|
-| Claude Code | `~/.claude.json` | `mcpServers.klyne` |
-| Codex CLI | `~/.codex/config.toml` | `[mcp_servers.klyne]` |
-| Claude Code (advisor hook) | `~/.claude/settings.json` | `hooks.UserPromptSubmit[].klyne` (idempotent merge) |
-| Claude Code (session-end hook) | `~/.claude/settings.json` | `hooks.Stop[].klyne` — writes deterministic session-end summaries to klyne's local store |
-| Claude Code (slash commands) | `~/.claude/commands/klyne/*.md` | Markdown files for every `/klyne:*` surface |
+| Claude Code MCP server | `~/.claude.json` | `mcpServers.klyne` |
+| Codex CLI MCP server | `~/.codex/config.toml` | `[mcp_servers.klyne]` |
+| Advisor hook | `~/.claude/settings.json` | `hooks.UserPromptSubmit[].klyne` — inline session-drift warnings |
+| Pretool snapshot hook | `~/.claude/settings.json` | `hooks.PreToolUse[].klyne` — working-tree snapshot before risky commands |
+| Compact-shield hook | `~/.claude/settings.json` | `hooks.PreCompact[].klyne` — intercepts native `/compact` so context is recoverable |
+| Session-end hook | `~/.claude/settings.json` | `hooks.Stop[].klyne` — writes deterministic session-end summary to local store |
+| Slash commands | `~/.claude/commands/klyne/*.md` | Markdown files for every `/klyne:*` surface |
 
-Pass `--platform claude` or `--platform codex` to scope the install.
+Pass `--platform claude` or `--platform codex` to scope the install. After it finishes, klyne prints a `RESTART YOUR AI CLI NOW` banner — **heed it.** MCP servers and hook bindings only load at session start, so `/klyne:*` and the hooks won't work in your current session until you relaunch the CLI.
 
 ---
 

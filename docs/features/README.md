@@ -8,11 +8,10 @@ Features are grouped by where the user reaches them — MCP / slash commands, CL
 
 The rescue-layer surface — every klyne capability the AI can call mid-session. Wired up via `klyne mcp install`.
 
-- [mcp-and-slash-commands.md](./mcp-and-slash-commands.md) — installation, the six slash commands, and the markdown-verbatim contract
+- [mcp-and-slash-commands.md](./mcp-and-slash-commands.md) — installation, the slash commands, and the markdown-verbatim contract
 - [handoff.md](./handoff.md) — `/klyne:handoff` · deterministic prompt to continue work in a fresh session
 - [context-health.md](./context-health.md) — `/klyne:health` · verdict + top bloat sources
 - [pre-compact-recovery.md](./pre-compact-recovery.md) — `/klyne:precompact` · messages from before the last `/compact`
-- [search.md](./search.md) — `/klyne:search` · FTS5 across every indexed session
 - [sessions-list.md](./sessions-list.md) — `/klyne:sessions` · every Claude Code + Codex session in this project
 - [token-timeline.md](./token-timeline.md) — `/klyne:tokens` (+ CLI + web) · per-turn token usage with sparkline & heatmap
 

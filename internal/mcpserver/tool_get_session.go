@@ -16,10 +16,10 @@ import (
 // get_session tool
 // ================
 // Fetches one session's metadata + ordered messages directly from
-// klyne's SQLite store. Distinct from search_messages (cross-session
-// FTS) and from generate_handoff (current-session JSONL re-scan +
-// renderer): this is the "I already know the session_id, give me its
-// content" surface that bootstrap recipients need.
+// klyne's SQLite store. Distinct from generate_handoff (current-session
+// JSONL re-scan + renderer): this is the "I already know the
+// session_id, give me its content" surface that bootstrap recipients
+// need.
 
 const (
 	getSessionDefaultLimit = 100
@@ -99,7 +99,7 @@ func HandleGetSession(ctx context.Context, _ *mcp.CallToolRequest, in GetSession
 		order = "asc"
 	}
 
-	db, err := store.Open(config.DBPath())
+	db, err := store.Open(ctx, config.DBPath())
 	if err != nil {
 		return nil, GetSessionOutput{}, fmt.Errorf("open db: %w", err)
 	}

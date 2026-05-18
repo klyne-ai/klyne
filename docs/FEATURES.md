@@ -153,47 +153,6 @@ $ mcp__klyne__get_context_health
 
 ---
 
-### A3 · `search_messages` — cross-session full-text search
-
-**Real call** (against your real `Learning/trackIt/.worktrees/feat-joint-ledger-splits` session):
-
-```json
-$ mcp__klyne__search_messages query="jointLedgerController"
-{
-  "total": 3,
-  "took_ms": 4,
-  "hits": [
-    {
-      "session_id": "8a528bc6-…",
-      "project_path": "/Users/mohitpatel/Desktop/Learning/trackIt/.worktrees/feat-joint-ledger-splits",
-      "role": "assistant",
-      "snippet": "**Step 3**: Fix the three backfill paths in `<mark>jointLedgerController</mark>.js` to respect ledger mode. Looking at the pattern:",
-      "ts": 1778563076452
-    },
-    {
-      "session_id": "8a528bc6-…",
-      "snippet": "| `acceptInvite` Mode A (join existing ledger) — `<mark>jointLedgerController</mark>.js:587-617` | `updateMany` flips old personal txns to `scope: joint` but doesn't populate `splits[]` / `paidByUserId` / `splitMethod` — same bug as SMS ingest, except via bulk write |"
-    },
-    {
-      "session_id": "8a528bc6-…",
-      "snippet": "…271/271 server tests pass; client builds clean… `jointLedgerController.js` (createInvite + acceptInvite + publicLedger/publicInvite)…"
-    }
-  ]
-}
-```
-
-**Real-world story.** A week from now someone asks: *"Hey, didn't we hit a bug in the trackIt joint-ledger acceptInvite path?"* You don't remember the session id. You type `/klyne:search jointLedgerController` and get back the exact assistant turn citing line `:587-617`, complete with the bug analysis. That's session `8a528bc6` on 2026-05-11. **Sub-5 ms** across 80K messages.
-
-**Useful for you?** Massively. You have 207 sessions across 28 projects. Without this tool, "where did we discuss X" is a black hole.
-
-**Gotcha:** requires the daemon (`klyne start` or just `klyne`). When the daemon is down, the tool returns `daemon_down: true` with a restart hint, which is what I hit five minutes ago when the daemon had crashed:
-
-```json
-{"daemon_down": true, "reason": "Could not reach the klyne daemon at http://127.0.0.1:7878 — start it with `klyne` and try again.", "total": 0}
-```
-
----
-
 ### A4 · `generate_handoff` — deterministic Markdown handoff
 
 **Real call** (against this very session you're reading):
@@ -833,7 +792,7 @@ The killer flow is **runbooks** — multi-line scripted procedures that you used
 1. Pin 2-3 runbooks (secrets / deploy / DB migration) per project this week.
 2. Pin 1-2 global runbooks for procedures that work the same way across all your services.
 3. Add the CLAUDE.md rule (see [memory feature doc](./features/memory.md)) so Claude consults `recall` automatically before operational commands.
-4. Re-evaluate after a week. If you find yourself using `refer klyne …` daily, runbook adoption stuck — graduate to a richer `klyne runbooks` schema later. If usage is sparse, decisions-as-memory is fine forever.
+4. Re-evaluate after a week. If you find yourself using `refer klyne …` daily, runbook adoption stuck — keep it. If usage is sparse, decisions-as-memory is fine forever.
 
 ### Supported CLIs / hosts
 

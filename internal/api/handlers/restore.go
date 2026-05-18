@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"runtime"
 	"strings"
 	"time"
 
@@ -12,9 +13,41 @@ import (
 
 	"github.com/klyne-ai/klyne/internal/api"
 	"github.com/klyne-ai/klyne/internal/connectors"
-	"github.com/klyne-ai/klyne/internal/resume"
 	"github.com/klyne-ai/klyne/internal/store"
 )
+
+// restoreOSName is the runtime OS identifier, captured at init so the
+// resume-command formatters below can be unit-tested by swapping it.
+var restoreOSName = runtime.GOOS
+
+// claudeResumeCmd returns the "Open in Claude Code" resume command.
+// projectPath is optional; when empty the -p flag is omitted.
+func claudeResumeCmd(sessionID, projectPath string) string {
+	cmd := "claude --resume " + sessionID
+	if projectPath != "" {
+		cmd += " -p " + quoteResumePath(projectPath, restoreOSName)
+	}
+	return cmd
+}
+
+// codexResumeCmd returns the "Open in Codex CLI" resume command. Codex
+// resumes the most recent session in the CWD; sessionID/projectPath are
+// accepted for symmetry with claudeResumeCmd but unused.
+func codexResumeCmd(_, _ string) string {
+	return "codex resume --last"
+}
+
+// quoteResumePath returns a shell-safe quoted path for the given OS.
+func quoteResumePath(path, goos string) string {
+	if goos == "windows" {
+		escaped := strings.ReplaceAll(path, `"`, `\"`)
+		if strings.ContainsAny(escaped, " \t") {
+			return `"` + escaped + `"`
+		}
+		return escaped
+	}
+	return "'" + strings.ReplaceAll(path, "'", `'\''`) + "'"
+}
 
 // restoreTailSize is the number of tail messages to include in the restore bundle.
 const restoreTailSize = 20
@@ -143,8 +176,8 @@ func buildMarkdown(sessionID, summaryText string, msgs []*connectors.Message) st
 func buildResumeCmd(cli connectors.CLI, sessionID, projectPath string) string {
 	switch cli {
 	case connectors.CLICodex:
-		return resume.CodexCmd(sessionID, projectPath)
+		return codexResumeCmd(sessionID, projectPath)
 	default:
-		return resume.ClaudeCmd(sessionID, projectPath)
+		return claudeResumeCmd(sessionID, projectPath)
 	}
 }

@@ -143,6 +143,15 @@ type App struct {
 	ingestWG sync.WaitGroup
 	cancel   context.CancelFunc
 
+	// hookSrv is the klyne-hook RPC server (Unix socket listener).
+	// nil until Start brings it up; set back to nil by Stop. The
+	// matching wait group keeps Stop from returning before the
+	// accept loop drains. Type is the underlying hookrpc.Server but
+	// referenced via the hookSrvIface in hookserver.go to avoid
+	// pulling an additional import into this large file.
+	hookSrv hookSrvIface
+	hookWG  sync.WaitGroup
+
 	// claudeCompactBySession holds one CompactDetector per Claude session.
 	// It is touched ONLY from the writer goroutine (see processRawEvent),
 	// which is the single consumer of RawEvents, so no mutex is required.
@@ -189,7 +198,7 @@ func BuildOnly(cfg *config.Config) (*App, error) {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
 		return nil, fmt.Errorf("app: mkdir for DB %s: %w", dbPath, err)
 	}
-	db, err := store.Open(dbPath)
+	db, err := store.Open(context.Background(), dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("app: open store: %w", err)
 	}
@@ -429,6 +438,16 @@ func (a *App) Start(ctx context.Context) error {
 	// surfaces a "Reflection due" advisory in the bootstrap brief but
 	// never issues an LM call itself.
 
+	// 3.5. Start the klyne-hook RPC server (Unix socket) so the
+	// klyne-hook stub can forward Claude Code hook events without
+	// spawning the full klyne binary each time. Non-fatal: hook
+	// events still work via the exec fallback in the stub even when
+	// this listener fails to bind.
+	if herr := a.startHookServer(ctx); herr != nil {
+		a.logger.Warn("hookserver: not started, hooks will fall back to exec",
+			slog.Any("error", herr))
+	}
+
 	// 4. Serve HTTP in a goroutine and wait for ctx.
 	serveErr := make(chan error, 1)
 	go func() {
@@ -516,6 +535,14 @@ func (a *App) Stop(ctx context.Context) error {
 		// channel.
 		if a.runner != nil && a.runnerStarted {
 			_ = a.runner.Stop()
+		}
+
+		// Drain the hook RPC listener BEFORE closing the DB so any
+		// in-flight handler can finish reading from the shared
+		// connection. Hook handlers are bounded to HookCallTimeout
+		// so this never blocks for more than ~2s.
+		if err := a.stopHookServer(); err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("app: hookserver stop: %w", err)
 		}
 
 		if a.hub != nil {

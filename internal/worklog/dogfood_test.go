@@ -135,10 +135,10 @@ func critK1DogfoodUsefulness(_ context.Context, _ *sql.DB) (bool, string, error)
 
 func critK2CounterfactualAB(_ context.Context, _ *sql.DB) (bool, string, error) {
 	// For the SAME 20 questions, also answer using only existing klyne
-	// (search_messages + list_decisions + generate_handoff). If the new
-	// recap surface does not strictly beat the existing stack on >= 12 of
-	// 20 → KILL — you have a /klyne:recap win, not a worklog win.
-	return true, "MANUAL: re-answer the same K1 questions using only search_messages + list_decisions + generate_handoff. Kill if recap does not beat the existing stack on >= 12 of 20.", nil
+	// (list_decisions + generate_handoff). If the new recap surface does
+	// not strictly beat the existing stack on >= 12 of 20 → KILL — you
+	// have a /klyne:recap win, not a worklog win.
+	return true, "MANUAL: re-answer the same K1 questions using only list_decisions + generate_handoff. Kill if recap does not beat the existing stack on >= 12 of 20.", nil
 }
 
 // --- K3: hallucination audit (manual sample) ----------------------------
