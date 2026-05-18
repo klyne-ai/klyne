@@ -70,6 +70,10 @@ func InsertReflection(ctx context.Context, db *DB, r Reflection) error {
 }
 
 // ListReflectionsForProject returns reflections for one project newest-first.
+// The secondary `title DESC` sort breaks ts ties when /klyne:reflect writes
+// multiple daily reflections in one run (each call shares millisecond-scale
+// ts with its peers). Daily titles end in YYYY-MM-DD which sorts lexically
+// in chronological order, so the secondary sort puts newest day first.
 func ListReflectionsForProject(ctx context.Context, db *DB, projectPath string, limit int) ([]Reflection, error) {
 	if limit <= 0 {
 		limit = 10
@@ -80,7 +84,7 @@ func ListReflectionsForProject(ctx context.Context, db *DB, projectPath string, 
                 importance, summary_source, state, state_changed_at
          FROM worklog_reflections
          WHERE project_path = ?
-         ORDER BY ts DESC LIMIT ?`,
+         ORDER BY ts DESC, title DESC LIMIT ?`,
 		projectPath, limit)
 	if err != nil {
 		return nil, fmt.Errorf("store: list reflections: %w", err)
