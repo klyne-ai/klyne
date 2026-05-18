@@ -76,7 +76,7 @@ func runOtelEmit(cmd *cobra.Command, projectPath, sinceStr, outPath string, limi
 	if err != nil {
 		return fmt.Errorf("cost engine: %w", err)
 	}
-	db, err := store.Open(config.DBPath())
+	db, err := store.Open(cmd.Context(), config.DBPath())
 	if err != nil {
 		return fmt.Errorf("open db: %w (run `klyne start` to ingest sessions)", err)
 	}

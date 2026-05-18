@@ -98,7 +98,7 @@ func HandleRecordDecision(ctx context.Context, _ *mcp.CallToolRequest, in Record
 	if proj == "" && in.CWD != "" {
 		proj = projectpath.Canonical(in.CWD)
 	}
-	db, err := store.Open(config.DBPath())
+	db, err := store.Open(ctx, config.DBPath())
 	if err != nil {
 		return nil, RecordDecisionOutput{}, fmt.Errorf("open db: %w", err)
 	}
@@ -133,7 +133,7 @@ func HandleListDecisions(ctx context.Context, _ *mcp.CallToolRequest, in ListDec
 	}
 	limit := clampLimit(in.Limit, 50, 500)
 
-	db, err := store.Open(config.DBPath())
+	db, err := store.Open(ctx, config.DBPath())
 	if err != nil {
 		return nil, DecisionsListOutput{}, fmt.Errorf("open db: %w", err)
 	}
@@ -169,7 +169,7 @@ func HandleSearchDecisions(ctx context.Context, _ *mcp.CallToolRequest, in Searc
 	}
 	limit := clampLimit(in.Limit, 50, 500)
 
-	db, err := store.Open(config.DBPath())
+	db, err := store.Open(ctx, config.DBPath())
 	if err != nil {
 		return nil, DecisionsListOutput{}, fmt.Errorf("open db: %w", err)
 	}

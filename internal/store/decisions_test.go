@@ -12,7 +12,7 @@ import (
 func openDecisionsDB(t *testing.T) *store.DB {
 	t.Helper()
 	dir := t.TempDir()
-	db, err := store.Open(filepath.Join(dir, "dec.db"))
+	db, err := store.Open(context.Background(), filepath.Join(dir, "dec.db"))
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

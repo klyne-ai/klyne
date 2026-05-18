@@ -55,7 +55,7 @@ func handleRecordReflection(ctx context.Context, db *store.DB, in RecordReflecti
 // is enforced inside worklog.RecordReflection; this thin shell just
 // adapts errors to the tool-log surface.
 func HandleRecordReflection(ctx context.Context, _ *mcp.CallToolRequest, in RecordReflectionInput) (*mcp.CallToolResult, RecordReflectionOutput, error) {
-	db, err := store.Open(config.DBPath())
+	db, err := store.Open(ctx, config.DBPath())
 	if err != nil {
 		return nil, RecordReflectionOutput{}, fmt.Errorf("record_reflection: open db: %w", err)
 	}

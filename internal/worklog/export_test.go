@@ -32,7 +32,7 @@ func seedExportEntry(t *testing.T, db *store.DB, project, cli, sessionID string,
 
 func newExportTestDB(t *testing.T) *store.DB {
 	t.Helper()
-	db, err := store.Open(filepath.Join(t.TempDir(), "export.db"))
+	db, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "export.db"))
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

@@ -10,7 +10,7 @@ import (
 
 func openReflectionsDB(t *testing.T) *store.DB {
 	t.Helper()
-	db, err := store.Open(filepath.Join(t.TempDir(), "reflections.db"))
+	db, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "reflections.db"))
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

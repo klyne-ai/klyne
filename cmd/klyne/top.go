@@ -51,7 +51,7 @@ Flags:
 }
 
 func runTop(cmd *cobra.Command, projectPath, sinceStr string, limit int, outputJSON bool) error {
-	db, err := store.Open(config.DBPath())
+	db, err := store.Open(cmd.Context(), config.DBPath())
 	if err != nil {
 		return fmt.Errorf("open db at %s: %w (run `klyne start` to ingest sessions)", config.DBPath(), err)
 	}

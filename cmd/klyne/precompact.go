@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -57,7 +58,8 @@ Pass --status to print recent decision counts instead.`,
 }
 
 func runPreCompact(cmd *cobra.Command) error {
-	db, err := openPreCompactDB()
+	ctx := cmd.Context()
+	db, err := openPreCompactDB(ctx)
 	if err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "klyne precompact: open db: %v\n", err)
 		// Continue without DB — handler degrades gracefully (always allows).
@@ -67,7 +69,6 @@ func runPreCompact(cmd *cobra.Command) error {
 		defer db.Close() //nolint:errcheck
 	}
 
-	ctx := cmd.Context()
 	res, err := mcpserver.HandlePreCompact(ctx, cmd.InOrStdin(), db)
 	if err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "klyne precompact: %v\n", err)
@@ -80,13 +81,13 @@ func runPreCompact(cmd *cobra.Command) error {
 }
 
 func runPreCompactStatus(cmd *cobra.Command) error {
-	db, err := openPreCompactDB()
+	ctx := cmd.Context()
+	db, err := openPreCompactDB(ctx)
 	if err != nil {
 		return fmt.Errorf("klyne precompact: open db: %w", err)
 	}
 	defer db.Close() //nolint:errcheck
 
-	ctx := cmd.Context()
 	total, blocked, folded, err := store.CountShieldDecisions(ctx, db, "")
 	if err != nil {
 		return fmt.Errorf("klyne precompact: count decisions: %w", err)
@@ -102,8 +103,8 @@ func runPreCompactStatus(cmd *cobra.Command) error {
 
 // openPreCompactDB opens the klyne SQLite store for the precompact handler.
 // Returns (nil, err) on failure; callers must handle a nil DB gracefully.
-func openPreCompactDB() (*store.DB, error) {
-	return store.Open(config.DBPath())
+func openPreCompactDB(ctx context.Context) (*store.DB, error) {
+	return store.Open(ctx, config.DBPath())
 }
 
 // preCompactBinBase returns the base filename component of the binary path.

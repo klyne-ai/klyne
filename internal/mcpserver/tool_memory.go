@@ -158,7 +158,7 @@ func HandleRememberMemory(ctx context.Context, _ *mcp.CallToolRequest, in Rememb
 		}
 	}
 
-	db, err := store.Open(config.DBPath())
+	db, err := store.Open(ctx, config.DBPath())
 	if err != nil {
 		return nil, RememberMemoryOutput{}, fmt.Errorf("open db: %w", err)
 	}
@@ -204,7 +204,7 @@ func HandleRecallMemory(ctx context.Context, _ *mcp.CallToolRequest, in RecallMe
 
 	limit := clampLimit(in.Limit, 50, 500)
 
-	db, err := store.Open(config.DBPath())
+	db, err := store.Open(ctx, config.DBPath())
 	if err != nil {
 		return nil, RecallMemoryOutput{}, fmt.Errorf("open db: %w", err)
 	}

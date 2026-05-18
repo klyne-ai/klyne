@@ -69,7 +69,7 @@ func runAudit(cmd *cobra.Command, _ []string) error {
 	}
 
 	dbPath := config.DBPath()
-	db, dbErr := store.Open(dbPath)
+	db, dbErr := store.Open(cmd.Context(), dbPath)
 	if dbErr != nil {
 		// We can still run the audit — every session will be reported
 		// as not-in-DB, which is itself a signal worth surfacing.

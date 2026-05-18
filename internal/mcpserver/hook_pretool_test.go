@@ -41,7 +41,7 @@ func mustMatcher(t *testing.T) *policy.Matcher {
 func openPreToolDB(t *testing.T) *store.DB {
 	t.Helper()
 	dir := t.TempDir()
-	db, err := store.Open(filepath.Join(dir, "pretool.db"))
+	db, err := store.Open(context.Background(), filepath.Join(dir, "pretool.db"))
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}

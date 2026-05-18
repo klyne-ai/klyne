@@ -101,7 +101,7 @@ func truncateProposerBody(s string, n int) string {
 // to handleProposeReflection, returns the structured payload + a short
 // text summary for the tool-log line.
 func HandleProposeReflection(ctx context.Context, _ *mcp.CallToolRequest, in ProposeReflectionInput) (*mcp.CallToolResult, ProposeReflectionOutput, error) {
-	db, err := store.Open(config.DBPath())
+	db, err := store.Open(ctx, config.DBPath())
 	if err != nil {
 		return nil, ProposeReflectionOutput{}, fmt.Errorf("propose_reflection: open db: %w", err)
 	}

@@ -26,7 +26,7 @@ func withBootstrapDB(t *testing.T) *store.DB {
 	if err := os.MkdirAll(filepath.Dir(config.DBPath()), 0o755); err != nil {
 		t.Fatalf("mkdir klyne dir: %v", err)
 	}
-	db, err := store.Open(config.DBPath())
+	db, err := store.Open(context.Background(), config.DBPath())
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}

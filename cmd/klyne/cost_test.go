@@ -258,7 +258,7 @@ func TestCostWeekCmd_EmptyDB(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "klyne-test.db")
 
-	db, err := store.Open(dbPath)
+	db, err := store.Open(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
@@ -291,7 +291,7 @@ func TestCostWeekCmd_WithFixtureSpans(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "klyne-test.db")
 
-	db, err := store.Open(dbPath)
+	db, err := store.Open(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}

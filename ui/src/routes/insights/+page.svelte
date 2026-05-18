@@ -222,7 +222,7 @@
         </div>
       </div>
 
-      <div style="display: grid; grid-template-columns: 14px 170px 1fr 80px 70px 90px 90px 60px; gap: 10px; padding: 0 0 8px; border-bottom: 1px solid var(--ad-border-soft); font-size: 10px; text-transform: uppercase; letter-spacing: 0.10em; color: var(--ad-faint); font-family: var(--ad-font-mono); font-weight: 600;">
+      <div style="display: grid; grid-template-columns: 14px 170px 1fr 80px 70px 90px 90px 60px 70px; gap: 10px; padding: 0 0 8px; border-bottom: 1px solid var(--ad-border-soft); font-size: 10px; text-transform: uppercase; letter-spacing: 0.10em; color: var(--ad-faint); font-family: var(--ad-font-mono); font-weight: 600;">
         <span></span>
         <span>Project</span>
         <span>{unit} (claude / codex)</span>
@@ -231,6 +231,7 @@
         <span style="text-align: right;">cache hit</span>
         <span style="text-align: right;">tok / msg</span>
         <span style="text-align: right;">/compact</span>
+        <span></span>
       </div>
 
       <div style="display: flex; flex-direction: column;">
@@ -244,7 +245,7 @@
           {@const isOpen = expandedId === p.project_path}
           <div class="proj-rank-row">
             <div
-              style="display: grid; grid-template-columns: 14px 170px 1fr 80px 70px 90px 90px 60px; gap: 10px; padding: 11px 0; cursor: pointer; align-items: center; border-bottom: 1px solid var(--ad-border-soft);"
+              style="display: grid; grid-template-columns: 14px 170px 1fr 80px 70px 90px 90px 60px 70px; gap: 10px; padding: 11px 0; cursor: pointer; align-items: center; border-bottom: 1px solid var(--ad-border-soft);"
               onclick={() => (expandedId = isOpen ? null : p.project_path)}
               role="button"
               tabindex="0"
@@ -274,6 +275,13 @@
               <span class="mono tnum" style="font-size: 11.5px; text-align: right; color: {p.compact_count > 0 ? 'var(--ad-danger)' : 'var(--ad-faint)'}; font-weight: {p.compact_count > 0 ? 600 : 400};">
                 {p.compact_count > 0 ? `${p.compact_count}/${p.sessions}` : '—'}
               </span>
+              <button
+                class="btn btn--ghost btn--sm"
+                style="justify-self: end; font-size: 11px; padding: 3px 8px;"
+                title="Open {p.name} — all sessions for this project"
+                aria-label="Open project {p.name}"
+                onclick={(e) => { e.stopPropagation(); goto(`/projects/${encodeURIComponent(p.name)}`); }}
+              >open →</button>
             </div>
 
             {#if isOpen}
@@ -324,6 +332,12 @@
                         {p.compact_count} of {p.sessions} session(s) ran out of context.
                       </div>
                     {/if}
+                    <div style="margin-top: 14px;">
+                      <button
+                        class="btn btn--primary btn--sm"
+                        onclick={() => goto(`/projects/${encodeURIComponent(p.name)}`)}
+                      >Open full project →</button>
+                    </div>
                   </div>
                 </div>
               </div>

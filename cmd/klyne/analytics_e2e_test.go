@@ -31,7 +31,7 @@ func redirectHome(t *testing.T) string {
 // non-trivial output.
 func seedDB(t *testing.T, dbPath string) {
 	t.Helper()
-	db, err := store.Open(dbPath)
+	db, err := store.Open(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("open seed db: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestRoastCmd_E2E_NoSessions(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 	// Open + close to create an empty DB so the CLI can attach.
-	db, err := store.Open(config.DBPath())
+	db, err := store.Open(context.Background(), config.DBPath())
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

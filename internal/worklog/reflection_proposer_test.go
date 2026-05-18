@@ -11,7 +11,7 @@ import (
 
 func newProposerTestDB(t *testing.T) *store.DB {
 	t.Helper()
-	db, err := store.Open(filepath.Join(t.TempDir(), "proposer.db"))
+	db, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "proposer.db"))
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

@@ -127,12 +127,12 @@ func SeedStore(b testing.TB, dir string, n int) *store.DB {
 	b.Helper()
 
 	dbPath := dir + "/bench.db"
-	db, err := store.Open(dbPath)
+	ctx := context.Background()
+	db, err := store.Open(ctx, dbPath)
 	if err != nil {
 		b.Fatalf("SeedStore: open store: %v", err)
 	}
 
-	ctx := context.Background()
 	sessionID := "bench-session-0001"
 
 	// Upsert the parent session first (FK constraint).

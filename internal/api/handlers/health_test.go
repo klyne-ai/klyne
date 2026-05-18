@@ -1,6 +1,7 @@
 package handlers_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -53,7 +54,7 @@ func TestHealth_HappyPath(t *testing.T) {
 func TestHealth_ClosedDB(t *testing.T) {
 	t.Parallel()
 	// Open a DB, then close it so SchemaVersion fails.
-	db, err := store.Open(filepath.Join(t.TempDir(), "closed.db"))
+	db, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "closed.db"))
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

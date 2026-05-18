@@ -154,7 +154,7 @@ func computeAndPersistSessionEnd(ctx context.Context, stdin io.Reader) error {
 		return nil // nothing useful happened in the session
 	}
 
-	db, err := store.Open(config.DBPath())
+	db, err := store.Open(ctx, config.DBPath())
 	if err != nil {
 		return fmt.Errorf("open db: %w", err)
 	}

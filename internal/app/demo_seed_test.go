@@ -29,7 +29,7 @@ const codexFixtureLines = `{"timestamp":"2026-05-06T10:00:00.000Z","type":"sessi
 func newSeedTestDB(t *testing.T) *store.DB {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "seed-test.db")
-	db, err := store.Open(dbPath)
+	db, err := store.Open(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}

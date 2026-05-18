@@ -31,7 +31,7 @@ func setHomeDir(t *testing.T, dir string) {
 // newTestStore opens a fresh SQLite DB in a temp dir with all migrations applied.
 func newTestStore(t *testing.T) *store.DB {
 	t.Helper()
-	db, err := store.Open(t.TempDir() + "/test.db")
+	db, err := store.Open(context.Background(), t.TempDir() + "/test.db")
 	if err != nil {
 		t.Fatalf("open test store: %v", err)
 	}

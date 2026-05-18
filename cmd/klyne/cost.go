@@ -84,7 +84,7 @@ func costRunWeek(cmd *cobra.Command, since string, dryRun bool) error {
 		return fmt.Errorf("cost week: parse --since: %w", err)
 	}
 
-	db, err := store.Open(config.DBPath())
+	db, err := store.Open(ctx, config.DBPath())
 	if err != nil {
 		return fmt.Errorf("cost week: open db: %w", err)
 	}

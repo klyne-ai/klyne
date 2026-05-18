@@ -58,7 +58,7 @@ func TestSanitiseFTSQuery(t *testing.T) {
 // the retry succeeds with the next version.
 func TestInsertSummary_RetryOnConflict(t *testing.T) {
 	dir := t.TempDir()
-	db, err := Open(filepath.Join(dir, "retry.db"))
+	db, err := Open(context.Background(), filepath.Join(dir, "retry.db"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -101,7 +101,7 @@ func TestInsertSummary_RetryOnConflict(t *testing.T) {
 // error from the database propagates immediately without retry.
 func TestInsertSummary_NonUniqueErrorPropagates(t *testing.T) {
 	dir := t.TempDir()
-	db, err := Open(filepath.Join(dir, "fk_err.db"))
+	db, err := Open(context.Background(), filepath.Join(dir, "fk_err.db"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

@@ -36,7 +36,7 @@ func TestCrossAIHandoffFlow(t *testing.T) {
 		t.Fatalf("mkdir klyne dir: %v", err)
 	}
 
-	db, err := store.Open(config.DBPath())
+	db, err := store.Open(context.Background(), config.DBPath())
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}

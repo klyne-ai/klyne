@@ -66,7 +66,7 @@ func TestSessionEndHook_PersistsSummary(t *testing.T) {
 	}
 
 	// 4. Read the stop_summary back from klyne's DB.
-	db, err := store.Open(config.DBPath())
+	db, err := store.Open(context.Background(), config.DBPath())
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}

@@ -120,7 +120,7 @@ func handleUserRecap(ctx context.Context, db *store.DB, args UserRecapArgs) (*Us
 // pure handler, formats a one-line summary for the host tool log, and
 // returns the structured output alongside.
 func HandleUserRecap(ctx context.Context, _ *mcp.CallToolRequest, in UserRecapInput) (*mcp.CallToolResult, UserRecapOutput, error) {
-	db, err := store.Open(config.DBPath())
+	db, err := store.Open(ctx, config.DBPath())
 	if err != nil {
 		return nil, UserRecapOutput{}, fmt.Errorf("user_recap: open db: %w", err)
 	}

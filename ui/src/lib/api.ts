@@ -113,15 +113,23 @@ function buildUrl(path: string, params?: Record<string, string | number | undefi
   return queryString ? `${base}?${queryString}` : base;
 }
 
+// Read the response body once as text, then try to parse as JSON. The two-step
+// `try res.json() / catch res.text()` pattern is broken: res.json() consumes
+// the body stream even on parse failure, so the catch then throws "body stream
+// already read" — masking the actual server error.
+async function readBody(res: Response): Promise<unknown> {
+  const text = await res.text();
+  if (!text) return text;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
-    let body: unknown;
-    try {
-      body = await res.json();
-    } catch {
-      body = await res.text();
-    }
-    throw new ApiError(res.status, body);
+    throw new ApiError(res.status, await readBody(res));
   }
   // 204 No Content
   if (res.status === 204) {
@@ -155,8 +163,7 @@ export async function deleteSession(id: string): Promise<void> {
     method: 'DELETE'
   });
   if (!res.ok && res.status !== 204) {
-    let body: unknown;
-    try { body = await res.json(); } catch { body = await res.text(); }
+    const body = await readBody(res);
     throw new Error(`DELETE /sessions/${id} failed (${res.status}): ${typeof body === 'string' ? body : JSON.stringify(body)}`);
   }
 }
@@ -340,9 +347,7 @@ export async function deleteMemory(id: string): Promise<void> {
     method: 'DELETE'
   });
   if (!res.ok && res.status !== 204) {
-    let body: unknown;
-    try { body = await res.json(); } catch { body = await res.text(); }
-    throw new ApiError(res.status, body);
+    throw new ApiError(res.status, await readBody(res));
   }
 }
 

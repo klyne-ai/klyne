@@ -127,7 +127,7 @@ func BenchmarkIngestThroughput(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		dir := b.TempDir()
-		db, err := store.Open(dir + "/bench.db")
+		db, err := store.Open(context.Background(), dir + "/bench.db")
 		if err != nil {
 			b.Fatalf("open store: %v", err)
 		}

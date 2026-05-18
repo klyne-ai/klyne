@@ -50,7 +50,7 @@ klyne restore <id>
 }
 
 func runRestoreList(cmd *cobra.Command, limit int) error {
-	db, err := store.Open(config.DBPath())
+	db, err := store.Open(cmd.Context(), config.DBPath())
 	if err != nil {
 		return fmt.Errorf("open db: %w", err)
 	}
@@ -76,7 +76,7 @@ func runRestoreApply(cmd *cobra.Command, idStr string) error {
 		return fmt.Errorf("restore: id must be an integer, got %q", idStr)
 	}
 
-	db, err := store.Open(config.DBPath())
+	db, err := store.Open(cmd.Context(), config.DBPath())
 	if err != nil {
 		return fmt.Errorf("open db: %w", err)
 	}

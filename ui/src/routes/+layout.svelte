@@ -6,6 +6,7 @@
   import SearchOverlay from '$lib/ui/SearchOverlay.svelte';
   import { subscribe } from '$lib/sse.js';
   import { refreshProjects } from '$lib/projects.svelte.js';
+  import { cockpitStore, refreshCockpit } from '$lib/cockpit.svelte.js';
   import { onMsgNew } from '$lib/stores.svelte.js';
 
   interface Props {
@@ -15,6 +16,8 @@
 
   let searchOpen = $state(false);
   let unsubscribeSSE: (() => void) | null = null;
+  let tickHandle: ReturnType<typeof setInterval> | null = null;
+  let cockpitRefreshHandle: ReturnType<typeof setInterval> | null = null;
 
   function onKey(e: KeyboardEvent): void {
     const target = e.target as HTMLElement | null;
@@ -26,12 +29,22 @@
   onMount(() => {
     window.addEventListener('keydown', onKey);
     void refreshProjects();
+    void refreshCockpit();
+    // Tick drives liveCount recomputation in the nav without refetching.
+    tickHandle = setInterval(() => { cockpitStore.tick = Date.now(); }, 5_000);
+    // Periodic safety refresh — catches sessions started in other terminals
+    // that never fire SSE during this page's lifetime.
+    cockpitRefreshHandle = setInterval(() => { void refreshCockpit(); }, 60_000);
     unsubscribeSSE = subscribe({
       onMsgNew: (payload) => {
         onMsgNew(payload);
         void refreshProjects();
+        void refreshCockpit();
       },
-      onSessionUpdate: () => { void refreshProjects(); }
+      onSessionUpdate: () => {
+        void refreshProjects();
+        void refreshCockpit();
+      }
     });
   });
 
@@ -39,6 +52,8 @@
     window.removeEventListener('keydown', onKey);
     unsubscribeSSE?.();
     unsubscribeSSE = null;
+    if (tickHandle !== null) clearInterval(tickHandle);
+    if (cockpitRefreshHandle !== null) clearInterval(cockpitRefreshHandle);
   });
 </script>
 

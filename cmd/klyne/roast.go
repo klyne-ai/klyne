@@ -49,7 +49,7 @@ Flags:
 }
 
 func runRoast(cmd *cobra.Command, sinceStr string, max int, outputJSON bool) error {
-	db, err := store.Open(config.DBPath())
+	db, err := store.Open(cmd.Context(), config.DBPath())
 	if err != nil {
 		return fmt.Errorf("open db at %s: %w (run `klyne start` to ingest sessions)", config.DBPath(), err)
 	}

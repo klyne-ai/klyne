@@ -1,6 +1,5 @@
 <!--
-  Work view — terminal grid of currently-active sessions, with a project
-  rail on the left and an inspector on the right.
+  Work view — terminal grid of currently-active sessions.
 
   Ordering rule (deliberately boring): stable insertion order, newest
   session at the top. Once a tile is placed it never moves while it's
@@ -8,66 +7,28 @@
     - a new session appears → prepends at the top
     - a session falls past the 30-min recency window → drops out
 
-  Streaming messages NEVER re-sort the grid. With three sessions
-  streaming in parallel, recent-first ordering shuffled tiles every
-  few seconds — unreadable. The "● N live" chip in the header is the
-  finder for active work; it scrolls the latest-active tile into view
-  without changing layout.
+  Streaming messages NEVER re-sort the grid. Column count is derived
+  from tile count: 1 tile fills the view, 2 split half/half, 3 or
+  more land in a 3-column grid (additional tiles wrap onto new rows).
 -->
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
-  import { projectsStore } from '$lib/projects.svelte.js';
-  import type { ProjectAggregate } from '$lib/projects.svelte.js';
   import { fetchCockpitThreads } from '$lib/api.js';
   import { subscribe } from '$lib/sse.js';
   import type { CockpitThread, MsgNew } from '$lib/types.js';
-  import ProjectRail from '$lib/ui/ProjectRail.svelte';
   import Terminal from '$lib/ui/Terminal.svelte';
-  import Inspector from '$lib/ui/Inspector.svelte';
   import AdvisorModal from '$lib/components/AdvisorModal.svelte';
 
-  const LS_COLS = 'klyne.work.cols';
-  const LS_RAIL = 'klyne.work.rail';
-  const LS_INSP = 'klyne.work.inspector';
-
-  function loadCols(): 1 | 2 | 3 {
-    if (typeof localStorage === 'undefined') return 2;
-    const v = parseInt(localStorage.getItem(LS_COLS) ?? '2', 10);
-    return v === 1 || v === 3 ? v : 2;
-  }
-  function saveCols(c: number): void {
-    if (typeof localStorage === 'undefined') return;
-    localStorage.setItem(LS_COLS, String(c));
-  }
-  function loadBool(key: string, fallback: boolean): boolean {
-    if (typeof localStorage === 'undefined') return fallback;
-    const raw = localStorage.getItem(key);
-    if (raw === null) return fallback;
-    return raw === 'true';
-  }
-  function saveBool(key: string, value: boolean): void {
-    if (typeof localStorage === 'undefined') return;
-    localStorage.setItem(key, String(value));
-  }
-
-  let selectedPath = $state<string>('');
-  let railOpen = $state(loadBool(LS_RAIL, true));
-  let inspectorOpen = $state(loadBool(LS_INSP, true));
-  let cols = $state<1 | 2 | 3>(loadCols());
   let advisorSession = $state<string | null>(null);
   let focusSessionId = $state<string | null>(null);
-  let fullscreen = $state(false);
-  let savedRailOpen = $state(true);
-  let savedInspectorOpen = $state(true);
 
-  // Live = within 1 min. Recent (kept visible) = within 30 min. Sessions
-  // outside the 30-min window drop out of the grid.
-  const LIVE_THRESHOLD_MS = 60_000;
+  // Recent (kept visible) = within 30 min. Sessions outside the
+  // 30-min window drop out of the grid.
   const RECENT_THRESHOLD_MS = 30 * 60 * 1000;
   const SINCE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
-  // tick drives "is this session still recent" recomputation without
-  // re-fetching the server. Updated every 5s.
+  // tick drives recency-window recomputation without re-fetching the
+  // server. Updated every 5s.
   let tick = $state(Date.now());
 
   // Session-level data for the grid. /cockpit/threads returns one row
@@ -79,16 +40,6 @@
   // first seen, and only leaves when last_msg_at falls past
   // RECENT_THRESHOLD_MS. Streaming messages never re-sort.
   let sessionOrder = $state<string[]>([]);
-
-  const projects = $derived(projectsStore.items);
-
-  // Seed selected project for the rail/inspector from the most-recent
-  // project so the inspector isn't empty on first load.
-  $effect(() => {
-    if (!selectedPath && projects.length > 0) {
-      selectedPath = projects[0].project_path;
-    }
-  });
 
   async function loadThreads(): Promise<void> {
     try {
@@ -131,99 +82,21 @@
       .filter((t): t is CockpitThread => t !== undefined)
   );
 
-  const liveCount = $derived(
-    visibleThreads.filter((t) => tick - t.last_msg_at < LIVE_THRESHOLD_MS).length
-  );
-
-  function selectProject(path: string): void {
-    selectedPath = path;
-    inspectorOpen = true;
-  }
-
-  function setCols(c: 1 | 2 | 3): void { cols = c; saveCols(c); }
-  function toggleRail(): void {
-    railOpen = !railOpen;
-    saveBool(LS_RAIL, railOpen);
-  }
-  function toggleInspector(): void {
-    inspectorOpen = !inspectorOpen;
-    saveBool(LS_INSP, inspectorOpen);
-  }
-  function toggleFullscreen(): void {
-    if (!fullscreen) {
-      savedRailOpen = railOpen;
-      savedInspectorOpen = inspectorOpen;
-      railOpen = false;
-      inspectorOpen = false;
-      fullscreen = true;
-      if (typeof document !== 'undefined') {
-        const el = document.querySelector('.work') as HTMLElement | null;
-        if (el?.requestFullscreen) {
-          el.requestFullscreen().catch(() => { /* browser refused */ });
-        }
-      }
-    } else {
-      railOpen = savedRailOpen;
-      inspectorOpen = savedInspectorOpen;
-      fullscreen = false;
-      if (typeof document !== 'undefined' && document.fullscreenElement && document.exitFullscreen) {
-        document.exitFullscreen().catch(() => { /* already exited */ });
-      }
-    }
-  }
-  function onFullscreenChange(): void {
-    if (typeof document === 'undefined') return;
-    if (!document.fullscreenElement && fullscreen) {
-      railOpen = savedRailOpen;
-      inspectorOpen = savedInspectorOpen;
-      fullscreen = false;
-    }
-  }
-
-  $effect(() => {
-    if (typeof document === 'undefined') return;
-    if (fullscreen) {
-      document.body.classList.add('klyne-fullscreen');
-    } else {
-      document.body.classList.remove('klyne-fullscreen');
-    }
-    return () => document.body.classList.remove('klyne-fullscreen');
-  });
-
-  const selectedProject: ProjectAggregate | null = $derived(
-    projects.find((p) => p.project_path === selectedPath) ?? null
+  // Derive column count from tile count: 1 = full width, 2 = half/half,
+  // 3+ = three columns (extra tiles wrap onto new rows).
+  const cols = $derived<1 | 2 | 3>(
+    visibleThreads.length <= 1 ? 1 : visibleThreads.length === 2 ? 2 : 3
   );
 
   const focusThread: CockpitThread | null = $derived(
     focusSessionId ? threads[focusSessionId] ?? null : null
   );
 
-  // Scroll the most-recently-active live tile into view. Position
-  // doesn't change — we just bring the user's eye to it.
-  function jumpToLive(): void {
-    const liveT = visibleThreads
-      .filter((t) => tick - t.last_msg_at < LIVE_THRESHOLD_MS)
-      .sort((a, b) => b.last_msg_at - a.last_msg_at);
-    const target = liveT[0];
-    if (!target) return;
-    const el = document.querySelector<HTMLElement>(
-      `[data-session-id="${target.session_id}"]`
-    );
-    if (el?.scrollIntoView) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
-  }
-
+  // Esc closes the focus modal; F-key fullscreen toggle lives in TopNav.
   function onKey(e: KeyboardEvent): void {
-    const target = e.target as HTMLElement | null;
-    const inField = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
-    if (e.key === 'Escape') {
-      if (focusSessionId) { e.preventDefault(); focusSessionId = null; return; }
-      if (fullscreen) { e.preventDefault(); toggleFullscreen(); return; }
-    }
-    if (!inField && (e.key === 'f' || e.key === 'F') && !e.metaKey && !e.ctrlKey && !e.altKey) {
+    if (e.key === 'Escape' && focusSessionId) {
       e.preventDefault();
-      toggleFullscreen();
+      focusSessionId = null;
     }
   }
 
@@ -253,74 +126,19 @@
     tickHandle = setInterval(() => { tick = Date.now(); }, 5_000);
     refreshHandle = setInterval(() => { void loadThreads(); }, 60_000);
     window.addEventListener('keydown', onKey);
-    if (typeof document !== 'undefined') {
-      document.addEventListener('fullscreenchange', onFullscreenChange);
-    }
     return () => {
       sseUnsub?.();
       if (tickHandle !== null) clearInterval(tickHandle);
       if (refreshHandle !== null) clearInterval(refreshHandle);
       window.removeEventListener('keydown', onKey);
-      if (typeof document !== 'undefined') {
-        document.removeEventListener('fullscreenchange', onFullscreenChange);
-      }
     };
   });
 </script>
 
 <svelte:head><title>klyne — Work</title></svelte:head>
 
-<div
-  class="work"
-  class:inspector-collapsed={!inspectorOpen}
-  class:rail-collapsed={!railOpen}
-  class:work-fullscreen={fullscreen}
->
-  <ProjectRail
-    projects={projects}
-    selectedPath={selectedPath}
-    onSelect={selectProject}
-  />
-
+<div class="work">
   <main class="center">
-    <div class="center-hd">
-      <button
-        class="btn btn--ghost btn--sm btn--icon"
-        title={railOpen ? 'Hide projects rail' : 'Show projects rail'}
-        aria-label={railOpen ? 'Hide projects rail' : 'Show projects rail'}
-        onclick={toggleRail}
-      >{railOpen ? '‹' : '›'}</button>
-      <h2>Terminals</h2>
-      <span class="sub">
-        {visibleThreads.length} session{visibleThreads.length === 1 ? '' : 's'}
-        ·
-        <button
-          class="btn btn--ghost btn--sm live-chip"
-          disabled={liveCount === 0}
-          title={liveCount > 0 ? 'Scroll to the latest active session' : 'No sessions are currently streaming'}
-          aria-label="Jump to latest live session"
-          onclick={jumpToLive}
-          style="display: inline-flex; align-items: center; gap: 4px; padding: 0 6px; font-size: 12px; color: {liveCount > 0 ? 'var(--ad-active, #10b981)' : 'var(--ad-faint)'};"
-        ><span style="font-size: 9px;">●</span> {liveCount} live</button>
-      </span>
-      <div class="right">
-        <div class="seg" role="group" aria-label="Terminal columns">
-          <button class:active={cols === 1} onclick={() => setCols(1)}>1 col</button>
-          <button class:active={cols === 2} onclick={() => setCols(2)}>2 col</button>
-          <button class:active={cols === 3} onclick={() => setCols(3)}>3 col</button>
-        </div>
-        <button
-          class="btn btn--ghost btn--sm btn--icon"
-          title={fullscreen ? 'Exit fullscreen (Esc or F)' : 'Fullscreen (F)'}
-          aria-label={fullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
-          onclick={toggleFullscreen}
-        >⛶</button>
-        <button class="btn btn--ghost btn--sm" onclick={toggleInspector}>
-          {inspectorOpen ? 'hide inspector ›' : '‹ inspector'}
-        </button>
-      </div>
-    </div>
-
     {#if visibleThreads.length === 0}
       <div class="term-grid cols-1" style="padding: 32px;">
         <div class="term-empty">
@@ -347,13 +165,9 @@
     {/if}
   </main>
 
-  {#if inspectorOpen && selectedProject}
-    <Inspector project={selectedProject} onClose={() => (inspectorOpen = false)} />
-  {/if}
-
   {#if focusThread}
     <div class="overlay" onclick={() => (focusSessionId = null)} role="presentation">
-      <div class="search-modal" style="width: min(960px, 92vw); height: 78vh; display: flex; flex-direction: column;" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()} role="dialog" tabindex="-1" aria-modal="true" aria-label="Focused terminal">
+      <div class="search-modal term-focus-wrap" style="width: min(960px, 92vw); height: 78vh; display: flex; flex-direction: column;" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()} role="dialog" tabindex="-1" aria-modal="true" aria-label="Focused terminal">
         <Terminal
           thread={focusThread}
           tickMs={tick}

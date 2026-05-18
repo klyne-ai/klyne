@@ -19,7 +19,7 @@ func openSearchTestDB(t *testing.T) (*store.DB, string) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "search_test.db")
 
-	db, err := store.Open(dbPath)
+	db, err := store.Open(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}

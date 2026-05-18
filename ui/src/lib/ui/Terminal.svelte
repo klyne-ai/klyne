@@ -94,7 +94,10 @@
   }
   function whoFor(m: Message): string {
     if (m.role === 'user') return 'user';
-    return m.cli;
+    // Per-message m.cli is sometimes empty for historical assistant rows;
+    // fall back to the session's CLI so the role label + card colour
+    // always render.
+    return m.cli || thread.cli || 'assistant';
   }
 
   function copyResume(): void {
@@ -139,7 +142,8 @@
       {#each visibleMessages as m, i (m.id || i)}
         <div class="msg {whoFor(m)}">
           <div class="who">
-            <span>{whoFor(m)}</span>
+            <span class="pip"></span>
+            <span class="role">{whoFor(m)}</span>
             <span class="when">{relTime(m.ts)}</span>
           </div>
           <div class="body">{@html bodyHTML(m)}</div>

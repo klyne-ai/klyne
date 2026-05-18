@@ -11,7 +11,7 @@ import (
 )
 
 // withFakeHomeAndConfigDir redirects HOME and pre-creates the ~/.klyne
-// directory so store.Open() can land its SQLite file there. store.Open
+// directory so store.Open(context.Background(), ) can land its SQLite file there. store.Open
 // does not MkdirAll the parent — that's normally done by config.Save()
 // or by the daemon's bootstrap path — so tests must create it themselves.
 func withFakeHomeAndConfigDir(t *testing.T) string {

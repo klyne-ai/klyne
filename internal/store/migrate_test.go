@@ -16,7 +16,7 @@ func TestApply_AppliesAllMigrations(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "apply.db")
 
-	db, err := store.Open(dbPath)
+	db, err := store.Open(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -39,7 +39,7 @@ func TestApply_Idempotent(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "apply_idem.db")
 
-	db, err := store.Open(dbPath)
+	db, err := store.Open(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestApply_SetsAppliedAt(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "applied_at.db")
 
-	db, err := store.Open(dbPath)
+	db, err := store.Open(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestSchemaVersion_ReturnsLatest(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "schema_ver.db")
 
-	db, err := store.Open(dbPath)
+	db, err := store.Open(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestSchemaVersion_EmptyDB(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "empty.db")
 
-	db, err := store.Open(dbPath)
+	db, err := store.Open(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestApply_VersionsAreOrdered(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "ordered.db")
 
-	db, err := store.Open(dbPath)
+	db, err := store.Open(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -205,7 +205,7 @@ func TestApply_ClosedDB(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "apply_closed.db")
 
-	db, err := store.Open(dbPath)
+	db, err := store.Open(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -229,7 +229,7 @@ func TestApply_TablesExist(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "tables.db")
 
-	db, err := store.Open(dbPath)
+	db, err := store.Open(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

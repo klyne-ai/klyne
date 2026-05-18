@@ -77,7 +77,7 @@ func newDecisionsAddCmd() *cobra.Command {
 				Text:        text,
 				Tags:        tagList,
 			}
-			db, err := store.Open(config.DBPath())
+			db, err := store.Open(cmd.Context(), config.DBPath())
 			if err != nil {
 				return fmt.Errorf("open db: %w", err)
 			}
@@ -115,7 +115,7 @@ func newDecisionsListCmd() *cobra.Command {
 			if allProjects {
 				projectPath = ""
 			}
-			db, err := store.Open(config.DBPath())
+			db, err := store.Open(cmd.Context(), config.DBPath())
 			if err != nil {
 				return fmt.Errorf("open db: %w", err)
 			}
@@ -170,7 +170,7 @@ func newDecisionsSearchCmd() *cobra.Command {
 			if allProjects {
 				projectPath = ""
 			}
-			db, err := store.Open(config.DBPath())
+			db, err := store.Open(cmd.Context(), config.DBPath())
 			if err != nil {
 				return fmt.Errorf("open db: %w", err)
 			}
@@ -202,7 +202,7 @@ func newDecisionsDeleteCmd() *cobra.Command {
 		Short: "Delete a decision by id",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			db, err := store.Open(config.DBPath())
+			db, err := store.Open(cmd.Context(), config.DBPath())
 			if err != nil {
 				return fmt.Errorf("open db: %w", err)
 			}

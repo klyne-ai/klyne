@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -60,7 +61,8 @@ func runPreTool(cmd *cobra.Command) error {
 		return nil
 	}
 
-	db, err := openPreToolDB()
+	ctx := cmd.Context()
+	db, err := openPreToolDB(ctx)
 	if err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "klyne pretool: open db: %v\n", err)
 		// Continue without DB — we still run the policy match and emit
@@ -71,7 +73,6 @@ func runPreTool(cmd *cobra.Command) error {
 		defer db.Close() //nolint:errcheck
 	}
 
-	ctx := cmd.Context()
 	res, err := mcpserver.HandlePreToolUse(ctx, cmd.InOrStdin(), db, matcher)
 	if err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "klyne pretool: %v\n", err)
@@ -85,8 +86,8 @@ func runPreTool(cmd *cobra.Command) error {
 
 // openPreToolDB opens the klyne SQLite store for the pretool handler.
 // Returns (nil, err) on failure; callers must handle a nil DB gracefully.
-func openPreToolDB() (*store.DB, error) {
-	return store.Open(config.DBPath())
+func openPreToolDB(ctx context.Context) (*store.DB, error) {
+	return store.Open(ctx, config.DBPath())
 }
 
 // defaultPolicyPath returns the path of the shipped risky_commands.json

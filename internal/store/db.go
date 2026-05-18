@@ -74,8 +74,14 @@ func buildDSN(path string) string {
 // spec §5 PRAGMAs, runs any pending migrations, and returns a *DB with
 // separate read and write *sql.DB handles.
 //
+// ctx bounds every blocking step: PingContext on both handles and the
+// migration apply. Callers from short-deadline contexts (e.g. the Stop
+// hook's 5s budget) MUST pass that context so SQLite write-lock contention
+// can be preempted instead of running until the OS or harness kills the
+// process.
+//
 // The caller must call Close() when the DB is no longer needed.
-func Open(path string) (*DB, error) {
+func Open(ctx context.Context, path string) (*DB, error) {
 	dsn := buildDSN(path)
 
 	// --- write handle (MaxOpenConns=1) ---
@@ -86,7 +92,7 @@ func Open(path string) (*DB, error) {
 	wdb.SetMaxOpenConns(writeMaxConns)
 	wdb.SetMaxIdleConns(writeMaxConns)
 	// Confirm the write connection is healthy.
-	if err := wdb.Ping(); err != nil {
+	if err := wdb.PingContext(ctx); err != nil {
 		_ = wdb.Close()
 		return nil, fmt.Errorf("store: ping write handle: %w", err)
 	}
@@ -99,7 +105,7 @@ func Open(path string) (*DB, error) {
 	}
 	rdb.SetMaxOpenConns(readMaxConns)
 	rdb.SetMaxIdleConns(readMaxConns)
-	if err := rdb.Ping(); err != nil {
+	if err := rdb.PingContext(ctx); err != nil {
 		_ = wdb.Close()
 		_ = rdb.Close()
 		return nil, fmt.Errorf("store: ping read handle: %w", err)
@@ -108,7 +114,7 @@ func Open(path string) (*DB, error) {
 	db := &DB{read: rdb, write: wdb}
 
 	// Run migrations idempotently; always uses the write handle.
-	if err := Apply(context.Background(), wdb); err != nil {
+	if err := Apply(ctx, wdb); err != nil {
 		_ = wdb.Close()
 		_ = rdb.Close()
 		return nil, fmt.Errorf("store: apply migrations: %w", err)

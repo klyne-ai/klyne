@@ -49,7 +49,7 @@ func newWorklogExportWeekCmd() *cobra.Command {
 			if output == "" {
 				output = project
 			}
-			db, err := store.Open(config.DBPath())
+			db, err := store.Open(cmd.Context(), config.DBPath())
 			if err != nil {
 				return fmt.Errorf("open store: %w", err)
 			}

@@ -134,7 +134,7 @@ func HandleUpdateMemory(ctx context.Context, _ *mcp.CallToolRequest, in UpdateMe
 		tags = sanitizeTags(*in.Tags)
 	}
 
-	db, err := store.Open(config.DBPath())
+	db, err := store.Open(ctx, config.DBPath())
 	if err != nil {
 		return nil, UpdateMemoryOutput{}, fmt.Errorf("open db: %w", err)
 	}
@@ -161,7 +161,7 @@ func HandleDeleteMemory(ctx context.Context, _ *mcp.CallToolRequest, in DeleteMe
 		return nil, DeleteMemoryOutput{}, errors.New("id is required")
 	}
 
-	db, err := store.Open(config.DBPath())
+	db, err := store.Open(ctx, config.DBPath())
 	if err != nil {
 		return nil, DeleteMemoryOutput{}, fmt.Errorf("open db: %w", err)
 	}
@@ -206,7 +206,7 @@ func HandleListMemories(ctx context.Context, _ *mcp.CallToolRequest, in ListMemo
 	limit := clampLimit(in.Limit, 50, 500)
 	tag := strings.TrimSpace(in.Tag)
 
-	db, err := store.Open(config.DBPath())
+	db, err := store.Open(ctx, config.DBPath())
 	if err != nil {
 		return nil, ListMemoriesOutput{}, fmt.Errorf("open db: %w", err)
 	}

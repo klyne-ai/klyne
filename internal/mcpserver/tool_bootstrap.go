@@ -152,7 +152,7 @@ func HandleBootstrap(ctx context.Context, _ *mcp.CallToolRequest, in BootstrapIn
 	// swallowed — a missing DB at this point usually means klyne has
 	// never run before, in which case the migrations would have
 	// created an empty file on first Open.
-	db, err := store.Open(config.DBPath())
+	db, err := store.Open(ctx, config.DBPath())
 	if err != nil {
 		return nil, BootstrapOutput{}, fmt.Errorf("open db: %w", err)
 	}

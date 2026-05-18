@@ -126,7 +126,7 @@ func handleRecapProject(ctx context.Context, db *store.DB, args RecapProjectArgs
 // shape. The summary TextContent is what shows in the host's tool log;
 // the structured output rides alongside for the agent to read.
 func HandleRecapProject(ctx context.Context, _ *mcp.CallToolRequest, in RecapProjectInput) (*mcp.CallToolResult, RecapProjectOutput, error) {
-	db, err := store.Open(config.DBPath())
+	db, err := store.Open(ctx, config.DBPath())
 	if err != nil {
 		return nil, RecapProjectOutput{}, fmt.Errorf("recap_project: open db: %w", err)
 	}

@@ -16,7 +16,7 @@ type sessionRow struct {
 
 func newTestDBWithSessions(t *testing.T, rows []sessionRow) *store.DB {
 	t.Helper()
-	db, err := store.Open(filepath.Join(t.TempDir(), "boundary.db"))
+	db, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "boundary.db"))
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

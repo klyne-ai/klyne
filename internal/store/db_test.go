@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -19,9 +20,37 @@ import (
 // parent).
 func TestOpen_InvalidPath(t *testing.T) {
 	// Use a deeply nested path whose parent doesn't exist.
-	_, err := store.Open("/nonexistent-klyne-test-dir/deep/subdir/test.db")
+	_, err := store.Open(context.Background(), "/nonexistent-klyne-test-dir/deep/subdir/test.db")
 	if err == nil {
 		t.Fatal("expected Open to fail for unwritable path, got nil error")
+	}
+}
+
+// TestOpen_RespectsCancelledContext verifies the regression: when Open is
+// invoked with an already-cancelled context, it returns ctx.Err() promptly
+// instead of attempting a blocking Ping or migration apply. This protects
+// the Stop hook (cmd/klyne/session_end.go) from being SIGKILL'd by Claude
+// Code's 60s hook timeout when the SQLite write lock is contended.
+func TestOpen_RespectsCancelledContext(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "cancelled.db")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // pre-cancel before Open
+
+	start := time.Now()
+	_, err := store.Open(ctx, dbPath)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected Open to fail when ctx is pre-cancelled, got nil error")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected error to wrap context.Canceled, got: %v", err)
+	}
+	// "Promptly" means well under one second. The bug was multi-minute hangs.
+	if elapsed > time.Second {
+		t.Fatalf("Open with cancelled ctx took %v, expected < 1s", elapsed)
 	}
 }
 
@@ -31,7 +60,7 @@ func TestClose_CanBeCalledOnce(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "close.db")
 
-	db, err := store.Open(dbPath)
+	db, err := store.Open(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -48,7 +77,7 @@ func TestSchemaVersion_AfterClose(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "schver_closed.db")
 
-	db, err := store.Open(dbPath)
+	db, err := store.Open(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -75,7 +104,7 @@ func TestOpen_CreatesDB(t *testing.T) {
 		t.Fatal("expected db file to be absent before Open")
 	}
 
-	db, err := store.Open(dbPath)
+	db, err := store.Open(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("Open returned unexpected error: %v", err)
 	}
@@ -93,7 +122,7 @@ func TestOpen_AppliesPRAGMAs(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "pragmas.db")
 
-	db, err := store.Open(dbPath)
+	db, err := store.Open(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -134,7 +163,7 @@ func TestOpen_RunsMigrations(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "migrate.db")
 
-	db, err := store.Open(dbPath)
+	db, err := store.Open(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -158,7 +187,7 @@ func TestOpen_Idempotent(t *testing.T) {
 	dbPath := filepath.Join(dir, "idempotent.db")
 
 	// First open.
-	db1, err := store.Open(dbPath)
+	db1, err := store.Open(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("first Open: %v", err)
 	}
@@ -179,7 +208,7 @@ func TestOpen_Idempotent(t *testing.T) {
 	}
 
 	// Second open — must be idempotent.
-	db2, err := store.Open(dbPath)
+	db2, err := store.Open(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("second Open: %v", err)
 	}
@@ -209,7 +238,7 @@ func TestRead_Concurrent(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "read_concurrent.db")
 
-	db, err := store.Open(dbPath)
+	db, err := store.Open(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -246,7 +275,7 @@ func TestWrite_Serialized(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "write_serial.db")
 
-	db, err := store.Open(dbPath)
+	db, err := store.Open(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -266,7 +295,7 @@ func TestWrite_Stress(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "stress.db")
 
-	db, err := store.Open(dbPath)
+	db, err := store.Open(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

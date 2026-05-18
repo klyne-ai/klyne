@@ -29,7 +29,7 @@ func newAdvisoriesRouter(t *testing.T, db *store.DB) http.Handler {
 // fixture style.
 func openTestDB(t *testing.T) *store.DB {
 	t.Helper()
-	db, err := store.Open(t.TempDir() + "/advisories.db")
+	db, err := store.Open(context.Background(), t.TempDir() + "/advisories.db")
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}

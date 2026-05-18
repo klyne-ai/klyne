@@ -12,7 +12,7 @@ import (
 
 func openTestDB(t *testing.T) *store.DB {
 	t.Helper()
-	db, err := store.Open(t.TempDir() + "/usage.db")
+	db, err := store.Open(context.Background(), t.TempDir() + "/usage.db")
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}

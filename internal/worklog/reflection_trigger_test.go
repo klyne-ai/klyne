@@ -12,7 +12,7 @@ import (
 
 func newTriggerTestDB(t *testing.T) *store.DB {
 	t.Helper()
-	db, err := store.Open(filepath.Join(t.TempDir(), "trigger.db"))
+	db, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "trigger.db"))
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

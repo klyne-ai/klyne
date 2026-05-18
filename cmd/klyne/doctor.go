@@ -104,11 +104,12 @@ func buildDoctorReport() (doctorReport, bool) {
 		r.DBSizeBytes = info.Size()
 	}
 
-	// Try to open and read schema version.
-	if db, err := store.Open(dbPath); err == nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	// Try to open and read schema version. Use a bounded ctx so a stuck
+	// SQLite lock can't make `klyne doctor` hang.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if db, err := store.Open(ctx, dbPath); err == nil {
 		ver, vErr := db.SchemaVersion(ctx)
-		cancel()
 		if vErr == nil {
 			r.SchemaVersion = ver
 			dbOK = true

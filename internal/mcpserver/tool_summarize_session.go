@@ -63,7 +63,7 @@ func HandleSummarizeSession(ctx context.Context, _ *mcp.CallToolRequest, in Summ
 		}, SummarizeSessionOutput{Reason: reason, Markdown: reason}, nil
 	}
 
-	db, err := store.Open(config.DBPath())
+	db, err := store.Open(ctx, config.DBPath())
 	if err != nil {
 		return nil, SummarizeSessionOutput{}, fmt.Errorf("open db: %w", err)
 	}

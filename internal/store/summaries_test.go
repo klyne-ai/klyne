@@ -21,7 +21,7 @@ func openSummaryTestDB(t *testing.T) (*store.DB, string) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "summary_test.db")
 
-	db, err := store.Open(dbPath)
+	db, err := store.Open(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestInsertSummary_ConcurrentNoDuplicates(t *testing.T) {
 func TestInsertSummary_MultipleSessions(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "multisess.db")
-	db, err := store.Open(dbPath)
+	db, err := store.Open(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
