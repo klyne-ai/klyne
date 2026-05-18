@@ -98,7 +98,7 @@
           {@const s = status(p)}
           <article class="card" class:stale={s.klass === 'stale'} class:cold={s.klass === 'cold'} class:fresh={s.klass === 'fresh'}>
             <header class="card-head">
-              <h2>{p.name}</h2>
+              <h2><a class="drill-link" href={`/worklog/project?path=${encodeURIComponent(p.project_path)}`}>{p.name}</a></h2>
               <span class="status {s.klass}">{s.label}</span>
             </header>
             <p class="meta muted">
@@ -216,4 +216,10 @@
     font-size: 0.85em; white-space: nowrap;
   }
   .copy:hover { background: var(--border, #2a2a2a); }
+
+  .drill-link {
+    color: inherit;
+    text-decoration: none;
+  }
+  .drill-link:hover { text-decoration: underline; }
 </style>
