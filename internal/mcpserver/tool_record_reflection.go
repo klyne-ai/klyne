@@ -15,11 +15,16 @@ import (
 // RecordReflectionInput is the MCP-facing input schema. Insights MUST
 // each carry at least one evidence id (session_id from the proposer
 // output); the underlying worklog helper rejects empty-evidence
-// insights up-front. Day is optional YYYY-MM-DD (UTC) — empty falls
-// back to today, which matches the legacy single-day call shape.
+// insights up-front.
+//
+// Day is the YYYY-MM-DD (UTC) calendar day the reflection covers.
+// Strongly recommended — omitting it files the reflection under
+// today's UTC date, which is wrong for multi-day catch-up (the
+// reason Day exists). Empty is allowed for back-compat with the
+// legacy single-day call shape.
 type RecordReflectionInput struct {
 	ProjectPath string            `json:"project_path" jsonschema:"absolute project path"`
-	Day         string            `json:"day,omitempty" jsonschema:"calendar day this reflection covers, YYYY-MM-DD (UTC); empty = today"`
+	Day         string            `json:"day,omitempty" jsonschema:"calendar day this reflection covers, YYYY-MM-DD (UTC); strongly recommended (omitting it files under today UTC which is wrong for multi-day catch-up)"`
 	Insights    []worklog.Insight `json:"insights" jsonschema:"synthesized insights — each must cite at least one entry session_id"`
 }
 

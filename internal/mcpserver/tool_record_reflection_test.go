@@ -114,7 +114,7 @@ func TestHandleRecordReflection_RejectsBadDay(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error on malformed day")
 	}
-	if !strings.Contains(err.Error(), "day") {
-		t.Errorf("expected error mentioning 'day', got %v", err)
+	if !strings.Contains(err.Error(), "bad day") {
+		t.Errorf("expected error mentioning 'bad day', got %v", err)
 	}
 }

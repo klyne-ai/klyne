@@ -165,7 +165,7 @@ Call this AFTER bucketing propose_reflection's entries by date and synthesizing 
 
 Inputs:
   - project_path (required) absolute project path
-  - day (required for daily synthesis) YYYY-MM-DD in UTC, the calendar day this reflection covers
+  - day (strongly recommended) YYYY-MM-DD in UTC, the calendar day this reflection covers. Omitting it files the reflection under today's UTC date, which is wrong for multi-day catch-up.
   - insights ([{text, evidence: [session_id, ...]}, ...])`,
 	}, HandleRecordReflection)
 
