@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -19,6 +20,7 @@ func newWorklogRouter(t *testing.T, db *store.DB) http.Handler {
 	r := chi.NewRouter()
 	h := handlers.NewWorklogHandler(db)
 	r.Get(api.RouteWorklog, h.List)
+	r.Get(api.RouteWorklogProject, h.Project)
 	return r
 }
 
@@ -181,5 +183,88 @@ func TestWorklog_List_EmptyDB(t *testing.T) {
 	}
 	if len(body.Projects) != 0 {
 		t.Errorf("Projects len=%d, want 0 for empty DB", len(body.Projects))
+	}
+}
+
+func TestWorklogProject_ReturnsAllReflectionsForOneProject(t *testing.T) {
+	t.Parallel()
+	db := newTestStore(t)
+	ctx := context.Background()
+
+	// Two reflections under /proj/x, one under /proj/y. The handler must
+	// only return /proj/x rows.
+	mustUpsert(t, ctx, db, "x-e1", 10_000, "/proj/x", 1)
+	mustReflect(t, ctx, db, "x-r1", 20_000, "/proj/x", "x-e1")
+	mustUpsert(t, ctx, db, "x-e2", 30_000, "/proj/x", 1)
+	mustReflect(t, ctx, db, "x-r2", 40_000, "/proj/x", "x-e2")
+	mustUpsert(t, ctx, db, "y-e1", 50_000, "/proj/y", 1)
+	mustReflect(t, ctx, db, "y-r1", 60_000, "/proj/y", "y-e1")
+
+	srv := httptest.NewServer(newWorklogRouter(t, db))
+	t.Cleanup(srv.Close)
+
+	resp, err := http.Get(srv.URL + "/worklog/items/project?path=" + url.QueryEscape("/proj/x"))
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	var body api.WorklogProjectResponse
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Project.ProjectPath != "/proj/x" {
+		t.Errorf("project=%s, want /proj/x", body.Project.ProjectPath)
+	}
+	if len(body.Reflections) != 2 {
+		t.Fatalf("Reflections len=%d, want 2", len(body.Reflections))
+	}
+	// Newest first.
+	if body.Reflections[0].ID != "x-r2" || body.Reflections[1].ID != "x-r1" {
+		t.Errorf("order wrong: got %s,%s; want x-r2,x-r1", body.Reflections[0].ID, body.Reflections[1].ID)
+	}
+}
+
+func TestWorklogProject_RejectsMissingPath(t *testing.T) {
+	t.Parallel()
+	db := newTestStore(t)
+	srv := httptest.NewServer(newWorklogRouter(t, db))
+	t.Cleanup(srv.Close)
+
+	resp, err := http.Get(srv.URL + "/worklog/items/project")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status=%d, want 400", resp.StatusCode)
+	}
+}
+
+func TestWorklogProject_UnknownProjectReturnsEmpty(t *testing.T) {
+	t.Parallel()
+	db := newTestStore(t)
+	srv := httptest.NewServer(newWorklogRouter(t, db))
+	t.Cleanup(srv.Close)
+
+	resp, err := http.Get(srv.URL + "/worklog/items/project?path=" + url.QueryEscape("/no/such/proj"))
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	var body api.WorklogProjectResponse
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Project.ProjectPath != "/no/such/proj" {
+		t.Errorf("project=%s, want /no/such/proj (echo even when empty)", body.Project.ProjectPath)
+	}
+	if len(body.Reflections) != 0 {
+		t.Errorf("Reflections len=%d, want 0", len(body.Reflections))
 	}
 }

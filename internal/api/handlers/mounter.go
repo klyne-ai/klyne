@@ -125,6 +125,7 @@ func (m *Mounter) Mount(r chi.Router) {
 	// audit suppression behavior.
 	hWorklog := NewWorklogHandler(m.deps.DB)
 	r.Get(api.RouteWorklog, hWorklog.List)
+	r.Get(api.RouteWorklogProject, hWorklog.Project)
 
 	// /insights/projects — per-project rollup powering the Insights
 	// dashboard. Reads from sessions + messages + compact_events; no

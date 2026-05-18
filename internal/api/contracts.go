@@ -57,6 +57,10 @@ const (
 	// /worklog/items subpath to avoid colliding with the SPA route
 	// (same pattern as /memory/items).
 	RouteWorklog             = "/worklog/items"
+	// RouteWorklogProject: per-project drill-in. Takes ?path=<abs-path>;
+	// returns the project's rollup PLUS its full daily-reflection list
+	// newest-first. Powers /worklog/project in the cockpit SPA.
+	RouteWorklogProject      = "/worklog/items/project"
 	// Insights: per-project rollup powering the Insights dashboard.
 	// Returns one rich record per project with agent split, cache hit %,
 	// efficiency, /compact pain signal, top sessions, daily sparkline,
@@ -90,6 +94,7 @@ func AllRoutes() []string {
 		RouteMemory,
 		RouteMemoryItem,
 		RouteWorklog,
+		RouteWorklogProject,
 		RouteInsightsProjects,
 	}
 }
@@ -857,4 +862,19 @@ type ProjectInsightsResponse struct {
 // never-reflected, then fresh). Empty when neither table has any data.
 type WorklogResponse struct {
 	Projects []store.WorklogProjectRollup `json:"projects"`
+}
+
+// WorklogProjectResponse is GET /worklog/items/project?path=<abs>. Bundles
+// the project's rollup (latest reflection, stale-ness, pending count) with
+// the full daily-reflection list newest-first — enough for the drill-in
+// page to render the header AND the ISO-week-grouped reflection list in
+// one round-trip.
+//
+// When the path has no rows in either table, Project carries the echoed
+// ProjectPath, Name = basename(path), LatestReflection = nil, PendingEntries
+// = 0, Stale = false; Reflections is an empty (non-nil) slice. The UI
+// renders an empty-state message instead of erroring.
+type WorklogProjectResponse struct {
+	Project     store.WorklogProjectRollup `json:"project"`
+	Reflections []store.Reflection         `json:"reflections"`
 }
