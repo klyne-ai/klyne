@@ -45,3 +45,21 @@ export function dayLabel(tsMs: number): string {
 
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
+
+/**
+ * ISO 8601 week label for an epoch-ms timestamp. UTC matches the
+ * backend's IsoWeek helper (internal/worklog/export.go:31) so server
+ * and UI agree on bucket boundaries.
+ *
+ * Algorithm: find the Thursday of the same week (ISO 8601 anchors
+ * weeks on Thursday), then count weeks from year start.
+ */
+export function isoWeek(ts: number): string {
+  const d = new Date(ts);
+  const utc = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  const dayNum = utc.getUTCDay() === 0 ? 7 : utc.getUTCDay();
+  utc.setUTCDate(utc.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(utc.getUTCFullYear(), 0, 1));
+  const week = Math.ceil(((utc.getTime() - yearStart.getTime()) / 86_400_000 + 1) / 7);
+  return `${utc.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
+}

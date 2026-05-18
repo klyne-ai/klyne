@@ -4,11 +4,10 @@
   /worklog cards.
 -->
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { page } from '$app/stores';
   import { fetchWorklogProject } from '$lib/api.js';
   import type { Reflection, WorklogProjectResponse } from '$lib/types.js';
-  import { relTime } from '$lib/format.js';
+  import { isoWeek, relTime } from '$lib/format.js';
 
   let resp = $state<WorklogProjectResponse | null>(null);
   let loading = $state(true);
@@ -34,20 +33,16 @@
     }
   }
 
-  onMount(() => { void load(); });
-
-  // ISO 8601 week label for an epoch-ms timestamp. UTC matches the
-  // backend's IsoWeek helper so server and UI agree on bucket boundaries.
-  function isoWeek(ts: number): string {
-    const d = new Date(ts);
-    // Algorithm: ISO week containing Thursday of the same week.
-    const utc = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
-    const dayNum = utc.getUTCDay() === 0 ? 7 : utc.getUTCDay();
-    utc.setUTCDate(utc.getUTCDate() + 4 - dayNum);
-    const yearStart = new Date(Date.UTC(utc.getUTCFullYear(), 0, 1));
-    const week = Math.ceil(((utc.getTime() - yearStart.getTime()) / 86_400_000 + 1) / 7);
-    return `${utc.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
-  }
+  $effect(() => {
+    // Read path inside the effect so it becomes a tracked dep; SvelteKit
+    // treats /worklog/project?path=/a and ?path=/b as the same route, so
+    // without this re-run we'd leave stale `resp` on screen across nav.
+    // Resetting collapsed prevents week-state from carrying across
+    // projects (week labels may collide).
+    void path;
+    collapsed = {};
+    void load();
+  });
 
   // Bucket reflections by ISO-week, newest week first. Within a week we
   // keep the server's newest-first order (which is already by ts DESC).

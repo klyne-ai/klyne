@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { kfmt, relAgo, costFmt, dayLabel } from './format.js';
+import { kfmt, relAgo, costFmt, dayLabel, isoWeek } from './format.js';
 
 describe('kfmt', () => {
   it('formats sub-thousand numbers as-is', () => {
@@ -65,4 +65,25 @@ describe('dayLabel', () => {
     const label = dayLabel(new Date('2025-05-04').getTime());
     expect(label).toMatch(/May\s+4/);
   });
+});
+
+describe('isoWeek', () => {
+  // Each case: [UTC date, expected ISO-week label, why it matters]
+  const cases: Array<[Date, string, string]> = [
+    [new Date(Date.UTC(2026, 0, 1)),  '2026-W01', 'Jan 1 2026 (Thu) — first day of W01'],
+    [new Date(Date.UTC(2026, 0, 4)),  '2026-W01', 'Jan 4 (Sun) is in W01 (always-in-W1 rule)'],
+    [new Date(Date.UTC(2026, 0, 5)),  '2026-W02', 'Mon after that flips to W02'],
+    [new Date(Date.UTC(2026, 4, 17)), '2026-W20', 'Sun 2026-05-17 — last day of W20'],
+    [new Date(Date.UTC(2026, 4, 18)), '2026-W21', 'Mon flips week boundary'],
+    [new Date(Date.UTC(2026, 11, 31)),'2026-W53', 'Dec 31 2026 (Thu) — 2026 has W53'],
+    [new Date(Date.UTC(2027, 0, 1)),  '2026-W53', 'Jan 1 2027 (Fri) still in 2026-W53'],
+    [new Date(Date.UTC(2027, 0, 4)),  '2027-W01', 'Jan 4 2027 (Mon) flips to W01'],
+    [new Date(Date.UTC(2024, 11, 30)),'2025-W01', 'Mon 2024-12-30 belongs to 2025-W01'],
+  ];
+
+  for (const [d, want, why] of cases) {
+    it(`${d.toISOString().slice(0, 10)} → ${want} (${why})`, () => {
+      expect(isoWeek(d.getTime())).toBe(want);
+    });
+  }
 });
