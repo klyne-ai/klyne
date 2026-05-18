@@ -1,9 +1,10 @@
 <!--
-  TopNav — 3-tab shell.
+  TopNav — 4-tab shell.
 
   Tabs:
     Work     (replaces Dashboard + Cockpit + Projects)
     Memory   (decisions / runbooks review)
+    Worklog  (stop_summaries audit — signal vs suppressed)
     Insights (project-centric subscription-aware metrics)
 
   Search lives behind the `/` overlay, not as a dedicated route.
@@ -23,6 +24,7 @@
   const tabs = [
     { id: 'work',     label: 'Work',     path: '/' },
     { id: 'memory',   label: 'Memory',   path: '/memory' },
+    { id: 'worklog',  label: 'Worklog',  path: '/worklog' },
     { id: 'insights', label: 'Insights', path: '/insights' }
   ] as const;
 
@@ -30,6 +32,7 @@
     const p = $page.url.pathname;
     if (p === '/' || p.startsWith('/work') || p.startsWith('/cockpit') || p.startsWith('/projects') || p.startsWith('/sessions')) return 'work';
     if (p.startsWith('/memory')) return 'memory';
+    if (p.startsWith('/worklog')) return 'worklog';
     if (p.startsWith('/insights') || p.startsWith('/stats')) return 'insights';
     return '';
   }
