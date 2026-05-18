@@ -84,6 +84,15 @@ func TestHandleGenerateHandoff_HappyPathReturnsMarkdown(t *testing.T) {
 	if !reflect.DeepEqual(out.NarrativeSlots, want) {
 		t.Errorf("NarrativeSlots = %v, want %v", out.NarrativeSlots, want)
 	}
+	// Skeleton must be populated: the fixture has a Read on auth.go so
+	// AnchorFiles should be non-empty, and a tool_result with is_error=true
+	// so KnownBlockers should be non-empty.
+	if len(out.Skeleton.AnchorFiles) == 0 {
+		t.Errorf("Skeleton.AnchorFiles is empty; expected auth.go from the happy-path fixture, got %+v", out.Skeleton)
+	}
+	if len(out.Skeleton.KnownBlockers) == 0 {
+		t.Errorf("Skeleton.KnownBlockers is empty; expected FAIL TestLogin from the happy-path fixture, got %+v", out.Skeleton)
+	}
 }
 
 func mustHandoff(t *testing.T, in HandoffInput) HandoffOutput {
@@ -150,11 +159,11 @@ func TestHandleGenerateHandoff_StaleFilesInCollapsedTail(t *testing.T) {
 	// the "## Anchor files" table by splitting on the <details> boundary.
 	detailsIdx := strings.Index(md, "<details>")
 	if detailsIdx < 0 {
-		// No stale files at all — that's also acceptable if the scorer
-		// didn't mark them stale (fixture may not trigger the threshold
-		// on every platform). Skip rather than hard-fail.
-		t.Logf("no <details> section in handoff — stale-file relegation not triggered (ok if scorer threshold not met)")
-		return
+		// The fixture has 15 user messages after the auth reads, which
+		// exceeds recentTouchHorizonUserMsgs=10. If the <details> block
+		// is absent the staleness premise has silently drifted — fail
+		// loudly so the threshold change is caught immediately.
+		t.Fatalf("no <details> section in handoff — stale-file relegation not triggered; fixture should reliably exceed the recency horizon.\nFull markdown:\n%s", md)
 	}
 	anchorSection := md[:detailsIdx]
 	// Auth files must NOT appear in the anchor table above <details>.
