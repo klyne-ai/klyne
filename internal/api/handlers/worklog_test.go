@@ -264,6 +264,9 @@ func TestWorklogProject_UnknownProjectReturnsEmpty(t *testing.T) {
 	if body.Project.ProjectPath != "/no/such/proj" {
 		t.Errorf("project=%s, want /no/such/proj (echo even when empty)", body.Project.ProjectPath)
 	}
+	if body.Project.Name != "proj" {
+		t.Errorf("Name=%q, want %q (basename of /no/such/proj)", body.Project.Name, "proj")
+	}
 	if len(body.Reflections) != 0 {
 		t.Errorf("Reflections len=%d, want 0", len(body.Reflections))
 	}
