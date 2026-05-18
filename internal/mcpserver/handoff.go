@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/klyne-ai/klyne/internal/connectors"
 	"github.com/klyne-ai/klyne/internal/contexthealth"
@@ -597,4 +598,108 @@ func extractLinkedURLs(msgs []*connectors.Message) []string {
 		}
 	}
 	return out
+}
+
+// planOfRecordPatterns lists the file-path globs that count as
+// "planning documents" for the purposes of the handoff. Match is
+// case-sensitive substring on the path's lowercased form.
+var planOfRecordPatterns = []string{
+	"/plans/",    // matches docs/superpowers/plans/*.md, docs/.../plans/*.md
+	"/research/", // matches docs/research/<topic>/*.md
+	"/00-plan.md", // matches any */00-plan.md naming
+}
+
+// isPlanPath returns true when the given path should be considered
+// a plan-of-record candidate. Lower-cased so case quirks in the
+// path don't matter.
+func isPlanPath(p string) bool {
+	pl := strings.ToLower(p)
+	if !strings.HasSuffix(pl, ".md") {
+		return false
+	}
+	for _, pat := range planOfRecordPatterns {
+		if strings.Contains(pl, pat) {
+			return true
+		}
+	}
+	return false
+}
+
+// extractPlanOfRecord walks the snapshot's tool calls and returns
+// the *PlanOfRecordRef for the plan-shaped file with the most
+// recent Read/Edit touch. Read counts include all touches in the
+// session. now is the reference time used to compute the
+// LastTouchAgo display string; tests pass a fixed value for
+// determinism, production callers pass time.Now().UnixMilli().
+func extractPlanOfRecord(msgs []*connectors.Message, now int64) *PlanOfRecordRef {
+	type rec struct {
+		path      string
+		count     int
+		lastTouch int64
+	}
+	byPath := map[string]*rec{}
+	for _, m := range msgs {
+		if m == nil {
+			continue
+		}
+		for _, tc := range m.ToolCalls {
+			if !isReadTool(tc.Name) {
+				continue
+			}
+			p := extractPath(tc.Input)
+			if p == "" || !isPlanPath(p) {
+				continue
+			}
+			r, ok := byPath[p]
+			if !ok {
+				r = &rec{path: p}
+				byPath[p] = r
+			}
+			r.count++
+			if m.Ts > r.lastTouch {
+				r.lastTouch = m.Ts
+			}
+		}
+	}
+	if len(byPath) == 0 {
+		return nil
+	}
+	// Pick the most-recently-touched plan; ties broken alphabetically
+	// so the result is deterministic.
+	var best *rec
+	for _, r := range byPath {
+		switch {
+		case best == nil:
+			best = r
+		case r.lastTouch > best.lastTouch:
+			best = r
+		case r.lastTouch == best.lastTouch && r.path < best.path:
+			best = r
+		}
+	}
+	return &PlanOfRecordRef{
+		Path:         best.path,
+		ReadCount:    best.count,
+		LastTouchAgo: formatRelativeAgo(now, best.lastTouch),
+	}
+}
+
+// formatRelativeAgo renders the gap between now and earlier (both
+// epoch-ms) as a short human-readable string: "4m", "1h", "2d".
+// Returns "" when earlier is zero or in the future.
+func formatRelativeAgo(now, earlier int64) string {
+	if earlier <= 0 || earlier > now {
+		return ""
+	}
+	delta := time.Duration(now-earlier) * time.Millisecond
+	switch {
+	case delta < time.Minute:
+		return "just now"
+	case delta < time.Hour:
+		return fmt.Sprintf("%dm", int(delta/time.Minute))
+	case delta < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(delta/time.Hour))
+	default:
+		return fmt.Sprintf("%dd", int(delta/(24*time.Hour)))
+	}
 }

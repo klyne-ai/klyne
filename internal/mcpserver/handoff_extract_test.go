@@ -1,9 +1,11 @@
 package mcpserver
 
 import (
+	"encoding/json"
 	"reflect"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/klyne-ai/klyne/internal/connectors"
 )
@@ -61,5 +63,61 @@ func TestExtractLinkedURLs_DeduplicatesPreservingOrder(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
+	}
+}
+
+// readToolCall builds a Message carrying a single Read-style tool
+// call for the given file path, timestamped at ts (epoch-ms).
+func readToolCall(path string, ts int64) *connectors.Message {
+	input, _ := json.Marshal(map[string]string{"file_path": path})
+	return &connectors.Message{
+		Role: connectors.RoleAssistant,
+		Ts:   ts,
+		ToolCalls: []connectors.ToolCall{
+			{Name: "Read", Input: string(input)},
+		},
+	}
+}
+
+func TestExtractPlanOfRecord_MostRecentMatchingFileWins(t *testing.T) {
+	now := time.Now().UnixMilli()
+	minAgo := func(ago time.Duration) int64 { return now - ago.Milliseconds() }
+	msgs := []*connectors.Message{
+		readToolCall("docs/superpowers/specs/2026-05-15-spec.md", minAgo(2*time.Hour)),
+		readToolCall("src/services/foo.js", minAgo(1*time.Hour)), // not a plan
+		readToolCall("docs/superpowers/plans/2026-05-15-labstack.md", minAgo(30*time.Minute)),
+		readToolCall("docs/superpowers/plans/2026-05-15-labstack.md", minAgo(5*time.Minute)),
+	}
+	got := extractPlanOfRecord(msgs, now)
+	if got == nil {
+		t.Fatal("expected non-nil plan-of-record")
+	}
+	if got.Path != "docs/superpowers/plans/2026-05-15-labstack.md" {
+		t.Errorf("path = %q, want plans/...", got.Path)
+	}
+	if got.ReadCount != 2 {
+		t.Errorf("ReadCount = %d, want 2", got.ReadCount)
+	}
+}
+
+func TestExtractPlanOfRecord_NoMatchReturnsNil(t *testing.T) {
+	now := time.Now().UnixMilli()
+	msgs := []*connectors.Message{
+		readToolCall("src/foo.js", now-1000),
+		readToolCall("README.md", now-500),
+	}
+	if got := extractPlanOfRecord(msgs, now); got != nil {
+		t.Fatalf("expected nil, got %+v", got)
+	}
+}
+
+func TestExtractPlanOfRecord_AlsoMatchesResearchAnd00Plan(t *testing.T) {
+	now := time.Now().UnixMilli()
+	msgs := []*connectors.Message{
+		readToolCall("docs/research/worklog/00-plan.md", now-1000),
+	}
+	got := extractPlanOfRecord(msgs, now)
+	if got == nil || got.Path != "docs/research/worklog/00-plan.md" {
+		t.Fatalf("got %+v, want 00-plan.md", got)
 	}
 }
