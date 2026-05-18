@@ -38,6 +38,15 @@ type SessionSnapshot struct {
 	// Lines that the parser skips (permission-mode, file-history-snapshot,
 	// summary lines without leaf-uuid context, etc.) are NOT included.
 	Messages []*connectors.Message
+	// GitDirtyFiles is the set of absolute file paths with uncommitted
+	// changes at snapshot-load time, captured from `git status --porcelain`
+	// rooted at the session's first non-empty Cwd. Empty + DirtyUnknown=true
+	// shape is signalled by GitDirtyKnown=false.
+	GitDirtyFiles map[string]bool
+	// GitDirtyKnown is true iff captureGitDirty succeeded. When false,
+	// callers should label per-file dirty/clean state as "unknown" rather
+	// than guessing "clean."
+	GitDirtyKnown bool
 }
 
 // LoadSnapshot opens path, parses every line using the right parser
@@ -51,12 +60,29 @@ type SessionSnapshot struct {
 // ~/.codex/sessions, falls back to the Claude parser; this preserves
 // pre-Codex test fixtures that drop transcripts in arbitrary tempdirs.
 func LoadSnapshot(ctx context.Context, path string) (*SessionSnapshot, error) {
+	var (
+		snap *SessionSnapshot
+		err  error
+	)
 	switch CLIForPath(path) {
 	case connectors.CLICodex:
-		return loadCodexSnapshot(ctx, path)
+		snap, err = loadCodexSnapshot(ctx, path)
 	default:
-		return loadClaudeSnapshot(ctx, path)
+		snap, err = loadClaudeSnapshot(ctx, path)
 	}
+	if err != nil {
+		return nil, err
+	}
+	// Capture git-dirty state once at load time so the renderer stays
+	// a pure function of the snapshot. Failure is non-fatal — the
+	// renderer falls back to "unknown" labels.
+	if cwd := firstCwdFromMessages(snap.Messages); cwd != "" {
+		if set, ok := captureGitDirty(cwd); ok {
+			snap.GitDirtyFiles = set
+			snap.GitDirtyKnown = true
+		}
+	}
+	return snap, nil
 }
 
 // loadClaudeSnapshot parses path as a Claude Code transcript and
