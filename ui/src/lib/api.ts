@@ -31,6 +31,7 @@ import type {
   UsageResponse,
   UsageStatsQuery,
   UsageStatsResponse,
+  WorklogProjectResponse,
   WorklogResponse,
 } from './types.js';
 
@@ -358,6 +359,17 @@ export async function deleteMemory(id: string): Promise<void> {
  */
 export async function fetchWorklog(): Promise<WorklogResponse> {
   return get<WorklogResponse>('/worklog/items');
+}
+
+/**
+ * GET /worklog/items/project?path=<abs> — per-project drill-in.
+ *
+ * Returns the project's rollup + its full daily-reflection list
+ * newest-first. The path arg is sent verbatim as the query value;
+ * the URLSearchParams machinery URL-encodes it.
+ */
+export async function fetchWorklogProject(path: string): Promise<WorklogProjectResponse> {
+  return get<WorklogProjectResponse>('/worklog/items/project', { path });
 }
 
 // ---------------------------------------------------------------------------

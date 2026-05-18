@@ -608,6 +608,12 @@ export interface WorklogResponse {
   projects: WorklogProjectRollup[];
 }
 
+/** WorklogProjectResponse is GET /worklog/items/project?path=<abs>. */
+export interface WorklogProjectResponse {
+  project: WorklogProjectRollup;
+  reflections: Reflection[];
+}
+
 // --- /insights/projects ---
 
 /** AgentSlice is one CLI's contribution within a project bucket. */
