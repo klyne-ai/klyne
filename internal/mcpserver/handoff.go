@@ -20,51 +20,14 @@ func contexthealthScoreFiles(msgs []*connectors.Message) contexthealth.Relevance
 	return contexthealth.ScoreFiles(msgs)
 }
 
-// handoffMaxRecentTurns caps how many of the latest user/assistant
-// turns we include verbatim in the handoff. Enough for the new
-// session to have continuity with the recent conversation, small
-// enough to keep the handoff prompt itself well under any context
-// window the user is likely to paste it into.
-const handoffMaxRecentTurns = 6
-
-// handoffMaxRecentTurnsScoped is the deeper window used when scope
-// is "current-topic" — the new session is replacing the old one
-// because the topic shifted, so it benefits from extra recent
-// context to pick up the new direction without the old framing.
-const handoffMaxRecentTurnsScoped = 10
-
-// HandoffScope is the typed wrapper for HandoffInput.Scope.
-type HandoffScope string
-
-const (
-	HandoffScopeFull         HandoffScope = "full"
-	HandoffScopeCurrentTopic HandoffScope = "current-topic"
-)
-
-// parseHandoffScope normalises an input string into a HandoffScope.
-// Empty strings, "full", and unknown values all fall through to
-// HandoffScopeFull so a typo never breaks the existing surface.
-func parseHandoffScope(s string) HandoffScope {
-	switch s {
-	case string(HandoffScopeCurrentTopic):
-		return HandoffScopeCurrentTopic
-	default:
-		return HandoffScopeFull
-	}
-}
-
-// handoffMaxFiles caps the "files touched" list. Past this point the
-// list becomes noise; the user can always inspect the source JSONL.
-const handoffMaxFiles = 20
-
-// handoffMaxCommands caps the "commands run" list with the same
-// reasoning.
-const handoffMaxCommands = 12
-
 // handoffMessagePreview truncates per-message text included verbatim
-// in the recent-exchanges section. Long enough to convey intent,
-// short enough that one verbose tool-result blob can't dominate.
+// in the handoff sections. Long enough to convey intent, short enough
+// that one verbose tool-result blob can't dominate.
 const handoffMessagePreview = 400
+
+// handoffMaxBlockers caps the rendered blockers list. Three is
+// enough signal for the next session to triage; more becomes noise.
+const handoffMaxBlockers = 3
 
 // HandoffInput is the input schema for generate_handoff.
 type HandoffInput struct {
@@ -93,196 +56,116 @@ type HandoffOutput struct {
 	Candidates   []CandidateRow `json:"candidates,omitempty" jsonschema:"sessions to choose from when ambiguous"`
 }
 
-// RenderHandoff is the exported entry point used by the docs/proof
-// tests (and any external consumer that wants to render a handoff
-// from a snapshot they already loaded). Delegates to renderHandoff
-// in HandoffScopeFull mode so existing callers do not need to know
-// about the scope flag.
+// RenderHandoff renders the deterministic skeleton — the body of
+// the handoff prompt without any model-authored narrative. Pure
+// function of the snapshot. The proof test at
+// docs/proof/02-handoff-equivalence/ asserts this output is
+// byte-identical across runs for the same (snapshot, git-dirty)
+// input.
 func RenderHandoff(snap *SessionSnapshot) string {
-	return renderHandoff(snap, HandoffScopeFull)
+	return renderHandoff(snap, time.Now().UnixMilli())
 }
 
-// RenderScopedHandoff renders the handoff under the given scope.
-// HandoffScopeCurrentTopic restricts the "Files touched" section
-// to files whose relevance score (per contexthealth.ScoreFiles)
-// exceeds the threshold, and bumps the recent-exchanges window
-// from handoffMaxRecentTurns to handoffMaxRecentTurnsScoped.
-func RenderScopedHandoff(snap *SessionSnapshot, scope HandoffScope) string {
-	return renderHandoff(snap, scope)
-}
-
-// renderHandoff turns a SessionSnapshot into the deterministic
-// Markdown handoff. Pure function — no I/O — so callers (tests,
-// future code that wants to re-render from cached snapshots) can
-// reuse it without paying the JSONL re-scan cost.
-func renderHandoff(snap *SessionSnapshot, scope HandoffScope) string {
+// renderHandoff is the implementation; now is injected so tests
+// (and the proof fixture) can pin relative-time strings.
+func renderHandoff(snap *SessionSnapshot, now int64) string {
 	var b strings.Builder
 
-	projectPath := projectPathFromMessages(snap.Messages)
-	if projectPath == "" {
-		projectPath = "(unknown — no cwd-bearing message in transcript)"
+	cwd := firstCwdFromMessages(snap.Messages)
+	if cwd == "" {
+		cwd = "(unknown — no cwd-bearing message in transcript)"
 	}
+	branch := branchFromMessages(snap.Messages)
 
 	fmt.Fprintf(&b, "# Handoff from session `%s`\n\n", short(snap.SessionID))
-	if scope == HandoffScopeCurrentTopic {
-		b.WriteString("_Scope: current-topic — only files relevant to the user's most recent direction are carried forward._\n\n")
-	}
-	fmt.Fprintf(&b, "We are working in `%s`.\n\n", projectPath)
-
-	if topic := recentTopic(snap.Messages); topic != "" {
-		fmt.Fprintf(&b, "## Recent task\n\n%s\n\n", topic)
+	if branch != "" {
+		fmt.Fprintf(&b, "Working in `%s` on branch `%s`.\n\n", cwd, branch)
+	} else {
+		fmt.Fprintf(&b, "Working in `%s`.\n\n", cwd)
 	}
 
-	relevantPaths := relevantPathSet(snap.Messages, scope)
-	if files := filesTouchedFiltered(snap.Messages, relevantPaths); len(files) > 0 {
-		b.WriteString("## Files touched\n\n")
-		for _, f := range files {
-			fmt.Fprintf(&b, "- `%s`%s\n", f.Path, occurrenceSuffix(f.Count))
+	if plan := extractPlanOfRecord(snap.Messages, now); plan != nil {
+		b.WriteString("## Plan of record\n\n")
+		ago := ""
+		if plan.LastTouchAgo != "" {
+			ago = fmt.Sprintf("; last touched %s ago", plan.LastTouchAgo)
+		}
+		fmt.Fprintf(&b, "- `%s` (read %d×%s)\n\n", plan.Path, plan.ReadCount, ago)
+	}
+
+	verdict := contexthealthScoreFiles(snap.Messages)
+	anchors, staleCount := buildAnchorFiles(verdict, snap.GitDirtyFiles, snap.GitDirtyKnown, now)
+	if len(anchors) > 0 {
+		fmt.Fprintf(&b, "## Anchor files (top %d by relevance)\n\n", len(anchors))
+		b.WriteString("| File | State | Last touch |\n|------|-------|------------|\n")
+		for _, a := range anchors {
+			state := "clean"
+			switch {
+			case a.DirtyUnknown:
+				state = "unknown"
+			case a.Dirty:
+				state = "dirty"
+			}
+			fmt.Fprintf(&b, "| `%s` | %s | %s |\n", a.Path, state, a.LastTouchAgo)
+		}
+		b.WriteString("\n")
+		if staleCount > 0 {
+			fmt.Fprintf(&b, "<details><summary>%d more files touched (stale / low-relevance)</summary>\n\n", staleCount)
+			for _, f := range verdict.Files {
+				if f.Stale {
+					fmt.Fprintf(&b, "- `%s`\n", f.Path)
+				}
+			}
+			b.WriteString("\n</details>\n\n")
+		}
+	}
+
+	if tickets := extractTicketHints(snap.Messages); len(tickets) > 0 {
+		b.WriteString("## Likely ticket / source-of-truth\n\n")
+		for _, t := range tickets {
+			if t.FromURL {
+				fmt.Fprintf(&b, "- `%s` (appears in pasted URL)\n", t.Key)
+			} else {
+				fmt.Fprintf(&b, "- `%s` (mentioned %d× in user turns)\n", t.Key, t.Mentions)
+			}
+		}
+		if urls := extractLinkedURLs(snap.Messages); len(urls) > 0 {
+			for _, u := range urls {
+				fmt.Fprintf(&b, "- %s\n", u)
+			}
 		}
 		b.WriteString("\n")
 	}
 
-	if cmds := commandsRun(snap.Messages); len(cmds) > 0 {
-		b.WriteString("## Commands run\n\n")
-		for _, c := range cmds {
-			fmt.Fprintf(&b, "- `%s`%s\n", c.Stem, occurrenceSuffix(c.Count))
+	inProg, pending := extractTodos(snap.Messages)
+	if len(inProg)+len(pending) > 0 {
+		b.WriteString("## In-progress todos (last TodoWrite)\n\n")
+		for _, t := range inProg {
+			fmt.Fprintf(&b, "- [in_progress] %s\n", t.Content)
+		}
+		for _, t := range pending {
+			fmt.Fprintf(&b, "- [pending] %s\n", t.Content)
 		}
 		b.WriteString("\n")
 	}
 
 	if fails := recentFailures(snap.Messages); len(fails) > 0 {
-		b.WriteString("## Known failures\n\n")
+		b.WriteString("## Recent blockers (last 3 errors)\n\n")
 		for _, f := range fails {
 			fmt.Fprintf(&b, "- %s\n", oneLine(f))
 		}
 		b.WriteString("\n")
 	}
 
-	maxTurns := handoffMaxRecentTurns
-	if scope == HandoffScopeCurrentTopic {
-		maxTurns = handoffMaxRecentTurnsScoped
-	}
-	if recent := recentTurnsLimited(snap.Messages, maxTurns); len(recent) > 0 {
-		b.WriteString("## Last few exchanges\n\n")
-		for _, t := range recent {
-			fmt.Fprintf(&b, "**%s** — %s\n\n", t.Role, oneLine(t.Body))
-		}
-	}
-
-	fmt.Fprintf(&b, "---\n_Source: `%s`_\n", snap.Path)
+	fmt.Fprintf(&b, "_Source: `%s`_\n", snap.Path)
 	return b.String()
-}
-
-// projectPathFromMessages returns the first non-empty Cwd or
-// ProjectPath value across the snapshot's messages. Empty when none
-// of the rows carries one (rare — most Claude Code messages do).
-func projectPathFromMessages(msgs []*connectors.Message) string {
-	for _, m := range msgs {
-		if m.Cwd != "" {
-			return m.Cwd
-		}
-		if m.ProjectPath != "" {
-			return m.ProjectPath
-		}
-	}
-	return ""
-}
-
-// recentTopic extracts the most-recent user message's content as a
-// proxy for "what is the user trying to do." Truncated to fit the
-// handoff prompt without dominating it.
-func recentTopic(msgs []*connectors.Message) string {
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role == connectors.RoleUser && strings.TrimSpace(msgs[i].Content) != "" {
-			return truncatePreview(strings.TrimSpace(msgs[i].Content))
-		}
-	}
-	return ""
-}
-
-// touchedFile is one file-read attribution row with a reused-count.
-type touchedFile struct {
-	Path  string
-	Count int
-}
-
-// filesTouched aggregates Read/Edit/View tool calls across the
-// snapshot, sorts by reuse count desc (the most-frequent reads are
-// likely the ones the next session also wants context on), and
-// caps at handoffMaxFiles.
-func filesTouched(msgs []*connectors.Message) []touchedFile {
-	counts := map[string]int{}
-	for _, m := range msgs {
-		for _, tc := range m.ToolCalls {
-			if !isReadTool(tc.Name) {
-				continue
-			}
-			path := extractPath(tc.Input)
-			if path == "" {
-				continue
-			}
-			counts[path]++
-		}
-	}
-	rows := make([]touchedFile, 0, len(counts))
-	for p, c := range counts {
-		rows = append(rows, touchedFile{Path: p, Count: c})
-	}
-	sort.Slice(rows, func(i, j int) bool {
-		if rows[i].Count != rows[j].Count {
-			return rows[i].Count > rows[j].Count
-		}
-		return rows[i].Path < rows[j].Path
-	})
-	if len(rows) > handoffMaxFiles {
-		rows = rows[:handoffMaxFiles]
-	}
-	return rows
-}
-
-// commandRow is one shell-command attribution.
-type commandRow struct {
-	Stem  string
-	Count int
-}
-
-// commandsRun aggregates Bash tool calls by command stem (e.g.
-// "go test"), sorts by count desc, caps at handoffMaxCommands.
-func commandsRun(msgs []*connectors.Message) []commandRow {
-	counts := map[string]int{}
-	for _, m := range msgs {
-		for _, tc := range m.ToolCalls {
-			if !isShellTool(tc.Name) {
-				continue
-			}
-			stem := commandStem(extractCommand(tc.Input))
-			if stem == "" {
-				continue
-			}
-			counts[stem]++
-		}
-	}
-	rows := make([]commandRow, 0, len(counts))
-	for s, c := range counts {
-		rows = append(rows, commandRow{Stem: s, Count: c})
-	}
-	sort.Slice(rows, func(i, j int) bool {
-		if rows[i].Count != rows[j].Count {
-			return rows[i].Count > rows[j].Count
-		}
-		return rows[i].Stem < rows[j].Stem
-	})
-	if len(rows) > handoffMaxCommands {
-		rows = rows[:handoffMaxCommands]
-	}
-	return rows
 }
 
 // recentFailures pulls the most recent N tool-result rows whose
 // IsError flag is set. Truncated per-row so a single huge stack
 // trace doesn't dominate the handoff.
 func recentFailures(msgs []*connectors.Message) []string {
-	const maxFailures = 5
+	const maxFailures = handoffMaxBlockers
 	var out []string
 	// Walk backward so we collect newest-first.
 	for i := len(msgs) - 1; i >= 0 && len(out) < maxFailures; i-- {
@@ -294,92 +177,6 @@ func recentFailures(msgs []*connectors.Message) []string {
 			if len(out) >= maxFailures {
 				break
 			}
-		}
-	}
-	return out
-}
-
-// recentTurn is one user/assistant exchange row for the handoff.
-type recentTurn struct {
-	Role string
-	Body string
-}
-
-// recentTurns returns the last handoffMaxRecentTurns user/assistant
-// messages, capped per-message at handoffMessagePreview characters.
-// Kept for callers that don't want to specify a limit.
-func recentTurns(msgs []*connectors.Message) []recentTurn {
-	return recentTurnsLimited(msgs, handoffMaxRecentTurns)
-}
-
-// recentTurnsLimited is recentTurns with a caller-supplied cap so
-// the scoped handoff can pull a deeper window than the default.
-// Returns chronological-order (oldest first) entries.
-func recentTurnsLimited(msgs []*connectors.Message, maxTurns int) []recentTurn {
-	if maxTurns <= 0 {
-		return nil
-	}
-	var picked []*connectors.Message
-	for i := len(msgs) - 1; i >= 0 && len(picked) < maxTurns; i-- {
-		m := msgs[i]
-		if m.Role != connectors.RoleUser && m.Role != connectors.RoleAssistant {
-			continue
-		}
-		body := strings.TrimSpace(m.Content)
-		if body == "" {
-			continue
-		}
-		picked = append(picked, m)
-	}
-	out := make([]recentTurn, 0, len(picked))
-	for i := len(picked) - 1; i >= 0; i-- {
-		body := strings.TrimSpace(picked[i].Content)
-		if len(body) > handoffMessagePreview {
-			body = body[:handoffMessagePreview] + "…"
-		}
-		out = append(out, recentTurn{
-			Role: string(picked[i].Role),
-			Body: body,
-		})
-	}
-	return out
-}
-
-// relevantPathSet returns the set of file paths the handoff should
-// include under the given scope. nil for HandoffScopeFull (no
-// filtering); a populated set of relevant paths for HandoffScopeCurrentTopic.
-//
-// Empty set on current-topic falls back to "no files" — the caller's
-// filesTouchedFiltered will then return an empty slice and the
-// "Files touched" section is omitted, signalling clearly that no
-// loaded file is currently relevant.
-func relevantPathSet(msgs []*connectors.Message, scope HandoffScope) map[string]bool {
-	if scope != HandoffScopeCurrentTopic {
-		return nil
-	}
-	verdict := contexthealthScoreFiles(msgs)
-	out := map[string]bool{}
-	for _, f := range verdict.Files {
-		if !f.Stale {
-			out[f.Path] = true
-		}
-	}
-	return out
-}
-
-// filesTouchedFiltered is filesTouched with an optional inclusion
-// set. When include is nil, behaves identically to filesTouched.
-// When include is non-nil, only paths present in the set are
-// returned.
-func filesTouchedFiltered(msgs []*connectors.Message, include map[string]bool) []touchedFile {
-	all := filesTouched(msgs)
-	if include == nil {
-		return all
-	}
-	out := make([]touchedFile, 0, len(all))
-	for _, f := range all {
-		if include[f.Path] {
-			out = append(out, f)
 		}
 	}
 	return out

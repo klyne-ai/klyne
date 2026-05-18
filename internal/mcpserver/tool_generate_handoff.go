@@ -59,12 +59,12 @@ func HandleGenerateHandoff(ctx context.Context, _ *mcp.CallToolRequest, in Hando
 	if err != nil {
 		return nil, HandoffOutput{}, fmt.Errorf("load snapshot: %w", err)
 	}
-	md := renderHandoff(snap, parseHandoffScope(in.Scope))
+	md := RenderHandoff(snap)
 
 	out := HandoffOutput{
 		SessionID:   snap.SessionID,
 		Path:        snap.Path,
-		ProjectPath: projectPathFromMessages(snap.Messages),
+		ProjectPath: firstCwdFromMessages(snap.Messages),
 		Markdown:    md,
 	}
 	// The Content text is what the AI reads first; surface a one-liner
