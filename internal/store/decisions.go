@@ -108,6 +108,45 @@ func ListDecisions(ctx context.Context, db *DB, f DecisionFilter) ([]Decision, e
 	return out, nil
 }
 
+// ListGlobalDecisions returns global decisions (project_path = '')
+// sorted by ts DESC. Limit defaults to 100 when zero. Use this
+// instead of ListDecisions with empty ProjectPath when you only
+// want globals — ListDecisions with ProjectPath="" returns ALL
+// decisions across all projects (no filter), which forces callers
+// to filter client-side. This primitive does the filter in SQL.
+func ListGlobalDecisions(ctx context.Context, db *DB, limit int) ([]Decision, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	const q = `SELECT id, ts, project_path, session_id, text, tags_json
+FROM decisions
+WHERE project_path = ''
+ORDER BY ts DESC
+LIMIT ?`
+	rows, err := db.Read().QueryContext(ctx, q, limit)
+	if err != nil {
+		return nil, fmt.Errorf("store: list global decisions: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+
+	out := make([]Decision, 0)
+	for rows.Next() {
+		var d Decision
+		var tagsJSON string
+		if err := rows.Scan(&d.ID, &d.Ts, &d.ProjectPath, &d.SessionID, &d.Text, &tagsJSON); err != nil {
+			return nil, fmt.Errorf("store: scan global decision: %w", err)
+		}
+		if tagsJSON != "" {
+			_ = json.Unmarshal([]byte(tagsJSON), &d.Tags)
+		}
+		out = append(out, d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: iter global decisions: %w", err)
+	}
+	return out, nil
+}
+
 // SearchDecisions returns decisions whose text contains q (case-insensitive).
 // Limit defaults to 50.
 func SearchDecisions(ctx context.Context, db *DB, q, projectPath string, limit int) ([]Decision, error) {

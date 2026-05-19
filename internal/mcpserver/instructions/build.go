@@ -89,32 +89,17 @@ func fetchProject(ctx context.Context, db *store.DB, cwd string) ([]store.Decisi
 }
 
 // fetchGlobal returns up to inventoryLimit global runbooks
-// (project_path == "") plus the cut count. ListDecisions with
-// ProjectPath="" returns ALL decisions across all projects (not
-// just globals), so we have to fetch a larger window and filter
-// client-side — same pattern as HandleRecallMemory at
-// internal/mcpserver/tool_memory.go:243-257.
-//
-// Window size: fetchWindow. Cheap and almost certainly covers the
-// global slice in real installs (most users have <5 globals). If a
-// power user manages to have so many non-global decisions that
-// globals get pushed past the window, the worst case is the
-// instructions surface fewer globals than expected — recall still
-// works live.
+// (project_path == "") plus the cut count. Uses the store's
+// ListGlobalDecisions primitive — fetches with fetchWindow so
+// the "+N more" footer count is accurate up to fetchWindow -
+// inventoryLimit hidden rows. Beyond that, the footer
+// undercounts (recall still works live).
 func fetchGlobal(ctx context.Context, db *store.DB) ([]store.Decision, int) {
-	all, err := store.ListDecisions(ctx, db, store.DecisionFilter{
-		Limit: fetchWindow,
-	})
+	rows, err := store.ListGlobalDecisions(ctx, db, fetchWindow)
 	if err != nil {
 		return nil, 0
 	}
-	globals := make([]store.Decision, 0, fetchWindow)
-	for _, d := range all {
-		if d.ProjectPath == "" {
-			globals = append(globals, d)
-		}
-	}
-	return trimToLimit(globals)
+	return trimToLimit(rows)
 }
 
 // trimToLimit trims rows down to inventoryLimit and returns
