@@ -8,18 +8,15 @@ import (
 	"github.com/klyne-ai/klyne/internal/store"
 )
 
-// inventoryLimit is the max number of runbooks listed per scope in
-// the instructions string. Build fetches a wider window than this
-// so the "+N more" footer can show an accurate cut count without a
-// second COUNT query.
-const inventoryLimit = 20
-
-// fetchWindow is the cap on rows pulled per scope. We surface
-// inventoryLimit rows; anything between inventoryLimit and
-// fetchWindow contributes to the "+N more" footer count.
-// Beyond fetchWindow the footer undercounts — acceptable per spec
-// (recall still works live).
-const fetchWindow = inventoryLimit * 4
+// inventoryLimit caps how many runbooks per scope appear in the
+// rendered inventory. fetchWindow caps how many rows we pull per
+// scope; the gap between inventoryLimit and fetchWindow feeds the
+// "+N more" footer count. Beyond fetchWindow the footer undercounts
+// — acceptable per spec (recall still works live).
+const (
+	inventoryLimit = 20
+	fetchWindow    = inventoryLimit * 4
+)
 
 // Build returns the MCP server Instructions string for the project
 // rooted at cwd. Empty string means "omit the instructions field
@@ -58,8 +55,7 @@ func Build(ctx context.Context, cwd string, db *store.DB) string {
 		b.WriteString("\n")
 	}
 	if len(global) > 0 {
-		const globalHeading = "Global runbooks"
-		b.WriteString(renderInventory(global, globalHeading, globalHidden))
+		b.WriteString(renderInventory(global, "Global runbooks", globalHidden))
 	}
 
 	return strings.TrimRight(b.String(), "\n")
@@ -68,8 +64,7 @@ func Build(ctx context.Context, cwd string, db *store.DB) string {
 // fetchProject returns up to inventoryLimit project-scoped runbooks
 // plus the number that were cut from the cap. cwd="" yields no
 // project runbooks because ListDecisions treats empty ProjectPath as
-// "no filter" — see fetchGlobal for the client-side filter that
-// handles globals.
+// "no filter"; globals are fetched separately via fetchGlobal.
 func fetchProject(ctx context.Context, db *store.DB, cwd string) ([]store.Decision, int) {
 	if cwd == "" {
 		return nil, 0
@@ -79,10 +74,7 @@ func fetchProject(ctx context.Context, db *store.DB, cwd string) ([]store.Decisi
 		Limit:       fetchWindow,
 	})
 	if err != nil {
-		// Best-effort: log to stderr would be nice but stderr is
-		// the MCP host's diagnostic channel — leave that to the
-		// caller. Silent skip is acceptable here per the spec's
-		// error-handling table.
+		// Best-effort per spec — silent skip.
 		return nil, 0
 	}
 	return trimToLimit(rows)
@@ -103,9 +95,10 @@ func fetchGlobal(ctx context.Context, db *store.DB) ([]store.Decision, int) {
 }
 
 // trimToLimit trims rows down to inventoryLimit and returns
-// (kept, hidden) where hidden is the count cut. Callers fetch up
-// to fetchWindow rows so hidden is an accurate cut count for the
-// "+N more" footer (capped at fetchWindow - inventoryLimit).
+// (kept, hidden) where kept ≤ inventoryLimit and hidden ≥ 0 is the
+// accurate cut count (capped at fetchWindow - inventoryLimit by the
+// fetch step). Callers fetch fetchWindow rows so hidden tracks the
+// real overage up to that bound.
 func trimToLimit(rows []store.Decision) ([]store.Decision, int) {
 	if len(rows) <= inventoryLimit {
 		return rows, 0
