@@ -7,7 +7,11 @@
 
 ## Problem
 
-The user invokes `/klyne:tokens` and `/klyne:health` as one mental concept — "how is my context doing right now?" — and the two-command split feels artificial. Separately, `/klyne:bootstrap` ends with a "Current session health" tail that duplicates `/klyne:health`'s surface, and its `## klyne memory (SQLite store)` section header is stale after the 2026-05-19 runbooks reposition (commit `eac01bf`) which only updated UI/docs.
+The user invokes `/klyne:tokens` and `/klyne:health` as one mental concept — "how is my context doing right now?" — and the two-command split feels artificial. Separately, `/klyne:bootstrap` ends with a "Current session health" tail that duplicates `/klyne:health`'s surface.
+
+> **Amendment 2026-05-19 (post-spec, pre-plan):** The "memory section header is stale" concern raised at brainstorm time turned out to be a stale-binary observation — `tool_bootstrap.go:323` already says `## klyne runbooks`. The user's screenshot was from a different project running an older `klyne` build. No code change needed for that header. Plan dropped the task.
+>
+> Separately, plan-drafting surfaced a real migration gap: `slashcommands.go:InstallSlashCommands` only writes/overwrites — it does not remove `.md` files that are no longer in the embed FS. Without a one-pass cleanup, users who already have `tokens.md` and `health.md` installed will keep seeing them after `klyne mcp install`. Plan adds one task for this.
 
 ## Goals
 
@@ -30,7 +34,6 @@ The user invokes `/klyne:tokens` and `/klyne:health` as one mental concept — "
 | Output ordering | Verdict on top, full token detail below | Lead with the call to action; raw data underneath. |
 | Architecture | New MCP tool `get_session_status` | Matches the dumb-echo pattern used by all 7 existing klyne slashcommands. One round-trip, server controls layout. |
 | Bootstrap merge scope | Move only the health tail | Bootstrap remains the cross-session briefing; `/klyne:status` owns "right now". |
-| Bootstrap memory copy | Rename "klyne memory (SQLite store)" → "klyne runbooks" | Match the 2026-05-19 reposition; leave "Claude auto-memory" untouched (separate Claude-Code-owned concept). |
 | Heatmap | Drop from the merged output | Table + sparkline + trajectory headline are the high-signal pieces. Heatmap can re-enter later if missed. |
 | Token table | Preserve verbatim | Columns: `time | input tokens | % of context | cached | uncached` (5-col when context window known, 4-col when not). |
 
@@ -100,10 +103,12 @@ Notes:
 - `internal/mcpserver/slashcommands/status.md` — dumb echo shim. Frontmatter `description`: "Unified context check — health verdict + token timeline + bloat sources for the active session".
 
 **Edit**
-- `internal/mcpserver/server.go` — register `get_session_status`.
-- `internal/mcpserver/tool_bootstrap.go` — strip the "Current session health" tail section; rename `## klyne memory (SQLite store)` → `## klyne runbooks`.
-- `internal/mcpserver/tool_bootstrap_test.go` — drop health-tail assertions; add `klyne runbooks` header assertion.
-- `internal/mcpserver/slashcommands/bootstrap.md` — frontmatter description drops "latest health verdict"; body description list updates to reflect three sections instead of four.
+- `internal/mcpserver/server.go` — register `get_session_status`; update `bootstrap` tool description to drop "latest health verdict".
+- `internal/mcpserver/tool_bootstrap.go` — strip the "Current session health" tail section; delete the `LatestHealth` field on `BootstrapOutput` and the `BootstrapHealthSummary` type entirely (only the local test references it; no external consumer).
+- `internal/mcpserver/tool_bootstrap_test.go` — drop `LatestHealth` field assertions; drop "Current session health" markdown-omission assertion.
+- `internal/mcpserver/slashcommands/bootstrap.md` — frontmatter description and body section list drop "latest health verdict" / "current session health".
+- `internal/mcpserver/slashcommands.go` — `InstallSlashCommands` gains a final pass that removes `.md` files in the destination dir that are no longer in the embed FS, so retiring `tokens.md`/`health.md` actually removes them on the next `klyne mcp install`.
+- `internal/mcpserver/slashcommands_test.go` — add a test for the new cleanup behaviour.
 
 **Delete**
 - `internal/mcpserver/slashcommands/health.md`
