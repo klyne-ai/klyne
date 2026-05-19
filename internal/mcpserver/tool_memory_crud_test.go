@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -304,5 +305,20 @@ func TestInstructions_PostRemember_ShowsRunbookTitle(t *testing.T) {
 
 	if !strings.Contains(got, "for labstack changes we have four working dirs") {
 		t.Errorf("instructions missing remembered runbook title; got:\n%s", got)
+	}
+
+	// Tighten: confirm the rendered project heading includes the
+	// canonicalised cwd. A regression that dropped projectpath.Canonical
+	// from buildServerInstructions (or that swapped fetchProject's
+	// cwd arg) would slip past the body-only assertion above.
+	wantHeading := fmt.Sprintf("# Project runbooks (path: %s)", canonical)
+	if !strings.Contains(got, wantHeading) {
+		t.Errorf("instructions missing canonical project heading %q; got:\n%s", wantHeading, got)
+	}
+
+	// And confirm the directive header is present — protects against a
+	// future refactor that broke renderDirective wiring.
+	if !strings.Contains(got, "klyne tracks runbooks for this project") {
+		t.Errorf("instructions missing directive header; got:\n%s", got)
 	}
 }

@@ -156,3 +156,25 @@ func TestBuild_EmptyCwd_GlobalsOnly(t *testing.T) {
 		t.Errorf("project-scoped row leaked under empty cwd; got:\n%s", got)
 	}
 }
+
+func TestBuild_ProjectOnly_NoGlobalSection(t *testing.T) {
+	db := openTempDB(t)
+	cwd := "/repo/svc-c"
+
+	seed(t, db, "d-p1", cwd, "project-only runbook")
+
+	got := Build(context.Background(), cwd, db)
+	if got == "" {
+		t.Fatal("expected non-empty instructions, got empty string")
+	}
+
+	if !strings.Contains(got, "# Project runbooks (path: /repo/svc-c)") {
+		t.Errorf("missing project heading; got:\n%s", got)
+	}
+	if !strings.Contains(got, "d-p1  project-only runbook") {
+		t.Errorf("missing project row; got:\n%s", got)
+	}
+	if strings.Contains(got, "# Global runbooks") {
+		t.Errorf("global section should be omitted when no globals exist; got:\n%s", got)
+	}
+}
