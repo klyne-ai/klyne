@@ -18,12 +18,13 @@ AI coding tools already write the truth to disk: messages, tool calls, file read
 
 Use it when the AI loses the thread:
 
-| Broken moment | klyne action | Result |
+| What you want to know | klyne action | Result |
 |---|---|---|
+| "What did I ship this week across Claude AND Codex?" | `/klyne:reflect` | Worklog auto-captures each session (importance-scored, event-tagged); reflection synthesises 3–5 dated insights with mandatory citations back to source sessions. Uses your Claude subscription — no extra API key. |
+| Active session is burning context or cache badly | `/klyne:status` | Health verdict + recommended action + token timeline + bloat sources in one Markdown payload |
+| Starting fresh and need yesterday's context | `/klyne:bootstrap` | Day-1 brief: recent sessions, runbooks (project + global), reflections, and cross-AI worklog entries — synthesised in one call |
 | `/compact` buried the exact path, command, or decision | `/klyne:precompact` | Original pre-compact turns from JSONL |
-| A task must continue in a fresh Claude/Codex session | `/klyne:handoff` | Touched files, commands, failures, and recent context |
-| A session starts burning context or cache badly | `/klyne:status` | Health verdict + recommended action + token timeline + bloat sources in one view |
-| A procedure should survive future chats | `klyne remember this ...` | Stores a local project/global runbook that klyne recalls automatically before risky shell commands (or on demand with `refer klyne ...`) |
+| Need to pick between parallel sessions in this project | `/klyne:sessions` | Every Claude + Codex session for the cwd's project, with previews and active flag |
 
 Four surfaces, one local engine:
 
@@ -42,11 +43,11 @@ Each row maps to a walkthrough with real output in [`docs/FEATURES.md`](docs/FEA
 
 | Real situation | What klyne found on disk | CTA |
 |---|---|---|
-| `oms-service` debug session compacted three times | Last boundary: **793,401 tokens -> 9,002** | Run `/klyne:precompact` |
-| README/video work had to survive a fresh chat | Handoff found touched files, commands, failures, and recent turns | Run `/klyne:handoff` |
-| Agent work hid its true spend | One session spawned **31 subagents** and rolled up **201M input tokens** | Run `klyne subagents --since=168h` |
-| Service note must be reused safely | Runbooks store project/global ops-annotations in `~/.klyne/klyne.db` and klyne consults them before risky shell commands | Say `klyne remember this ...`; klyne recalls automatically (or `refer klyne ...` on demand) |
-| Session drift starts before you notice | Advisor checks stale files, acceleration, plan-window burn, and hard ceiling | Let the hook warn once per state change |
+| "What did I work on this week, across every AI tool?" | A week of worklog entries auto-written by the Stop hook — Claude + Codex sessions interleaved, each scored 1–10 and tagged with event fingerprints (commit landed, decision recorded, security-relevant file touched, etc.); reflection synthesises them into dated insights cited back to the source sessions | Run `/klyne:reflect` |
+| Active session feels off — burning cache, getting stale, drifting | Health verdict (`healthy / drifting / risky / rescue_now`) + recommended action + per-turn token trajectory + the exact bloat sources eating the prefix | Run `/klyne:status` |
+| Fresh chat with no memory of what was happening here | Last 3 sessions, top 5 project runbooks + global preview, recent reflections, and cross-AI worklog entries — synthesised into a single brief | Run `/klyne:bootstrap` |
+| `oms-service` debug session compacted three times | Last boundary: **793,401 tokens → 9,002** (88× compression). The original turns are still on disk in JSONL — klyne reads them back | Run `/klyne:precompact` |
+| Multiple parallel sessions in this project — which one is active? | Every Claude + Codex session for the cwd, with first-user-message previews and a 30-second "is_active" flag | Run `/klyne:sessions` |
 
 ---
 
