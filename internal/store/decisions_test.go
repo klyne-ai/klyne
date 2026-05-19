@@ -140,6 +140,41 @@ func TestDeleteDecision(t *testing.T) {
 	}
 }
 
+func TestListGlobalDecisions(t *testing.T) {
+	db := openDecisionsDB(t)
+
+	must := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Seed 2 globals + 3 project-scoped + 1 different-project.
+	must(store.InsertDecision(context.Background(), db, &store.Decision{ID: "g1", Ts: 100, ProjectPath: "", Text: "global one"}))
+	must(store.InsertDecision(context.Background(), db, &store.Decision{ID: "g2", Ts: 200, ProjectPath: "", Text: "global two"}))
+	must(store.InsertDecision(context.Background(), db, &store.Decision{ID: "p1", Ts: 300, ProjectPath: "/repo/a", Text: "project a"}))
+	must(store.InsertDecision(context.Background(), db, &store.Decision{ID: "p2", Ts: 400, ProjectPath: "/repo/a", Text: "project a"}))
+	must(store.InsertDecision(context.Background(), db, &store.Decision{ID: "p3", Ts: 500, ProjectPath: "/repo/b", Text: "project b"}))
+
+	got, err := store.ListGlobalDecisions(context.Background(), db, 50)
+	must(err)
+
+	if len(got) != 2 {
+		t.Fatalf("want 2 globals, got %d", len(got))
+	}
+	// Newest-first.
+	if got[0].ID != "g2" || got[1].ID != "g1" {
+		t.Errorf("ordering wrong: got %s, %s", got[0].ID, got[1].ID)
+	}
+	// No project-scoped rows leaked.
+	for _, d := range got {
+		if d.ProjectPath != "" {
+			t.Errorf("project-scoped row leaked: %+v", d)
+		}
+	}
+}
+
 func TestInsertDecision_RequiresIDAndText(t *testing.T) {
 	ctx := context.Background()
 	db := openDecisionsDB(t)
