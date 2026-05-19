@@ -48,6 +48,7 @@ func TestMigrationsApply(t *testing.T) {
 		"014_work_spans.sql",            // cost-per-outcome work-span attribution
 		"015_worklog_columns.sql",       // worklog memory-layer columns on stop_summaries
 		"016_worklog_reflections.sql",   // reflection layer (Generative Agents pattern) w/ citation invariant
+		"017_git_dashboard.sql",         // AI productivity dashboard tables (git_session_snapshots, dashboard_cache)
 	}
 	if len(sqlFiles) != len(expected) {
 		t.Fatalf("expected %d migrations, found %d: %v", len(expected), len(sqlFiles), sqlFiles)
@@ -146,6 +147,47 @@ func TestMigration016CreatesReflectionsTable(t *testing.T) {
 	for _, c := range expected {
 		if !have[c] {
 			t.Errorf("missing column %q on worklog_reflections", c)
+		}
+	}
+}
+
+// TestMigration017CreatesDashboardTables asserts that migration 017
+// creates the two AI productivity dashboard tables with their full
+// column sets (spec §5). The session-end capture that writes
+// git_session_snapshots is a documented prototype stub (spec §11) — the
+// table must still exist so the follow-up can populate it.
+func TestMigration017CreatesDashboardTables(t *testing.T) {
+	t.Parallel()
+
+	db := newTestDB(t)
+	applyAll(t, db, nil)
+
+	snapCols := []string{
+		"id", "session_id", "project_path", "repo_name", "worktree_path",
+		"branch", "head_sha", "ahead_count", "behind_count",
+		"dirty_file_count", "dirty_files_json", "captured_at",
+	}
+	have := columnSet(t, db, "git_session_snapshots")
+	if len(have) == 0 {
+		t.Fatal("git_session_snapshots table not created")
+	}
+	for _, c := range snapCols {
+		if !have[c] {
+			t.Errorf("missing column %q on git_session_snapshots", c)
+		}
+	}
+
+	cacheCols := []string{
+		"id", "day", "repo_name", "branch", "cache_key",
+		"payload_json", "model", "generated_at",
+	}
+	haveCache := columnSet(t, db, "dashboard_cache")
+	if len(haveCache) == 0 {
+		t.Fatal("dashboard_cache table not created")
+	}
+	for _, c := range cacheCols {
+		if !haveCache[c] {
+			t.Errorf("missing column %q on dashboard_cache", c)
 		}
 	}
 }
