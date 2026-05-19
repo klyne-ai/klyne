@@ -15,7 +15,7 @@ Each slash command calls one MCP tool and prints the tool's `markdown` field byt
 
 | Slash command | MCP tool | What it does | Detail |
 |---|---|---|---|
-| `/klyne:bootstrap` | `bootstrap` | Day-1 session brief: recent sessions, project + global memories, latest session's context-health verdict | [bootstrap.md](./bootstrap.md) |
+| `/klyne:bootstrap` | `bootstrap` | Day-1 session brief: recent sessions, klyne runbooks, Claude auto-memory, recent reflections, cross-AI worklog entries, current session health | [bootstrap.md](./bootstrap.md) |
 | `/klyne:handoff` | `generate_handoff` | Deterministic handoff prompt for a fresh session | [handoff.md](./handoff.md) |
 | `/klyne:health` | `get_context_health` | Verdict (healthy / drifting / risky / rescue_now) + top bloat sources | [context-health.md](./context-health.md) |
 | `/klyne:precompact` | `get_pre_compact_context` | Messages from immediately before the last `/compact` | [pre-compact-recovery.md](./pre-compact-recovery.md) |

@@ -1,6 +1,6 @@
 <!--
   Inspector — right panel detailing the currently-selected project.
-  Shows headline stats, recent sessions list, and per-project memories.
+  Shows headline stats, recent sessions list, and per-project runbooks.
 -->
 <script lang="ts">
   import { onMount } from 'svelte';

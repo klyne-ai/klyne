@@ -1,4 +1,4 @@
-# Web cockpit — 3-tab shell at `http://127.0.0.1:7878`
+# Web cockpit — 4-tab shell at `http://127.0.0.1:7878`
 
 > Status: shipped. Local-only HTTP server bound to `127.0.0.1`. No remote calls. Started by `klyne start` (or just `klyne`).
 
@@ -6,12 +6,13 @@ The web cockpit is the browser-side surface on the same local engine that powers
 
 ## Shell
 
-Three-tab top nav. Search lives behind the `/` keyboard overlay, not as a route.
+Four-tab top nav. Search lives behind the `/` keyboard overlay, not as a route.
 
 | Tab | Primary view | Deep-link surfaces |
 |---|---|---|
 | **Work** | `/` — live operational view: running sessions, projects, recent activity | `/cockpit` (SSE tile grid), `/projects` · `/projects/[name]`, `/sessions/[id]`, `/advisors` |
-| **Memory** | `/memory` — project + global memories grouped by service | — |
+| **Runbooks** | `/runbooks` — project + global runbooks grouped by service (pre-execution-recall surface) | — |
+| **Worklog** | `/worklog` — per-session reflections | — |
 | **Insights** | `/insights` — project-centric, subscription-aware metrics | `/stats` (Overview / Models / Daily / Stats tabs, GitHub-style heatmap, models-by-cost, streaks) |
 
 ## Surfaces by route
@@ -22,7 +23,7 @@ Three-tab top nav. Search lives behind the `/` keyboard overlay, not as a route.
 | `/cockpit` | Live SSE-streaming grid; one tile per active session, latest 10 messages tail |
 | `/projects` · `/projects/[name]` | Project hub + per-project drill-down (sessions, files, decisions) |
 | `/sessions/[id]` | Full session detail — every message, every tool call, token timeline |
-| `/memory` | Project + global memories grouped by service ([memory.md](./memory.md)) |
+| `/runbooks` | Project + global runbooks grouped by service ([runbooks.md](./runbooks.md)) |
 | `/insights` | Project-centric subscription-aware metrics |
 | `/stats` | Tokens-per-day, models-by-cost, activity heatmap ([stats-dashboard.md](./stats-dashboard.md)) |
 | `/advisors` | Per-session advisor state — which triggers fired and when ([proactive-session-advisor.md](./proactive-session-advisor.md)) |

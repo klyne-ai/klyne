@@ -25,7 +25,7 @@ const bootstrapReflectionTriggerThreshold = 150
 // Bootstrap tool
 // ==============
 // Serena-inspired session-bootstrap brief. Synthesises klyne's existing
-// per-project data — recent sessions, project + global memories, and the
+// per-project data — recent sessions, project + global runbooks, and the
 // most-recent session's context-health verdict — into ONE deterministic
 // briefing the agent can fetch at session start. Pure JSONL + SQLite
 // reads; no AI calls, no network.
@@ -42,9 +42,9 @@ const bootstrapReflectionTriggerThreshold = 150
 const bootstrapRecentSessions = 3
 
 // bootstrapProjectMemoryLimit and bootstrapGlobalMemoryPreview cap the
-// memory rows surfaced in the brief. Project memories are the more
-// immediately useful set; globals get a preview + a count so the agent
-// knows the rest exists and can `recall` for them on demand.
+// runbook rows surfaced in the brief. Project-scoped runbooks are the
+// more immediately useful set; globals get a preview + a count so the
+// agent knows the rest exists and can `recall` for them on demand.
 const (
 	bootstrapProjectMemoryLimit  = 5
 	bootstrapGlobalMemoryPreview = 3
@@ -82,7 +82,7 @@ type BootstrapOutput struct {
 	CWD                   string                  `json:"cwd" jsonschema:"the working directory that was searched"`
 	Sessions              []CandidateRow          `json:"sessions" jsonschema:"up to 3 most-recent sessions in this project, newest first"`
 	ProjectMemories       []store.Decision        `json:"project_memories" jsonschema:"up to 5 most-recent project-scoped klyne (SQLite) memories"`
-	GlobalMemoryCount     int                     `json:"global_memory_count" jsonschema:"total global klyne memory count (project_path = \"\")"`
+	GlobalMemoryCount     int                     `json:"global_memory_count" jsonschema:"total global runbook count (project_path = \"\")"`
 	GlobalMemoriesPreview []store.Decision        `json:"global_memories_preview" jsonschema:"up to 3 most-recent global klyne (SQLite) memories"`
 	ClaudeAutoMemory      ClaudeAutoMemory        `json:"claude_auto_memory" jsonschema:"on-disk Claude auto-memory for this project (~/.claude/projects/<encoded-cwd>/memory/) — separate store, separate writer"`
 	LatestHealth          *BootstrapHealthSummary `json:"latest_health,omitempty" jsonschema:"context-health verdict for the most-recently modified session, when one exists"`
@@ -163,7 +163,7 @@ func HandleBootstrap(ctx context.Context, _ *mcp.CallToolRequest, in BootstrapIn
 		Limit:       bootstrapProjectMemoryLimit,
 	})
 	if err != nil {
-		return nil, BootstrapOutput{}, fmt.Errorf("list project memories: %w", err)
+		return nil, BootstrapOutput{}, fmt.Errorf("list project runbooks: %w", err)
 	}
 	out.ProjectMemories = projectMemories
 
@@ -315,27 +315,26 @@ func formatBootstrapAsMarkdown(out BootstrapOutput) string {
 		b.WriteString("\n")
 	}
 
-	// --- klyne memory (SQLite store) -------------------------------
-	b.WriteString("## klyne memory (SQLite store)\n\n")
-	b.WriteString("### Project-scoped\n\n")
-	if len(out.ProjectMemories) == 0 {
+	// --- klyne runbooks (user-level, SQLite store) -----------------
+	// Flattened: runbooks are user-level annotations, scope (project /
+	// global) is a per-entry detail, not a top-level structure. Rows
+	// carry their scope as a small tag so the user still sees which
+	// will fire in which cwd.
+	b.WriteString("## klyne runbooks\n\n")
+	hasProject := len(out.ProjectMemories) > 0
+	hasGlobal := out.GlobalMemoryCount > 0
+	if !hasProject && !hasGlobal {
 		b.WriteString("_(none)_\n\n")
 	} else {
 		for _, d := range out.ProjectMemories {
-			fmt.Fprintf(&b, "- %s\n", oneLine(d.Text))
+			fmt.Fprintf(&b, "- `[project]` %s\n", oneLine(d.Text))
 		}
-		b.WriteString("\n")
-	}
-	b.WriteString("### Global\n\n")
-	if out.GlobalMemoryCount == 0 {
-		b.WriteString("_(none)_\n\n")
-	} else {
 		for _, d := range out.GlobalMemoriesPreview {
-			fmt.Fprintf(&b, "- %s\n", oneLine(d.Text))
+			fmt.Fprintf(&b, "- `[global]` %s\n", oneLine(d.Text))
 		}
 		remaining := out.GlobalMemoryCount - len(out.GlobalMemoriesPreview)
 		if remaining > 0 {
-			fmt.Fprintf(&b, "- _(+%d more — call `recall` to see them)_\n", remaining)
+			fmt.Fprintf(&b, "- _(+%d more global — call `recall` to see them)_\n", remaining)
 		}
 		b.WriteString("\n")
 	}

@@ -117,7 +117,7 @@ When the user has configured a plan tier (klyne config set plan <tier>), the res
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "bootstrap",
-		Description: `Day-1 session briefing: recent sessions, project + global memories, and the latest session's context-health verdict, all in one call.
+		Description: `Day-1 session briefing: recent sessions, klyne runbooks (project + global), Claude auto-memory, recent reflections, cross-AI worklog entries, and the latest session's context-health verdict — all in one call.
 
 Call at session start when you have no prior context for this project, or when the user asks "what was I working on?" / "where did I leave off?". Pure JSONL + SQLite reads — no AI calls. Render the response's markdown field verbatim.`,
 	}, HandleBootstrap)
