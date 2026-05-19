@@ -4,18 +4,19 @@
   import { fetchSessions, deleteSession, fetchMessages } from '$lib/api.js';
   import { projectsStore, refreshProjects } from '$lib/projects.svelte.js';
   import { removeSession } from '$lib/stores.svelte.js';
-  import { kfmt, relAgo, dayLabel, costFmt } from '$lib/format.js';
-  import type { Session, Message } from '$lib/types.js';
+  import { kfmt, dayLabel, costFmt } from '$lib/format.js';
+  import type { Session } from '$lib/types.js';
   import { isConversationalMessage } from '$lib/messageFilters.js';
   import CliBadge from '$lib/ui/CliBadge.svelte';
   import StatusBadge from '$lib/ui/StatusBadge.svelte';
   import { sessionHref } from '$lib/navlinks.js';
 
-  let {
-    projectName,
-    basePath = '',
-    backHref = '/projects',
-  }: { projectName: string; basePath?: string; backHref?: string } = $props();
+  interface Props {
+    projectName: string;
+    basePath?: string;
+    backHref?: string;
+  }
+  const { projectName, basePath = '', backHref = '/projects' }: Props = $props();
 
   const project = $derived(
     projectsStore.items.find((p) => p.name === projectName) ?? null
