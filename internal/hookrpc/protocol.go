@@ -58,10 +58,12 @@ func SocketPath() string {
 const HookConnectTimeout = 200 * time.Millisecond
 
 // HookCallTimeout bounds the total roundtrip (write request + read
-// response) once a connection is established. 2 seconds covers every
-// real hook handler with margin; longer responses indicate a wedged
-// daemon and should fall back to exec.
-const HookCallTimeout = 2 * time.Second
+// response) once a connection is established. 6 seconds covers the
+// session-end handler's own 5s ceiling with margin; lighter handlers
+// (pretool/advise/precompact) finish in well under 100ms either way.
+// Longer responses indicate a wedged daemon and should fall back to
+// exec.
+const HookCallTimeout = 6 * time.Second
 
 // Event identifies which Claude Code hook event the stub is forwarding.
 // The daemon's dispatch table maps each value to the matching handler
@@ -85,17 +87,18 @@ var AllEvents = []Event{
 	EventSessionEnd,
 }
 
-// DaemonRoutedEvents enumerates the events the v1 daemon actually
-// handles in-process. session-end is intentionally excluded for now:
-// its compute path includes ~380 LOC of summary + worklog logic that
-// hasn't been hoisted out of cmd/klyne yet, so klyne-hook continues
-// to exec the full binary for that event. The stub falls back
-// transparently; users see no behavior change beyond the SIGKILL
-// elimination for the three routed events.
+// DaemonRoutedEvents enumerates the events the daemon handles
+// in-process. All four Claude Code hook events now route through the
+// daemon when it is reachable; the session-end handler lives in
+// internal/hooks/sessionend.go alongside the other three. The stub
+// still falls back to exec'ing the full binary when the daemon socket
+// is missing or unresponsive — but that fallback emits a visible
+// warning so users notice the daemon needs to be started.
 var DaemonRoutedEvents = map[Event]bool{
 	EventPreTool:    true,
 	EventAdvise:     true,
 	EventPreCompact: true,
+	EventSessionEnd: true,
 }
 
 // Request is the single JSON object the stub sends per connection.

@@ -43,8 +43,11 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"syscall"
+	"time"
 
+	"github.com/klyne-ai/klyne/internal/config"
 	"github.com/klyne-ai/klyne/internal/hookrpc"
 )
 
@@ -101,6 +104,12 @@ func main() {
 		// to fallback — better to spawn the heavy binary than fail
 		// the hook silently.
 		if errors.Is(callErr, hookrpc.ErrDaemonUnavailable) {
+			// Emit a throttled, user-visible warning so the user
+			// knows the daemon needs to start. Silently falling back
+			// to the heavy exec means jetsam kills the subprocess on
+			// memory-pressured machines and the user sees a generic
+			// "non-blocking status code" error with no path forward.
+			warnDaemonDownIfNeeded()
 			exitViaFallback(event, payload, nil)
 		}
 		exitViaFallback(event, payload, callErr)
@@ -188,10 +197,7 @@ func findFallbackBinary() string {
 }
 
 // dirName returns p's directory portion including the trailing
-// separator. Reimplemented without importing path/filepath so the
-// final klyne-hook binary stays as small as possible — every
-// imported package adds to the on-disk and resident size that we're
-// trying to minimize.
+// separator.
 func dirName(p string) string {
 	for i := len(p) - 1; i >= 0; i-- {
 		if p[i] == '/' || p[i] == '\\' {
@@ -199,6 +205,50 @@ func dirName(p string) string {
 		}
 	}
 	return ""
+}
+
+// daemonDownWarningInterval is the minimum gap between consecutive
+// "daemon not running" warnings written to stderr. Hooks fire on every
+// tool use / prompt submit / compact / stop; without throttling the
+// terminal would flood. 15 minutes is short enough that the user sees
+// the warning soon after the daemon goes down, long enough that the
+// signal stays useful.
+const daemonDownWarningInterval = 15 * time.Minute
+
+// daemonDownSentinelName is the basename of the file we touch to track
+// the last warning's timestamp. Lives next to the hook socket in
+// config.ConfigDir() so it's tied to the daemon's lifecycle.
+const daemonDownSentinelName = "daemon-down-warned-at"
+
+// warnDaemonDownIfNeeded writes a one-shot, throttled stderr line
+// telling the user the klyne daemon isn't running and how to start it.
+// Throttled via a sentinel file in config.ConfigDir(); if the sentinel
+// is missing or older than daemonDownWarningInterval, write the
+// warning and touch the file. Best-effort — any I/O failure is
+// swallowed because hooks must never block.
+func warnDaemonDownIfNeeded() {
+	sentinel := filepath.Join(config.ConfigDir(), daemonDownSentinelName)
+	if info, err := os.Stat(sentinel); err == nil {
+		if time.Since(info.ModTime()) < daemonDownWarningInterval {
+			return
+		}
+	}
+	fmt.Fprintln(os.Stderr,
+		"klyne: daemon not reachable. Start it with `klyne start` "+
+			"to enable jetsam-safe hook handling. Without the daemon, "+
+			"hook events spawn the full ~22MB klyne binary which the "+
+			"kernel may kill under memory pressure (you'll see "+
+			"\"Failed with non-blocking status code\" errors). Run "+
+			"`klyne start` once in any terminal — it backgrounds itself.")
+	// Touch the sentinel so we don't repeat for the throttle interval.
+	// MkdirAll handles the first-ever run where ~/.klyne doesn't exist yet.
+	if err := os.MkdirAll(filepath.Dir(sentinel), 0o700); err != nil {
+		return
+	}
+	f, err := os.Create(sentinel)
+	if err == nil {
+		_ = f.Close()
+	}
 }
 
 // bytesReader is a one-shot io.Reader over a []byte. exec.Cmd needs

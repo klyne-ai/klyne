@@ -58,9 +58,10 @@ func (a *App) startHookServer(ctx context.Context) error {
 			res := hooks.Advise(ctx, bytes.NewReader(req.Payload), req.Cwd)
 			return res.Stdout, res.Stderr, res.ExitCode, nil
 		},
-		// session-end intentionally absent in v1 — its compute path
-		// hasn't been hoisted into internal/hooks yet. The stub falls
-		// back to exec'ing the full klyne binary for that event.
+		hookrpc.EventSessionEnd: func(ctx context.Context, req hookrpc.Request) ([]byte, []byte, int, error) {
+			res := hooks.SessionEnd(ctx, bytes.NewReader(req.Payload), a.db)
+			return res.Stdout, res.Stderr, res.ExitCode, nil
+		},
 	}
 
 	// Inject the daemon's open DB so hook handlers reuse the
