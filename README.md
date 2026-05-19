@@ -24,7 +24,6 @@ Use it when the AI loses the thread:
 | Active session is burning context or cache badly | `/klyne:status` | Health verdict + recommended action + token timeline + bloat sources in one Markdown payload |
 | Starting fresh and need yesterday's context | `/klyne:bootstrap` | Day-1 brief: recent sessions, runbooks (project + global), reflections, and cross-AI worklog entries — synthesised in one call |
 | `/compact` buried the exact path, command, or decision | `/klyne:precompact` | Original pre-compact turns from JSONL |
-| Need to pick between parallel sessions in this project | `/klyne:sessions` | Every Claude + Codex session for the cwd's project, with previews and active flag |
 
 Four surfaces, one local engine:
 
@@ -47,7 +46,6 @@ Each row maps to a walkthrough with real output in [`docs/FEATURES.md`](docs/FEA
 | Active session feels off — burning cache, getting stale, drifting | Health verdict (`healthy / drifting / risky / rescue_now`) + recommended action + per-turn token trajectory + the exact bloat sources eating the prefix | Run `/klyne:status` |
 | Fresh chat with no memory of what was happening here | Last 3 sessions, top 5 project runbooks + global preview, recent reflections, and cross-AI worklog entries — synthesised into a single brief | Run `/klyne:bootstrap` |
 | `oms-service` debug session compacted three times | Last boundary: **793,401 tokens → 9,002** (88× compression). The original turns are still on disk in JSONL — klyne reads them back | Run `/klyne:precompact` |
-| Multiple parallel sessions in this project — which one is active? | Every Claude + Codex session for the cwd, with first-user-message previews and a 30-second "is_active" flag | Run `/klyne:sessions` |
 
 ---
 
