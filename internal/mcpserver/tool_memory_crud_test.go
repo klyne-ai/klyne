@@ -8,6 +8,9 @@ import (
 	"testing"
 
 	"github.com/klyne-ai/klyne/internal/config"
+	"github.com/klyne-ai/klyne/internal/mcpserver/instructions"
+	"github.com/klyne-ai/klyne/internal/projectpath"
+	"github.com/klyne-ai/klyne/internal/store"
 )
 
 // withFakeHomeAndConfigDir redirects HOME and pre-creates the ~/.klyne
@@ -269,5 +272,37 @@ func TestDeriveMemoryName_TruncatesAtRunes(t *testing.T) {
 	}
 	if got != strings.Repeat("a", 60)+"…" {
 		t.Errorf("unexpected: %q", got)
+	}
+}
+
+// TestInstructions_PostRemember_ShowsRunbookTitle is the end-to-end
+// wiring check: storing a runbook via HandleRememberMemory and then
+// calling instructions.Build must surface the new runbook's first
+// line. Protects three things at once: HandleRememberMemory's
+// canonical-path resolution, store persistence, and the
+// instructions package's read path.
+func TestInstructions_PostRemember_ShowsRunbookTitle(t *testing.T) {
+	withFakeHomeAndConfigDir(t)
+
+	cwd := t.TempDir()
+	_, _, err := HandleRememberMemory(context.Background(), nil, RememberMemoryInput{
+		Text: "for labstack changes we have four working dirs",
+		CWD:  cwd,
+	})
+	if err != nil {
+		t.Fatalf("HandleRememberMemory: %v", err)
+	}
+
+	db, err := store.Open(context.Background(), config.DBPath())
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	defer db.Close()
+
+	canonical := projectpath.Canonical(cwd)
+	got := instructions.Build(context.Background(), canonical, db)
+
+	if !strings.Contains(got, "for labstack changes we have four working dirs") {
+		t.Errorf("instructions missing remembered runbook title; got:\n%s", got)
 	}
 }
