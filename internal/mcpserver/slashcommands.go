@@ -81,11 +81,13 @@ func InstallSlashCommands() (*SlashCommandsReport, error) {
 
 	rewroteAny := false
 	written := 0
+	embedded := make(map[string]struct{}, len(entries))
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
 		}
 		name := entry.Name()
+		embedded[name] = struct{}{}
 		content, err := fs.ReadFile(slashCommandsFS, "slashcommands/"+name)
 		if err != nil {
 			return nil, fmt.Errorf("read embedded %s: %w", name, err)
@@ -106,6 +108,33 @@ func InstallSlashCommands() (*SlashCommandsReport, error) {
 		}
 		rewroteAny = true
 		written++
+	}
+
+	// Cleanup pass: remove any .md file in the destination that is no
+	// longer in the embed FS. This is how retiring a slashcommand
+	// (deleting its file under slashcommands/) actually propagates to
+	// the user's ~/.claude/commands/klyne/ directory on the next
+	// `klyne mcp install`. Conservative — only top-level .md files are
+	// considered; subdirectories and other extensions are left alone.
+	destEntries, err := os.ReadDir(dest)
+	if err != nil {
+		return nil, fmt.Errorf("read dest dir %s: %w", dest, err)
+	}
+	for _, de := range destEntries {
+		if de.IsDir() {
+			continue
+		}
+		name := de.Name()
+		if filepath.Ext(name) != ".md" {
+			continue
+		}
+		if _, ok := embedded[name]; ok {
+			continue
+		}
+		if err := os.Remove(filepath.Join(dest, name)); err != nil {
+			return nil, fmt.Errorf("remove stale %s: %w", name, err)
+		}
+		rewroteAny = true
 	}
 
 	action := InstallActionAlreadyInstalled
