@@ -3,7 +3,7 @@
 
   Tabs:
     Work     (replaces Dashboard + Cockpit + Projects)
-    Memory   (decisions / runbooks review)
+    Runbooks (decision / ops-annotation review; the recall surface)
     Worklog  (stop_summaries audit — signal vs suppressed)
     Insights (project-centric subscription-aware metrics)
 
@@ -27,7 +27,7 @@
 
   const tabs = [
     { id: 'work',     label: 'Work',     path: '/' },
-    { id: 'memory',   label: 'Memory',   path: '/memory' },
+    { id: 'runbooks', label: 'Runbooks', path: '/runbooks' },
     { id: 'worklog',  label: 'Worklog',  path: '/worklog' },
     { id: 'insights', label: 'Insights', path: '/insights' }
   ] as const;
@@ -38,7 +38,7 @@
     // match both.
     if (p.startsWith('/worklog')) return 'worklog';
     if (p === '/' || p.startsWith('/work') || p.startsWith('/cockpit') || p.startsWith('/projects') || p.startsWith('/sessions')) return 'work';
-    if (p.startsWith('/memory')) return 'memory';
+    if (p.startsWith('/runbooks')) return 'runbooks';
     if (p.startsWith('/insights') || p.startsWith('/stats')) return 'insights';
     return '';
   }

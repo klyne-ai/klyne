@@ -25,14 +25,14 @@ Use it when the AI loses the thread:
 | `/compact` buried the exact path, command, or decision | `/klyne:precompact` | Original pre-compact turns from JSONL |
 | A task must continue in a fresh Claude/Codex session | `/klyne:handoff` | Touched files, commands, failures, and recent context |
 | A session starts burning context or cache badly | `/klyne:health` / `/klyne:tokens` | Context health, token timeline, cache reuse, and plan-window burn |
-| A procedure should survive future chats | `klyne remember this ...` | Local project/global memory recalled later with `refer klyne ...` |
+| A procedure should survive future chats | `klyne remember this ...` | Stores a local project/global runbook that klyne recalls automatically before risky shell commands (or on demand with `refer klyne ...`) |
 
 Four surfaces, one local engine:
 
 - **MCP server** — Claude Code & Codex CLI can call klyne mid-session.
 - **Proactive advisor** — Claude Code hook warns before the next prompt makes the session worse.
-- **Web cockpit** — `http://127.0.0.1:7878`. Three-tab shell — **Work** (live sessions, projects, compact), **Memory** (project/global notes), **Insights** (token spend, models, heatmap). `/` opens a global search overlay.
-- **Memory** — chat-first project/global notes stored locally and visible at `/memory`.
+- **Web cockpit** — `http://127.0.0.1:7878`. Four-tab shell — **Work** (live sessions, projects, compact), **Runbooks** (project/global ops-annotations consulted before risky shell commands), **Worklog** (per-session reflections), **Insights** (token spend, models, heatmap). `/` opens a global search overlay.
+- **Runbooks** — chat-first project/global ops-annotations stored locally and visible at `/runbooks`. The hero behaviour is **pre-execution recall**: Claude consults a stored runbook before running operational shell commands.
 
 > **Real maintainer machine, 30 days:** 222 sessions, 84,074 messages, 11.7B input tokens, 97 % cache reuse, $27.0K in priced model compute, and one `oms-service` compact event that shrank 793K tokens to 9K (88x). `klyne audit-sessions` checked stored stats against raw JSONL: **17/17 ✓ (100 %)**.
 
@@ -47,7 +47,7 @@ Each row maps to a walkthrough with real output in [`docs/FEATURES.md`](docs/FEA
 | `oms-service` debug session compacted three times | Last boundary: **793,401 tokens -> 9,002** | Run `/klyne:precompact` |
 | README/video work had to survive a fresh chat | Handoff found touched files, commands, failures, and recent turns | Run `/klyne:handoff` |
 | Agent work hid its true spend | One session spawned **31 subagents** and rolled up **201M input tokens** | Run `klyne subagents --since=168h` |
-| Service note must be reused safely | Memory stores project/global notes in `~/.klyne/klyne.db` | Say `klyne remember this ...`, then `refer klyne ...` |
+| Service note must be reused safely | Runbooks store project/global ops-annotations in `~/.klyne/klyne.db` and klyne consults them before risky shell commands | Say `klyne remember this ...`; klyne recalls automatically (or `refer klyne ...` on demand) |
 | Session drift starts before you notice | Advisor checks stale files, acceleration, plan-window burn, and hard ceiling | Let the hook warn once per state change |
 
 ---
@@ -144,7 +144,7 @@ Four surfaces sharing one local engine:
 flowchart LR
   A["Claude Code JSONL<br/>~/.claude/projects"] -->|"read-only"| E["klyne local engine"]
   B["Codex JSONL<br/>~/.codex/sessions"] -->|"read-only"| E
-  E --> M["MCP tools<br/>health, search, handoff, precompact, memory"]
+  E --> M["MCP tools<br/>health, search, handoff, precompact, runbooks"]
   E --> W["Web cockpit<br/>127.0.0.1:7878"]
   E --> H["Claude hook<br/>klyne advise"]
   E --> DB["SQLite<br/>~/.klyne/klyne.db"]
@@ -166,15 +166,15 @@ flowchart LR
 
 | Tool | What it solves |
 |---|---|
-| `bootstrap` | Day-1 session brief: last 3 sessions + last 5 project memories + global preview + latest context-health verdict — synthesized in one call so a fresh session has cross-session context on turn 1 |
+| `bootstrap` | Day-1 session brief: last 3 sessions + last 5 project runbooks + global preview + latest context-health verdict — synthesized in one call so a fresh session has cross-session context on turn 1 |
 | `list_sessions` | Enumerate Claude + Codex sessions in this project |
 | `get_context_health` | Classify a session as `healthy` / `drifting` / `risky` / `rescue_now` + bloat scorecard |
 | `generate_handoff` | Deterministic Markdown handoff; optional `scope=current-topic` |
 | `get_pre_compact_context` | Recover messages from before the last `/compact` |
 | `get_token_timeline` | Per-turn token usage — sparkline + table + heatmap, cached vs uncached split |
 | `record_decision` / `list_decisions` / `search_decisions` | Project-scoped immutable decisions log |
-| `remember` / `recall` | Chat-first memory: project/global notes that survive across fresh sessions |
-| `update_memory` / `delete_memory` / `list_memories` | Edit, delete, and browse memories by id — full CRUD parity with derived display names |
+| `remember` / `recall` | Chat-first runbooks: project/global ops-annotations that survive across fresh sessions; `recall` fires automatically before risky shell commands per the CLAUDE.md rule |
+| `update_memory` / `delete_memory` / `list_memories` | Edit, delete, and browse runbooks by id — full CRUD parity with derived display names. (Tool IDs keep their `_memory` suffix for back-compat.) |
 | `code_review_context` | Optional `.code-review-graph/` enrichment when present |
 | `recap_project` | Cross-AI worklog: visible session-end entries for one project in the last N days, tagged `[claude]` / `[codex]` so the agent answers "what did I do here lately?" across tools |
 | `user_recap` | Cross-project, cross-AI rollup: total entries + by-CLI + by-project + top-importance — for "what did I ship this week?" |
@@ -219,7 +219,7 @@ Installed as Markdown slash commands under `~/.claude/commands/klyne/*.md` — e
 | `klyne subagents [--since=24h]` | Roll up Task-tool subagent spend back to the parent session. |
 | `klyne decisions add\|list\|search\|delete` | Project-scoped immutable decisions log. |
 | `klyne worklog export-week [--project PATH] [--week YYYY-WW]` | Render `<project>/docs/worklog/YYYY-WW.md` from visible worklog entries — conditional on activity, no file written for quiet weeks. Tags each entry with its source CLI. |
-| Memory via chat | Say *"klyne remember this …"* / *"refer klyne …"* in Claude Code. Uses MCP `remember` / `recall`; no dedicated CLI alias yet. |
+| Runbooks via chat | Say *"klyne remember this …"* / *"refer klyne …"* in Claude Code. Uses MCP `remember` / `recall`; no dedicated CLI alias yet. |
 | `klyne statusline [--format=short\|mini\|plain]` | One-line summary for Claude Code's `statusLine` settings hook. |
 | `klyne otel emit [--out=PATH] [--since=24h]` | Emit OTel-shaped JSON spans, one per assistant turn. File-only — never pushes off-host. |
 | `klyne advise` | Hook entrypoint. You don't run this directly — Claude Code's `UserPromptSubmit` hook does. |
@@ -228,12 +228,13 @@ Installed as Markdown slash commands under `~/.claude/commands/klyne/*.md` — e
 
 ### Web cockpit at `http://127.0.0.1:7878`
 
-The shell is a 3-tab top nav. Search lives behind the `/` overlay, not as a route.
+The shell is a 4-tab top nav. Search lives behind the `/` overlay, not as a route.
 
 | Tab | Primary view | Deep-link surfaces |
 |---|---|---|
 | **Work** | `/` — live operational view: running sessions, projects, recent activity. | `/cockpit` (SSE tile grid), `/projects` · `/projects/[name]`, `/sessions/[id]`, `/advisors`. |
-| **Memory** | `/memory` — project + global memories grouped by service. Read/filter/delete from the browser; write via chat. | — |
+| **Runbooks** | `/runbooks` — project + global runbooks grouped by service. The pre-execution-recall surface — klyne consults these before risky shell commands. Read/filter/delete from the browser; write via chat. | — |
+| **Worklog** | `/worklog` — per-session reflections. | — |
 | **Insights** | `/insights` — project-centric, subscription-aware metrics. | `/stats` (Overview / Models / Daily / Stats tabs, activity heatmap, models-by-cost, streaks). |
 
 Press `/` anywhere to open the search overlay (FTS5 across every indexed session).
@@ -260,9 +261,9 @@ The honest case where Claude wins: invoked in a short, healthy session, Claude c
 
 ---
 
-## Memory: project runbooks the AI can actually reuse
+## Runbooks: pre-execution recall the AI can actually use
 
-Memory is the chat-first version of the decisions log. It uses the same local SQLite table, but the verbs match how you work:
+Runbooks are the chat-first project ops-annotations klyne consults **before** Claude runs operational shell commands. Same local SQLite table as the decisions log, but the verbs match how you work and the timing is automatic:
 
 ```text
 klyne remember this for our auth-service project:
@@ -274,16 +275,16 @@ RUNBOOK: add-secret-to-bucket
 refer klyne and add NEW_API_KEY=abc123 to auth-service main bucket
 ```
 
-![How klyne memory stores project and global runbooks locally, then recalls them before Claude acts](docs/assets/readme/memory-runbook-flow.svg)
+![How klyne stores project and global runbooks locally, then recalls them before Claude acts](docs/assets/readme/memory-runbook-flow.svg)
 
 On recall, klyne returns two labelled lists in one MCP call:
 
-- **Project memories** — stored under the resolved project path.
-- **Global memories** — stored with an empty project path and available everywhere.
+- **Project runbooks** — stored under the resolved project path. (JSON field name: `project_memories`.)
+- **Global runbooks** — stored with an empty project path and available everywhere. (JSON field name: `global_memories`.)
 
-If a matching memory looks like a runbook, Claude substitutes variables from your request, shows the concrete commands, and asks before running them. The dashboard at `http://127.0.0.1:7878/memory` shows every memory grouped by service, with filters for text and tags.
+If a matching runbook is found, Claude substitutes variables from your request, shows the concrete commands, and asks before running them. The dashboard at `http://127.0.0.1:7878/runbooks` shows every runbook grouped by service, with filters for text and tags.
 
-Details: [`docs/features/memory.md`](docs/features/memory.md).
+Details: [`docs/features/runbooks.md`](docs/features/runbooks.md).
 
 ---
 
@@ -346,7 +347,7 @@ klyne is local-first:
 
 **Optional AI features** in the web cockpit (auto-summary, title generation) require your own provider key and are clearly gated. **Core audit, MCP rescue, search, and handoff features are deterministic and do not require any AI API key.**
 
-Memory is local too: `remember` writes rows into `~/.klyne/klyne.db`; `recall` reads project-scoped and global rows back over MCP. No provider key is involved.
+Runbooks are local too: `remember` writes rows into `~/.klyne/klyne.db`; `recall` reads project-scoped and global rows back over MCP. No provider key is involved.
 
 See [`docs/SECURITY.md`](docs/SECURITY.md) for the full threat model.
 
@@ -474,7 +475,7 @@ Pass `--platform claude` or `--platform codex` to scope the install. After it fi
 | 📊 [Analytics commands design](docs/features/analytics-commands.md) | `top` / `patterns` / `roast` design |
 | 📊 [v2 surfaces design](docs/features/v2-statusline-files-decisions-subagents-otel.md) | `statusline` / `files` / `decisions` / `subagents` / `otel` |
 | 📊 [v3 stats dashboard design](docs/features/v3-stats-dashboard.md) | `/stats` web page + heatmap CLI |
-| 🧠 [Memory feature](docs/features/memory.md) | `remember` / `recall`, project vs global scope, `/memory` dashboard, CLAUDE.md rule |
+| 🧠 [Runbooks feature](docs/features/runbooks.md) | `remember` / `recall`, project vs global scope, `/runbooks` dashboard, pre-execution-recall CLAUDE.md rule |
 | 🧪 [CLI review (2026-05-10)](docs/cli-review-2026-05-10.md) | Every CLI command tested live against real Claude + Codex sessions |
 | 🚚 [MCP ship log](docs/MCP-SHIP-LOG.md) | Every slice that landed, in order |
 | 🛡️ [Security model](docs/SECURITY.md) | Threat model + privacy contract |

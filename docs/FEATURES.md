@@ -732,19 +732,20 @@ $ klyne decisions delete d-e00c08fd589c11b0
 
 ---
 
-## Feature 4.5 — "klyne remember this …" / "refer klyne …" memory flow
+## Feature 4.5 — Runbooks: "klyne remember this …" / pre-execution recall
 
-> **What it is.** A chat-first persistent-memory surface on top of the same `decisions` table. Two new MCP tools (`remember`, `recall`) plus a dashboard route at `/memory` that groups memories by service. Shipped 2026-05-12.
+> **What it is.** A chat-first runbooks surface on top of the same `decisions` table. Two new MCP tools (`remember`, `recall`) plus a dashboard route at `/runbooks` that groups runbooks by service. The hero behaviour is **pre-execution recall** — `recall` fires automatically before risky shell commands per the CLAUDE.md rule. Shipped 2026-05-12; repositioned as runbooks 2026-05-19.
 
 ### The trigger phrases
 
 | You say in Claude Code | Klyne does |
 |---|---|
-| *"klyne remember this …"* | Stores a project-scoped memory (under the current cwd's project). Multi-line OK — runbooks supported. |
-| *"klyne remember this globally …"* / *"klyne remember … everywhere"* | Stores a global memory — applies in every project. |
-| *"refer klyne …"* / *"check klyne …"* / *"what does klyne remember about …"* | Recalls project memories AND global memories in **one** MCP call. If a matching runbook exists, Claude substitutes variables from your request and asks for confirmation before executing. |
+| *"klyne remember this …"* | Stores a project-scoped runbook (under the current cwd's project). Multi-line OK. |
+| *"klyne remember this globally …"* / *"klyne remember … everywhere"* | Stores a global runbook — applies in every project. |
+| *"refer klyne …"* / *"check klyne …"* / *"what does klyne remember about …"* | Recalls project + global runbooks in **one** MCP call. If a matching runbook exists, Claude substitutes variables from your request and asks for confirmation before executing. |
+| *(automatic, before risky shell commands)* | Per the CLAUDE.md rule, Claude calls `recall` before deploys, restarts, secrets ops, migrations, and `./scripts/*` invocations — then substitutes the matching runbook. |
 
-The trigger phrases are activated by a CLAUDE.md rule — full paste-ready snippet in [`docs/features/memory.md`](./features/memory.md#claudemd-rule-paste-this).
+The trigger phrases (and the automatic pre-execution call) are activated by a CLAUDE.md rule — full paste-ready snippet in [`docs/features/runbooks.md`](./features/runbooks.md#claudemd-rule-paste-this).
 
 ### Storage
 
@@ -752,9 +753,9 @@ Same `decisions` table as `record_decision`. Schema migration 009. `project_path
 
 ### Dashboard view
 
-Open `http://127.0.0.1:7878/memory`. Layout:
+Open `http://127.0.0.1:7878/runbooks`. Layout:
 
-- **Global** section at the top — every memory with `project_path = ""`.
+- **Global** section at the top — every runbook with `project_path = ""`.
 - **One section per project** below, sorted by most-recent-activity DESC, so the service you're actively working in lands at the top.
 - Each card: short id, relative timestamp, deterministically-coloured tags, full text (multi-line preserved), Delete button.
 - Filter bar: `?q=<substring>` and `?tag=<tag>` — debounced.
@@ -787,12 +788,12 @@ AI: Found a project-scoped runbook (d-71e776ba…). Substituting:
 
 ### Useful for you?
 
-The killer flow is **runbooks** — multi-line scripted procedures that you used to either keep in your head or in a Notion page nobody reads. Pinning them as memories means the AI can re-execute them with new arguments and never get the step order wrong. Two-week test plan:
+The killer flow is **pre-execution recall** — multi-line scripted procedures that you used to either keep in your head or in a Notion page nobody reads. Pinning them as runbooks means the AI consults the right one at the moment of execution and never gets the step order wrong. Two-week test plan:
 
 1. Pin 2-3 runbooks (secrets / deploy / DB migration) per project this week.
 2. Pin 1-2 global runbooks for procedures that work the same way across all your services.
-3. Add the CLAUDE.md rule (see [memory feature doc](./features/memory.md)) so Claude consults `recall` automatically before operational commands.
-4. Re-evaluate after a week. If you find yourself using `refer klyne …` daily, runbook adoption stuck — keep it. If usage is sparse, decisions-as-memory is fine forever.
+3. Add the CLAUDE.md rule (see [runbooks feature doc](./features/runbooks.md)) so Claude consults `recall` automatically before operational commands.
+4. Re-evaluate after a week. If you find yourself relying on the auto-recall (or saying `refer klyne …` on demand) daily, runbook adoption stuck — keep it. If usage is sparse, decisions-as-storage is fine forever.
 
 ### Supported CLIs / hosts
 
@@ -801,7 +802,7 @@ The killer flow is **runbooks** — multi-line scripted procedures that you used
 | `remember` tool | ✅ | ✅ (Codex registers the MCP server too) |
 | `recall` tool | ✅ | ✅ |
 | Trigger-phrase auto-recall via CLAUDE.md | ✅ | ⚠️ Codex does not yet honour CLAUDE.md; explicit `recall` calls still work |
-| `/memory` dashboard | ✅ (same browser for both) | ✅ |
+| `/runbooks` dashboard | ✅ (same browser for both) | ✅ |
 
 ---
 
@@ -1070,7 +1071,7 @@ $ curl http://127.0.0.1:7878/usage/stats?cli=claude&days=30
 | `/sessions/[id]` | `/sessions/:id` + `/sessions/:id/messages` | Full transcript, every tool call, token timeline, resume command |
 | `/search` | `/search?q=…` (FTS5) | Searched `jointLedgerController` above — 3 hits in 4 ms |
 | `/advisors` | `/advisors` | Per-session advisor state — which triggers fired and when |
-| `/memory` | `/memory/items` | Persistent memories grouped by project — runbooks, decisions, global notes |
+| `/runbooks` | `/memory/items` (HTTP route kept its `memory` prefix for back-compat) | Runbooks grouped by project — pre-execution-recall surface |
 
 **Useful for you?** The web UI is where most users will spend most of their time. The Stats page is the killer — **30-day streak / $26K / 11.5B input / 80K messages** is the kind of single-screen summary that you can't get from any CLI.
 
@@ -1094,7 +1095,7 @@ $ curl http://127.0.0.1:7878/usage/stats?cli=claude&days=30
 |---|---|---|
 | G1 | Open a terminal in `/Users/mohitpatel/Desktop/Project/klyne` | `pwd` returns that path |
 | G2 | Run `./bin/klyne` (or `./bin/klyne start`) | Output line `INFO klyne listening addr=127.0.0.1:7878` |
-| G3 | Open browser tab to `http://127.0.0.1:7878` | Page renders, top nav shows Work / Memory / Insights |
+| G3 | Open browser tab to `http://127.0.0.1:7878` | Page renders, top nav shows Work / Runbooks / Worklog / Insights |
 | G4 | Open Claude Code and start a new chat inside `/Users/mohitpatel/Desktop/Project/klyne` (use `cd` first, then `claude`) | Claude Code prompt visible at the bottom of the terminal |
 | G5 | In another terminal pane, confirm MCP wiring exists: `cat ~/.claude.json \| grep -A2 klyne` | Returns a non-empty `mcpServers.klyne` block |
 

@@ -197,15 +197,19 @@ Use when the user asks "what did we decide about X?" or when you start a new tas
 Use this when the user asks "did we decide anything about Y?" — returns the rows whose text contains the query. Scopes to the current project by default; pass all_projects=true for a cross-project search.`,
 	}, HandleSearchDecisions)
 
-	// --- memory facade -----------------------------------------------
-	// User-facing verbs over the same decisions table. Fire these when
-	// the user uses the trigger phrases:
+	// --- runbooks facade ----------------------------------------------
+	// User-facing verbs over the same decisions table. The hero
+	// behaviour is pre-execution recall: the AI calls `recall` BEFORE
+	// running operational shell commands so any stored runbook is
+	// applied automatically. Tool IDs keep their _memory suffix for
+	// back-compat with existing integrations.
 	//   "klyne remember this …"           → remember (scope=project)
 	//   "klyne remember this globally …"  → remember (scope=global)
 	//   "refer klyne …" / "check klyne …" → recall (returns project ∪ global)
+	//   pre-execution                      → recall (auto-fire per CLAUDE.md rule)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "remember",
-		Description: `Persist a memory (decision, runbook, or note) so it survives across sessions.
+		Description: `Persist a runbook (or decision / ops-annotation) so it survives across sessions and can be applied automatically before future shell commands.
 
 Fire this tool when the user says one of:
   "klyne remember this …"             → scope=project (default)
@@ -216,32 +220,32 @@ Fire this tool when the user says one of:
 Inputs: text (required), scope ("project"|"global", default "project"), optional project_path / cwd / tags / session_id. Multi-line text and runbooks (e.g. "Steps: 1. …, 2. …") are explicitly supported. Use tags like "runbook", "decision", "secrets", "infra", "deploy" so recall can filter cleanly.
 
 Scoping rules:
-  * scope=global  → memory applies to every project; stored with project_path=""
-  * scope=project → memory applies only to the named project; project_path is taken from input or falls back to cwd
+  * scope=global  → runbook applies to every project; stored with project_path=""
+  * scope=project → runbook applies only to the named project; project_path is taken from input or falls back to cwd
 
-Returns the new memory's id. Confirm the id and scope back to the user.`,
+Returns the new runbook's id. Confirm the id and scope back to the user.`,
 	}, HandleRememberMemory)
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "recall",
-		Description: `Recall all memories relevant to the current project — BOTH project-scoped AND global — in one call.
+		Description: `Recall all runbooks relevant to the current project — BOTH project-scoped AND global — in one call. This is the pre-execution-recall surface.
 
-Fire this tool BEFORE acting on operational requests (secrets, deploys, migrations, "add … for service X", etc.) and whenever the user says "refer klyne …" / "check klyne …" / "what does klyne remember about …".
+Fire this tool BEFORE running operational shell commands (secrets, deploys, migrations, "add … for service X", scripts under ./scripts/, etc.) and whenever the user says "refer klyne …" / "check klyne …" / "what does klyne remember about …".
 
-Returns two labelled lists:
-  * project_memories — memories whose project_path matches the resolved project
-  * global_memories  — memories with project_path="" (apply everywhere)
+Returns two labelled lists (JSON field names kept for back-compat):
+  * project_memories — runbooks whose project_path matches the resolved project
+  * global_memories  — runbooks with project_path="" (apply everywhere)
 
-If a memory looks like a runbook (multi-line with numbered steps), follow it verbatim with variables substituted from the user's request. Confirm the substitution out loud before executing.
+If a runbook matches (multi-line with numbered steps, or starts with "RUNBOOK:"), follow it verbatim with variables substituted from the user's request. Echo the substituted commands in a fenced block and confirm BEFORE executing.
 
 Optional filters: query (substring), tag (single tag like "runbook"), project_path / cwd override.`,
 	}, HandleRecallMemory)
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "update_memory",
-		Description: `Edit an existing memory (text and/or tags) by id without changing scope, project_path, or session_id.
+		Description: `Edit an existing runbook (text and/or tags) by id without changing scope, project_path, or session_id.
 
-Fire this tool when the user says "klyne update memory <id> …" / "klyne edit that memory …" / "klyne retag this memory …" and you already know the id (typically returned by a prior remember or list_memories call).
+Fire this tool when the user says "klyne update memory <id> …" / "klyne edit that runbook …" / "klyne retag this runbook …" and you already know the id (typically returned by a prior remember or list_memories call). Tool name keeps its _memory suffix for back-compat.
 
 Inputs: id (required). At least one of text (new body — must be non-empty when provided) or tags (new full tag set; pass an empty array to clear all tags) must be supplied. Omitted fields are left untouched.
 
@@ -250,16 +254,16 @@ Returns the patched id. If the id is unknown the call errors with "memory <id> n
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "delete_memory",
-		Description: `Delete one memory permanently by id.
+		Description: `Delete one runbook permanently by id.
 
-Fire this tool when the user says "klyne delete memory <id>" / "klyne forget that <id>" / "klyne remove the runbook with id <id>". Confirm the id back to the user BEFORE calling — deletes are immediate and not undoable.
+Fire this tool when the user says "klyne delete memory <id>" / "klyne forget that <id>" / "klyne remove the runbook with id <id>". Confirm the id back to the user BEFORE calling — deletes are immediate and not undoable. Tool name keeps its _memory suffix for back-compat.
 
 Inputs: id (required). Returns the deleted id. If the id is unknown the call errors with "memory <id> not found" so you can ask the user to call list_memories first.`,
 	}, HandleDeleteMemory)
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "list_memories",
-		Description: `Enumerate memories without applying a query filter — the explicit "show me everything klyne remembers" surface.
+		Description: `Enumerate runbooks without applying a query filter — the explicit "show me everything klyne remembers" surface. Tool name keeps its _memories suffix for back-compat.
 
 Fire this tool when the user says "klyne list memories" / "klyne what do you remember?" / "klyne show me my runbooks". Use it BEFORE update_memory or delete_memory so you can surface ids the user can pick from.
 

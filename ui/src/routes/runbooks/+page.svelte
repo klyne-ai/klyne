@@ -1,8 +1,9 @@
 <!--
-  Memory view — review-focused card grid over the /memory/items endpoint.
-  Filter input, scope toggle (All / Global / Project), tag chips for
-  drilling in, group-by control (scope / project / tag / none), and a
-  per-card delete affordance.
+  Runbooks view — review-focused card grid over the /memory/items endpoint
+  (HTTP route name is unchanged; user-facing concept is "runbooks"). Filter
+  input, scope toggle (All / Global / Project), tag chips for drilling in,
+  group-by control (scope / project / tag / none), and a per-card delete
+  affordance.
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
@@ -15,7 +16,7 @@
   type Scope = 'all' | 'global' | 'project';
   type GroupBy = 'scope' | 'project' | 'tag' | 'none';
 
-  interface MemoryEntry extends Decision {
+  interface RunbookEntry extends Decision {
     /** Synthetic scope tag derived from project_path. */
     scope: 'global' | 'project';
     /** Project basename for display when scope === 'project'. */
@@ -42,7 +43,7 @@
       resp = await fetchMemory();
       error = null;
     } catch (e: unknown) {
-      error = e instanceof Error ? e.message : 'failed to load memories';
+      error = e instanceof Error ? e.message : 'failed to load runbooks';
     } finally {
       loading = false;
     }
@@ -72,7 +73,7 @@
     return i >= 0 ? stripped.slice(i + 1) : stripped;
   }
 
-  function enrich(d: Decision): MemoryEntry {
+  function enrich(d: Decision): RunbookEntry {
     const project = d.project_path ?? '';
     const text = d.text ?? '';
     const nl = text.indexOf('\n');
@@ -87,7 +88,7 @@
     };
   }
 
-  const entries: MemoryEntry[] = $derived.by(() => {
+  const entries: RunbookEntry[] = $derived.by(() => {
     if (!resp) return [];
     const flat: Decision[] = [];
     for (const g of resp.global) flat.push(g);
@@ -99,13 +100,13 @@
     Array.from(new Set(entries.flatMap((e) => e.tags ?? []))).sort()
   );
 
-  // Distinct project_paths across loaded memories, alphabetized. Global memories
+  // Distinct project_paths across loaded runbooks, alphabetized. Global runbooks
   // (project === '') are excluded — they're addressed via the scope toggle.
   const projectOptions: string[] = $derived.by(() =>
     Array.from(new Set(entries.map((e) => e.project_path ?? '').filter((p) => p !== ''))).sort()
   );
 
-  const filtered: MemoryEntry[] = $derived.by(() => {
+  const filtered: RunbookEntry[] = $derived.by(() => {
     const q = query.trim().toLowerCase();
     return entries.filter((m) => {
       if (scope === 'global' && m.scope !== 'global') return false;
@@ -122,12 +123,12 @@
 
   interface Group {
     label: string;
-    items: MemoryEntry[];
+    items: RunbookEntry[];
   }
 
   const groups: Group[] = $derived.by(() => {
-    if (groupBy === 'none') return [{ label: 'All memories', items: filtered }];
-    const map = new Map<string, MemoryEntry[]>();
+    if (groupBy === 'none') return [{ label: 'All runbooks', items: filtered }];
+    const map = new Map<string, RunbookEntry[]>();
     for (const m of filtered) {
       let key: string;
       if (groupBy === 'scope') key = m.scope === 'global' ? 'Global (apply everywhere)' : 'Project-scoped';
@@ -141,22 +142,22 @@
   });
 
   async function onDelete(id: string): Promise<void> {
-    if (!confirm('Delete this memory? This cannot be undone.')) return;
+    if (!confirm('Delete this runbook? This cannot be undone.')) return;
     try {
       await deleteMemory(id);
       await load();
     } catch (e: unknown) {
-      error = e instanceof Error ? e.message : 'failed to delete memory';
+      error = e instanceof Error ? e.message : 'failed to delete runbook';
     }
   }
 </script>
 
-<svelte:head><title>klyne — Memory</title></svelte:head>
+<svelte:head><title>klyne — Runbooks</title></svelte:head>
 
 <div class="page">
   <div class="page-hd">
     <h1>
-      Memory
+      Runbooks
       {#if resp}<span class="count">({filtered.length})</span>{/if}
     </h1>
     <div class="row">
@@ -164,10 +165,13 @@
     </div>
   </div>
   <p class="page-sub">
-    Decisions and runbooks klyne is remembering. Add via Claude Code:&nbsp;
+    klyne checks these runbooks before Claude runs operational shell
+    commands and substitutes the matching one — so the rule is followed
+    automatically instead of relying on memory. Add a runbook with
     <code>klyne remember this …</code> (project-scoped) or
-    <code>klyne remember this globally …</code>. Recall with
-    <code>refer klyne …</code>. Use the Project dropdown to scope to a single repository.
+    <code>klyne remember this globally …</code>; recall manually with
+    <code>refer klyne …</code>. Use the Project dropdown to scope to a
+    single repository.
   </p>
 
   <div class="toolbar">
@@ -218,7 +222,7 @@
 
   {#if !loading && filtered.length === 0}
     <div style="padding: 40px 20px; text-align: center; color: var(--ad-faint);">
-      No memories match. Try clearing filters.
+      No runbooks match. Try clearing filters.
     </div>
   {/if}
 
@@ -226,7 +230,7 @@
     <section style="margin-bottom: 28px;">
       <header style="display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px;">
         <h2 style="margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -0.01em;">{g.label}</h2>
-        <span class="muted" style="font-size: 12px;">{g.items.length} {g.items.length === 1 ? 'memory' : 'memories'}</span>
+        <span class="muted" style="font-size: 12px;">{g.items.length} {g.items.length === 1 ? 'runbook' : 'runbooks'}</span>
       </header>
       <div class="mem-grid">
         {#each g.items as m (m.id)}
