@@ -16,7 +16,7 @@
 
   type Unit = 'tokens' | 'messages' | 'sessions';
   type SortKey = Unit | 'trend' | 'cache' | 'compact';
-  type Window = '7d' | '30d' | '90d' | '1y';
+  type Window = '1d' | '7d' | '30d' | '90d' | '1y';
 
   let unit = $state<Unit>('tokens');
   let sortBy = $state<SortKey>('tokens');
@@ -27,7 +27,11 @@
   let loading = $state(true);
   let error = $state<string | null>(null);
 
+  // 1d is a rolling 24-hour window from now — not midnight-to-now. Keeps
+  // the math consistent with the other windows so the trend sparkline
+  // and totals don't snap at the calendar boundary.
   const WINDOW_MS: Record<Window, number> = {
+    '1d':  1 * 86_400_000,
     '7d':  7 * 86_400_000,
     '30d': 30 * 86_400_000,
     '90d': 90 * 86_400_000,
@@ -163,8 +167,8 @@
         <button class:active={unit === 'sessions'} onclick={() => { unit = 'sessions'; sortBy = 'sessions'; }}>Sessions</button>
       </div>
       <div class="seg">
-        {#each (['7d', '30d', '90d', '1y'] as const) as w}
-          <button class:active={win === w} onclick={() => (win = w)}>{w}</button>
+        {#each (['1d', '7d', '30d', '90d', '1y'] as const) as w}
+          <button class:active={win === w} onclick={() => (win = w)} title={w === '1d' ? 'Past 24 hours' : w === '1y' ? 'Past year' : `Past ${w.replace('d', ' days')}`}>{w}</button>
         {/each}
       </div>
     </div>
