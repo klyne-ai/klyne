@@ -146,6 +146,79 @@ func TestBuildReport_ReflectionPresentIsCurrent(t *testing.T) {
 	}
 }
 
+func TestBuildReport_WorktreesCollapseToOneServicePerCanonicalRepo(t *testing.T) {
+	// Two scans for the SAME canonical repo (main tree + a sibling
+	// worktree on a feature branch). The report must contain exactly ONE
+	// Service for that repo, with BOTH branches under it, and per-branch
+	// attribution preserved (keyed by ScanResult.Dir).
+	now := time.Date(2026, 5, 19, 16, 0, 0, 0, time.UTC)
+	scans := []ScanResult{
+		{
+			Repo: "klyne", Dir: "/repos/klyne", Branch: "init", Ship: ShipLocal, Ahead: 1,
+			Commits: []Commit{
+				{SHA: "aaaaaaaa", Subject: "main tree work", CommittedAt: now.Add(-2 * time.Hour), IsUser: true, Insertions: 10},
+			},
+		},
+		{
+			Repo: "productivity-dashboard", Dir: "/repos/klyne/.worktrees/productivity-dashboard",
+			Branch: "feat/productivity-dashboard", TicketID: "", Ship: ShipLocal, Ahead: 5,
+			Commits: []Commit{
+				{SHA: "bbbbbbbb", Subject: "dashboard substrate", CommittedAt: now.Add(-1 * time.Hour), IsUser: true, Insertions: 200},
+				{SHA: "cccccccc", Subject: "dashboard handler", CommittedAt: now.Add(-30 * time.Minute), IsUser: true, Insertions: 80},
+			},
+		},
+	}
+	in := ReportInput{
+		Day:   "2026-05-19",
+		Now:   now,
+		Scans: scans,
+		Attribution: map[string]RepoTime{
+			"/repos/klyne":                                  {AIMinutes: 15},
+			"/repos/klyne/.worktrees/productivity-dashboard": {AIMinutes: 240},
+		},
+		// Both scans canonicalize to the SAME project path → one Service.
+		ProjectPaths: map[string]string{
+			"/repos/klyne":                                  "/repos/klyne",
+			"/repos/klyne/.worktrees/productivity-dashboard": "/repos/klyne",
+		},
+	}
+	rep, err := BuildReport(context.Background(), in, fakeReflections{has: false})
+	if err != nil {
+		t.Fatalf("BuildReport: %v", err)
+	}
+	if len(rep.Services) != 1 {
+		t.Fatalf("len(Services) = %d; want 1 (worktrees collapse to one canonical repo)", len(rep.Services))
+	}
+	svc := rep.Services[0]
+	if svc.ProjectPath != "/repos/klyne" {
+		t.Errorf("Service.ProjectPath = %q; want /repos/klyne", svc.ProjectPath)
+	}
+	if len(svc.Branches) != 2 {
+		t.Fatalf("len(Branches) = %d; want 2 (init + feat/productivity-dashboard)", len(svc.Branches))
+	}
+	byName := map[string]Branch{}
+	for _, b := range svc.Branches {
+		byName[b.Name] = b
+	}
+	mt, ok := byName["init"]
+	if !ok {
+		t.Fatalf("missing 'init' branch; got %v", byName)
+	}
+	if mt.AttributedMinutes != 15 {
+		t.Errorf("init AttributedMinutes = %d; want 15 (per-Dir attribution preserved)", mt.AttributedMinutes)
+	}
+	pd, ok := byName["feat/productivity-dashboard"]
+	if !ok {
+		t.Fatalf("missing 'feat/productivity-dashboard' branch; got %v", byName)
+	}
+	if pd.AttributedMinutes != 240 {
+		t.Errorf("feat branch AttributedMinutes = %d; want 240 (per-Dir attribution preserved)", pd.AttributedMinutes)
+	}
+	if pd.Ahead != 5 {
+		t.Errorf("feat branch Ahead = %d; want 5 (per-worktree ship facts preserved)", pd.Ahead)
+	}
+}
+
 func TestBuildReport_SalienceLeadsWithHighestCommitBranch(t *testing.T) {
 	now := time.Date(2026, 5, 19, 10, 0, 0, 0, time.UTC)
 	in := ReportInput{

@@ -124,7 +124,12 @@ func (h *ProductivityHandler) Get(w http.ResponseWriter, r *http.Request) {
 	attribution := productivity.AttributeMinutes(sessions, commitCounts, productivityIdleCapMin)
 
 	in := productivity.ReportInput{
-		Day:          defStart.Format("2006-01-02"),
+		// B1: Day must reflect the WINDOW's start (the resolved `since`
+		// after defaulting), not today. When `since` is absent it
+		// defaults to local-midnight-today (defStart), so the
+		// default-when-absent behaviour is preserved; when an explicit
+		// window is passed Day tracks that window.
+		Day:          time.UnixMilli(sinceMs).Local().Format("2006-01-02"),
 		Now:          now,
 		Scans:        scans,
 		Attribution:  attribution,

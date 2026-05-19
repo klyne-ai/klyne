@@ -44,6 +44,17 @@ func DiscoverRepos(ctx context.Context, l SessionPathLister, since, until time.T
 		if strings.TrimSpace(p) == "" {
 			continue
 		}
+		// D5/§6.1: only sessions that ran inside a real git work tree
+		// describe a repo. A non-git project_path (e.g. a parent dir
+		// like /Users/x/Desktop, or observer/agent sessions with cwd at
+		// a non-repo) must NOT become a Service — that is the bogus
+		// Desktop/Learning/Project/observer-sessions noise.
+		if !insideGitWorkTree(p) {
+			continue
+		}
+		// Canonicalize to the repo's MAIN root so every worktree of a
+		// repo (per-ticket checkouts, claude/codex worktrees) collapses
+		// to a single canonical identity — one Service per repo (§6.6).
 		canon := projectpath.Canonical(p)
 		if seenCanon[canon] {
 			continue
@@ -65,6 +76,16 @@ func DiscoverRepos(ctx context.Context, l SessionPathLister, since, until time.T
 		}
 	}
 	return out, nil
+}
+
+// insideGitWorkTree reports whether dir is within a git working tree.
+// `git -C <dir> rev-parse --is-inside-work-tree` prints "true" only for
+// a real checkout/worktree; it errors (or prints false for a bare repo)
+// otherwise. This is the D5/§6.1 filter that drops non-repo
+// project_paths (parent dirs, observer/agent sessions) before discovery.
+func insideGitWorkTree(dir string) bool {
+	out, err := gitOut(dir, "rev-parse", "--is-inside-work-tree")
+	return err == nil && strings.TrimSpace(out) == "true"
 }
 
 // worktreePaths parses `git worktree list --porcelain` and returns every

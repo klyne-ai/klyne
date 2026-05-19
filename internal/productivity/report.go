@@ -48,28 +48,68 @@ func BuildReport(ctx context.Context, in ReportInput, refl ReflectionLookup) (Re
 	day := dayTime(in.Day, in.Now)
 	anyReflection := false
 
+	// §6.6 / D5: group scans by canonical project path so every worktree
+	// of a repo (the main tree + sibling per-ticket / claude / codex
+	// checkouts) collapses into ONE Service. The attribution map is keyed
+	// by ScanResult.Dir, so per-branch (per-worktree) attribution and
+	// per-worktree ship facts are preserved by building branches per
+	// scan and concatenating them under the canonical Service.
+	type group struct {
+		repo        string
+		projectPath string
+		scans       []ScanResult
+	}
+	var order []string
+	groups := map[string]*group{}
 	for _, sc := range in.Scans {
-		svc := Service{Repo: sc.Repo, ProjectPath: in.projectPath(sc.Dir)}
-
-		// §6.3 identity filter: only the user's commits count toward the
-		// productivity figures. Co-actors/bots (Jenkins, Ravi-Ranjan)
-		// are dropped here so they never enter a Branch.
-		var userCommits []Commit
-		for _, c := range sc.Commits {
-			if c.IsUser {
-				userCommits = append(userCommits, c)
-			}
+		pp := in.projectPath(sc.Dir)
+		g, ok := groups[pp]
+		if !ok {
+			g = &group{repo: RepoName(pp), projectPath: pp}
+			groups[pp] = g
+			order = append(order, pp)
 		}
+		g.scans = append(g.scans, sc)
+	}
 
-		rt := in.Attribution[sc.Dir]
-		svc.ManualOnly = rt.ManualOnly && rt.AIMinutes == 0 && len(userCommits) > 0
+	for _, pp := range order {
+		g := groups[pp]
+		svc := Service{Repo: g.repo, ProjectPath: g.projectPath}
 
-		svc.Branches = buildBranches(sc, userCommits, rt)
+		manualOnly := true
+		anyUserCommits := false
+		for _, sc := range g.scans {
+			// §6.3 identity filter: only the user's commits count toward
+			// the productivity figures. Co-actors/bots (Jenkins,
+			// Ravi-Ranjan) are dropped here so they never enter a Branch.
+			var userCommits []Commit
+			for _, c := range sc.Commits {
+				if c.IsUser {
+					userCommits = append(userCommits, c)
+				}
+			}
 
-		// Risk signals (§6.5), repo-scoped.
-		svc.Risks = riskSignals(sc, userCommits, in.DirtyRepos[sc.Dir], in.Now)
+			rt := in.Attribution[sc.Dir]
+			if len(userCommits) > 0 {
+				anyUserCommits = true
+				if !(rt.ManualOnly && rt.AIMinutes == 0) {
+					manualOnly = false
+				}
+			}
 
-		// Reflection status (§7 L3): per project/day.
+			svc.Branches = append(svc.Branches, buildBranches(sc, userCommits, rt)...)
+
+			// Risk signals (§6.5): repo-scoped, aggregated across every
+			// worktree of the canonical repo.
+			svc.Risks = append(svc.Risks, riskSignals(sc, userCommits, in.DirtyRepos[sc.Dir], in.Now)...)
+		}
+		svc.ManualOnly = manualOnly && anyUserCommits
+
+		// Salience ordering (§7.1 rule 5) applied across the merged
+		// branch set so the highest-impact worktree leads.
+		sortBranches(svc.Branches)
+
+		// Reflection status (§7 L3): per canonical project/day.
 		if refl != nil {
 			has, err := refl.HasReflection(ctx, svc.ProjectPath, day)
 			if err != nil {
@@ -135,13 +175,21 @@ func buildBranches(sc ScanResult, userCommits []Commit, rt RepoTime) []Branch {
 		branches = append(branches, b)
 	}
 
+	sortBranches(branches)
+	return branches
+}
+
+// sortBranches applies the §7.1 rule-5 salience ordering: highest commit
+// count first, then most net-new insertions, so the dashboard leads with
+// the highest-impact work (the documented salience-inversion fix). It is
+// applied both per-scan and across the merged per-repo branch set.
+func sortBranches(branches []Branch) {
 	sort.SliceStable(branches, func(i, j int) bool {
 		if len(branches[i].Commits) != len(branches[j].Commits) {
 			return len(branches[i].Commits) > len(branches[j].Commits)
 		}
 		return netNew(branches[i].Commits) > netNew(branches[j].Commits)
 	})
-	return branches
 }
 
 func ticketFor(branch string, sc ScanResult) string {
