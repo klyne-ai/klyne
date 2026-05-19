@@ -6,8 +6,6 @@ klyne is a **local-first session rescue layer** for Claude Code and Codex CLI. I
 
 **No cloud. No proxy. No telemetry. Read-only by design.**
 
-[![Watch the klyne demo](docs/assets/readme/klyne-local-rescue-flow.png)](https://youtu.be/2NglEGlq3Ns)
-
 ▶ [Watch the 5-minute demo](https://youtu.be/2NglEGlq3Ns) · ⚡ [Install in 60 seconds](#try-it-in-60-seconds) · 📖 [Feature reference](docs/FEATURES.md) · 🔬 [Proofs](docs/proof/)
 
 ---
@@ -166,7 +164,7 @@ flowchart LR
 
 | Tool | What it solves |
 |---|---|
-| `bootstrap` | Day-1 session brief: last 3 sessions + last 5 project runbooks + global preview + latest context-health verdict — synthesized in one call so a fresh session has cross-session context on turn 1 |
+| `bootstrap` | Day-1 session brief: last 3 sessions + last 5 project runbooks + global preview + recent reflections + cross-AI worklog entries — synthesized in one call so a fresh session has cross-session context on turn 1. (Live context-health for the current session lives in `/klyne:status`.) |
 | `list_sessions` | Enumerate Claude + Codex sessions in this project |
 | `get_context_health` | Classify a session as `healthy` / `drifting` / `risky` / `rescue_now` + bloat scorecard |
 | `generate_handoff` | Deterministic Markdown handoff; optional `scope=current-topic` |
@@ -472,10 +470,12 @@ Pass `--platform claude` or `--platform codex` to scope the install. After it fi
 | 🔬 [Reproducible-proof index](docs/proof/) | Every claim, every fixture, every Go test |
 | 📐 [Proactive advisor design](docs/features/proactive-session-advisor.md) | v1 spec for the `UserPromptSubmit` hook |
 | 📊 [Analytics commands design](docs/features/analytics-commands.md) | `top` / `patterns` / `roast` design |
-| 📊 [v2 surfaces design](docs/features/v2-statusline-files-decisions-subagents-otel.md) | `statusline` / `files` / `decisions` / `subagents` / `otel` |
-| 📊 [v3 stats dashboard design](docs/features/v3-stats-dashboard.md) | `/stats` web page + heatmap CLI |
+| 📊 [Stats dashboard](docs/features/stats-dashboard.md) | `/stats` web page + heatmap CLI |
+| 📊 [Statusline](docs/features/statusline.md) | Single-line render for Claude Code's `statusLine` hook |
+| 📊 [File heatmap](docs/features/file-heatmap.md) | `klyne files` per-file Read/Edit/Write rollup |
+| 📊 [Subagent attribution](docs/features/subagent-attribution.md) | `klyne subagents` surfaces Task-tool spend hidden from parent cost |
+| 📊 [OTel exporter](docs/features/otel-exporter.md) | `klyne otel emit` OTel-shaped JSONL exporter |
 | 🧠 [Runbooks feature](docs/features/runbooks.md) | `remember` / `recall`, project vs global scope, `/runbooks` dashboard, pre-execution-recall CLAUDE.md rule |
-| 🧪 [CLI review (2026-05-10)](docs/cli-review-2026-05-10.md) | Every CLI command tested live against real Claude + Codex sessions |
 | 🚚 [MCP ship log](docs/MCP-SHIP-LOG.md) | Every slice that landed, in order |
 | 🛡️ [Security model](docs/SECURITY.md) | Threat model + privacy contract |
 | 🧭 [Context-rescue strategy](docs/marketing/context-rescue-strategy.md) | Why klyne exists, framed against neighbours |

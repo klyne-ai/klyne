@@ -1451,8 +1451,11 @@ Active recording prep:
 | See every reproducible claim | [`docs/proof/`](./proof/) |
 | Read the design doc for the advisor | [`docs/features/proactive-session-advisor.md`](./features/proactive-session-advisor.md) |
 | Read the design doc for analytics commands | [`docs/features/analytics-commands.md`](./features/analytics-commands.md) |
-| Read the design doc for v2 surfaces | [`docs/features/v2-statusline-files-decisions-subagents-otel.md`](./features/v2-statusline-files-decisions-subagents-otel.md) |
-| Read the design doc for the v3 stats dashboard | [`docs/features/v3-stats-dashboard.md`](./features/v3-stats-dashboard.md) |
+| Read the doc for the stats dashboard | [`docs/features/stats-dashboard.md`](./features/stats-dashboard.md) |
+| Read the doc for the statusline | [`docs/features/statusline.md`](./features/statusline.md) |
+| Read the doc for the file heatmap | [`docs/features/file-heatmap.md`](./features/file-heatmap.md) |
+| Read the doc for subagent attribution | [`docs/features/subagent-attribution.md`](./features/subagent-attribution.md) |
+| Read the doc for the OTel exporter | [`docs/features/otel-exporter.md`](./features/otel-exporter.md) |
 | See the MCP server build log | [`docs/MCP-SHIP-LOG.md`](./MCP-SHIP-LOG.md) |
 | Trace what shipped in which slice | [`docs/MCP-SHIP-LOG.md`](./MCP-SHIP-LOG.md) |
 | Read the security model | [`docs/SECURITY.md`](./SECURITY.md) |

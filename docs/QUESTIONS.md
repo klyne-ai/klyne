@@ -61,15 +61,16 @@ Each section answers, concretely: what would Claude try if you didn't have klyne
 - **Why Claude's version fails**: it doesn't exist. This is the canonical klyne-only feature — the part Claude *provably cannot replicate*.
 - **Mode**: Recovery (strongest demo path in all of klyne).
 
-#### `/klyne:health` (`get_context_health`)
+#### `/klyne:status` (`get_session_status` — wraps `get_context_health` + `get_token_timeline`)
 
-- **What Claude could try**: eyeball its remaining context budget. The model has no exact token count of its own input — only the user's visible heuristics.
-- **What klyne does**: walks the JSONL, sums token counters from `usage.input_tokens / cache_read / cache_creation` per assistant turn, computes fill ratio against the active model's context window, classifies as `healthy / drifting / risky / rescue_now`, and lists the top bloat sources (which files / tools / past turns are eating context).
+- **What Claude could try**: eyeball its remaining context budget and hand-wave about cost per turn. The model has no exact token count of its own input — only the user's visible heuristics.
+- **What klyne does**: walks the JSONL once, classifies the session as `healthy / drifting / risky / rescue_now` with a recommended action, prints an ASCII sparkline + per-turn table of the last several turns (cached vs uncached split), and lists the top bloat sources contributing to the verdict — all in one Markdown payload the slashcommand renders verbatim.
 - **Why Claude's version fails**:
   - Claude has no read access to the JSONL `usage` fields.
   - Claude can't enumerate "which files in your context are stale."
+  - Claude reads no token series, so it can't show "your last 3 turns went 9K → 15K → 25K uncached" — the slope that predicts cap blowout.
   - Claude's self-estimate drifts; klyne's number matches what Anthropic actually bills.
-- **Mode**: Audit + Prevention input (advisor reads this verdict).
+- **Mode**: Audit + Prevention input (advisor reads the same verdict; the timeline backs the acceleration trigger).
 
 #### `/klyne:sessions` (`list_sessions`)
 
@@ -77,13 +78,6 @@ Each section answers, concretely: what would Claude try if you didn't have klyne
 - **What klyne does**: lists every indexed session for the project (id, started_at, tool counts, model, status).
 - **Why Claude's version fails**: doesn't exist — Claude has no view of sibling/sister sessions.
 - **Mode**: Audit / cross-session.
-
-#### `/klyne:tokens` (`get_token_timeline`)
-
-- **What Claude could try**: hand-wave about cost per turn.
-- **What klyne does**: per-turn input/output token series with cached vs uncached split, sparkline, and heatmap.
-- **Why Claude's version fails**: Claude reads no `usage` field, so it can't tell you "your last 3 turns went 9K → 15K → 25K uncached." That's the curve that predicts cap blowout — Claude can't see the slope of its own consumption.
-- **Mode**: Audit (and the data source for the advisor's acceleration trigger).
 
 #### `remember` / `recall` (memory MCP tools)
 
@@ -178,10 +172,10 @@ Each section answers, concretely: what would Claude try if you didn't have klyne
 
 ### Web cockpit
 
-#### Work / Memory / Insights tabs at `http://127.0.0.1:7878`
+#### Work / Runbooks / Worklog / Insights tabs at `http://127.0.0.1:7878`
 
 - **What Claude could try**: nothing — Claude has no UI surface.
-- **What klyne does**: local web app served by the daemon. Work tab is live terminal aggregation; Memory tab is the dashboard for `remember` / `decisions`; Insights tab is per-session deep dives.
+- **What klyne does**: local web app served by the daemon. Work tab is live terminal aggregation; Runbooks tab is the dashboard for `remember` / `recall` / decisions; Worklog tab is per-session reflections; Insights tab is per-session deep dives.
 - **Why Claude's version fails**: not a chat-shaped surface. The cockpit is for browsing, scrubbing, deleting — operations that don't fit a chat turn.
 - **Mode**: Audit + Prevention (ambient).
 
