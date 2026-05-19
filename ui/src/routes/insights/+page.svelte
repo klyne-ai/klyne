@@ -283,7 +283,7 @@
                 style="justify-self: end; font-size: 11px; padding: 3px 8px;"
                 title="Open {p.name} — all sessions for this project"
                 aria-label="Open project {p.name}"
-                onclick={(e) => { e.stopPropagation(); goto(`/projects/${encodeURIComponent(p.name)}`); }}
+                onclick={(e) => { e.stopPropagation(); goto(`/insights/projects/${encodeURIComponent(p.name)}`); }}
               >open →</button>
             </div>
 
@@ -323,7 +323,7 @@
                             <span class="mono faint" style="font-size: 11px;">{kfmt(s.messages)} msg</span>
                             <span class="spacer"></span>
                             <span class="mono faint" style="font-size: 10.5px;">{relTime(s.last_msg_at)}</span>
-                            <button class="btn btn--ghost btn--sm" onclick={(e) => { e.stopPropagation(); goto(`/sessions/${encodeURIComponent(s.session_id)}`); }}>open →</button>
+                            <button class="btn btn--ghost btn--sm" onclick={(e) => { e.stopPropagation(); goto(`/insights/sessions/${encodeURIComponent(s.session_id)}`); }}>open →</button>
                           </div>
                         {/each}
                       </div>
@@ -338,7 +338,7 @@
                     <div style="margin-top: 14px;">
                       <button
                         class="btn btn--primary btn--sm"
-                        onclick={() => goto(`/projects/${encodeURIComponent(p.name)}`)}
+                        onclick={() => goto(`/insights/projects/${encodeURIComponent(p.name)}`)}
                       >Open full project →</button>
                     </div>
                   </div>
