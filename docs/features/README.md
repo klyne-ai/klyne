@@ -9,11 +9,12 @@ Features are grouped by where the user reaches them — MCP / slash commands, CL
 The rescue-layer surface — every klyne capability the AI can call mid-session. Wired up via `klyne mcp install`.
 
 - [mcp-and-slash-commands.md](./mcp-and-slash-commands.md) — installation, the slash commands, and the markdown-verbatim contract
+- [bootstrap.md](./bootstrap.md) — `/klyne:bootstrap` · Day-1 brief: recent sessions + runbooks + reflections + cross-AI worklog
 - [handoff.md](./handoff.md) — `/klyne:handoff` · deterministic prompt to continue work in a fresh session
 - [context-health.md](./context-health.md) — `get_context_health` MCP tool · verdict + top bloat sources (slash entry point: `/klyne:status`)
+- [token-timeline.md](./token-timeline.md) — `get_token_timeline` MCP tool + `klyne tokens` CLI + web · per-turn token usage with sparkline (slash entry point: `/klyne:status`)
 - [pre-compact-recovery.md](./pre-compact-recovery.md) — `/klyne:precompact` · messages from before the last `/compact`
 - [sessions-list.md](./sessions-list.md) — `/klyne:sessions` · every Claude Code + Codex session in this project
-- [token-timeline.md](./token-timeline.md) — `get_token_timeline` MCP tool + `klyne tokens` CLI + web · per-turn token usage with sparkline (slash entry point: `/klyne:status`)
 
 ## Proactive surfaces
 
@@ -22,12 +23,12 @@ Features that push information at the user before they have to ask.
 - [proactive-session-advisor.md](./proactive-session-advisor.md) — `UserPromptSubmit` hook with four deterministic triggers
 - [statusline.md](./statusline.md) — single-line `klyne statusline` for Claude Code's status bar
 
-## Persistent memory
+## Runbooks
 
-Long-lived facts that survive across sessions.
+Chat-driven ops-annotations that survive across sessions and are consulted **before** Claude runs operational shell commands.
 
-- [memory.md](./memory.md) — chat-driven `remember` / `recall` with project & global scopes
-- [decisions-log.md](./decisions-log.md) — pinned project facts via CLI and MCP (same storage as memory, different verbs)
+- [runbooks.md](./runbooks.md) — chat-driven `remember` / `recall` with project & global scopes, plus the pre-execution-recall CLAUDE.md rule
+- [decisions-log.md](./decisions-log.md) — pinned project facts via CLI and MCP (same storage as runbooks, different verbs)
 
 ## Analytics & operational tooling
 
@@ -43,5 +44,5 @@ CLI surfaces that turn klyne's local SQLite store into glanceable answers.
 
 Browser-side surface served by the local daemon at `http://127.0.0.1:7878`.
 
-- [web-cockpit.md](./web-cockpit.md) — the 3-tab shell (Work / Memory / Insights) and every deep-link surface
+- [web-cockpit.md](./web-cockpit.md) — the 4-tab shell (Work / Runbooks / Worklog / Insights) and every deep-link surface
 - [stats-dashboard.md](./stats-dashboard.md) — `/stats` page (Overview / Models / Daily / Stats) + per-session activity heatmap
