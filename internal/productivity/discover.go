@@ -113,6 +113,7 @@ func worktreePaths(dir string) []string {
 var seedUserEmails = []string{
 	"mohitpatel9753@gmail.com",
 	"coders@clinikk.com",
+	"mohit@clinikk.com", // git author identity on the work microservices (mohit-clinikk)
 }
 
 // UserEmails returns the §6.3 identity set: the local `git config
