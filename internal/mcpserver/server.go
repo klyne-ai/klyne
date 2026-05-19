@@ -2,8 +2,14 @@ package mcpserver
 
 import (
 	"context"
+	"os"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/klyne-ai/klyne/internal/config"
+	"github.com/klyne-ai/klyne/internal/mcpserver/instructions"
+	"github.com/klyne-ai/klyne/internal/projectpath"
+	"github.com/klyne-ai/klyne/internal/store"
 )
 
 // version is what the server advertises during the MCP initialize
@@ -24,7 +30,12 @@ import (
 // the matching /klyne:search /klyne:status /klyne:resume
 // /klyne:runbooks slash commands. The surfaces collapsed into
 // the remaining handoff / health / recall / bootstrap stack.
-const version = "v0.7.0"
+// v0.7.1 — slice 9: MCP server Instructions now carries a directive
+// + titled inventory of project + global runbooks (≤ 20 per scope)
+// so the model auto-surfaces runbooks for every message without the
+// user having to call recall manually. See
+// docs/superpowers/specs/2026-05-19-runbook-auto-recall-design.md.
+const version = "v0.7.1"
 
 // New constructs the klyne MCP server with every v1 tool
 // registered. The returned server is ready for Run.
@@ -50,7 +61,9 @@ func New() *mcp.Server {
 	srv := mcp.NewServer(&mcp.Implementation{
 		Name:    "klyne",
 		Version: version,
-	}, nil)
+	}, &mcp.ServerOptions{
+		Instructions: buildServerInstructions(),
+	})
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "list_sessions",
@@ -303,4 +316,36 @@ Returns two labelled lists (project_memories and global_memories), newest first.
 // log output to stderr; tools must never write to os.Stdout directly.
 func Run(ctx context.Context) error {
 	return New().Run(ctx, &mcp.StdioTransport{})
+}
+
+// buildServerInstructions assembles the MCP-level Instructions string
+// surfaced in the initialize response. Best-effort: any failure
+// (cwd lookup, DB open, query) collapses to "" so the server still
+// starts and the instructions field is simply omitted from the
+// handshake. See internal/mcpserver/instructions/build.go for the
+// content rules.
+//
+// Called once per server boot. Subprocess-per-session means each
+// klyne MCP session computes its own instructions — newly remembered
+// runbooks land in the next session's instructions.
+func buildServerInstructions() string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		// Fall through with empty cwd: instructions.Build will
+		// return globals-only (still useful).
+		cwd = ""
+	}
+	canonical := cwd
+	if cwd != "" {
+		canonical = projectpath.Canonical(cwd)
+	}
+
+	ctx := context.Background()
+	db, err := store.Open(ctx, config.DBPath())
+	if err != nil {
+		return ""
+	}
+	defer db.Close() //nolint:errcheck
+
+	return instructions.Build(ctx, canonical, db)
 }
