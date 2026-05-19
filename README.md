@@ -24,7 +24,7 @@ Use it when the AI loses the thread:
 |---|---|---|
 | `/compact` buried the exact path, command, or decision | `/klyne:precompact` | Original pre-compact turns from JSONL |
 | A task must continue in a fresh Claude/Codex session | `/klyne:handoff` | Touched files, commands, failures, and recent context |
-| A session starts burning context or cache badly | `/klyne:health` / `/klyne:tokens` | Context health, token timeline, cache reuse, and plan-window burn |
+| A session starts burning context or cache badly | `/klyne:status` | Health verdict + recommended action + token timeline + bloat sources in one view |
 | A procedure should survive future chats | `klyne remember this ...` | Stores a local project/global runbook that klyne recalls automatically before risky shell commands (or on demand with `refer klyne ...`) |
 
 Four surfaces, one local engine:
@@ -186,11 +186,10 @@ flowchart LR
 | Slash | Calls |
 |---|---|
 | `/klyne:bootstrap` | `bootstrap` |
-| `/klyne:health` | `get_context_health` |
+| `/klyne:status` | `get_session_status` — verdict + recommended action + token timeline + bloat sources for the active session, in one Markdown payload |
 | `/klyne:sessions` | `list_sessions` |
 | `/klyne:handoff` | `generate_handoff` |
 | `/klyne:precompact` | `get_pre_compact_context` |
-| `/klyne:tokens` | `get_token_timeline` |
 | `/klyne:reflect` | Cross-AI worklog synthesis: Claude calls `propose_reflection`, synthesizes 3–5 insights with mandatory citations, then calls `record_reflection`. Uses your Claude subscription — no extra API key |
 
 Installed as Markdown slash commands under `~/.claude/commands/klyne/*.md` — each command file calls the matching MCP tool above. Single surface per command, no `(MCP)` duplicates in the slash menu.

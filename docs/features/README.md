@@ -10,10 +10,10 @@ The rescue-layer surface — every klyne capability the AI can call mid-session.
 
 - [mcp-and-slash-commands.md](./mcp-and-slash-commands.md) — installation, the slash commands, and the markdown-verbatim contract
 - [handoff.md](./handoff.md) — `/klyne:handoff` · deterministic prompt to continue work in a fresh session
-- [context-health.md](./context-health.md) — `/klyne:health` · verdict + top bloat sources
+- [context-health.md](./context-health.md) — `get_context_health` MCP tool · verdict + top bloat sources (slash entry point: `/klyne:status`)
 - [pre-compact-recovery.md](./pre-compact-recovery.md) — `/klyne:precompact` · messages from before the last `/compact`
 - [sessions-list.md](./sessions-list.md) — `/klyne:sessions` · every Claude Code + Codex session in this project
-- [token-timeline.md](./token-timeline.md) — `/klyne:tokens` (+ CLI + web) · per-turn token usage with sparkline & heatmap
+- [token-timeline.md](./token-timeline.md) — `get_token_timeline` MCP tool + `klyne tokens` CLI + web · per-turn token usage with sparkline (slash entry point: `/klyne:status`)
 
 ## Proactive surfaces
 

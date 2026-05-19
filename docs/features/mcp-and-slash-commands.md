@@ -2,7 +2,7 @@
 
 > Status: shipped. The core rescue-layer surface — every klyne capability the AI can call mid-session.
 
-`klyne mcp install` wires klyne as an MCP server in Claude Code and Codex CLI, drops six markdown slash commands into `~/.claude/commands/klyne/`, registers the `UserPromptSubmit` advisor hook, and unpacks the agent-driven Skill bundles into `~/.claude/skills/`. Idempotent.
+`klyne mcp install` wires klyne as an MCP server in Claude Code and Codex CLI, drops six markdown slash commands into `~/.claude/commands/klyne/`, registers the `UserPromptSubmit` advisor hook, and unpacks the agent-driven Skill bundles into `~/.claude/skills/`. Idempotent — the install pass also removes any `.md` files in the destination dir that are no longer in the bundled set, so retired slash commands are cleaned up on the next install.
 
 ```bash
 klyne mcp install            # install MCP server + slash commands + advisor hook
@@ -15,16 +15,17 @@ Each slash command calls one MCP tool and prints the tool's `markdown` field byt
 
 | Slash command | MCP tool | What it does | Detail |
 |---|---|---|---|
-| `/klyne:bootstrap` | `bootstrap` | Day-1 session brief: recent sessions, klyne runbooks, Claude auto-memory, recent reflections, cross-AI worklog entries, current session health | [bootstrap.md](./bootstrap.md) |
+| `/klyne:bootstrap` | `bootstrap` | Day-1 session brief: recent sessions, klyne runbooks, Claude auto-memory, recent reflections, cross-AI worklog entries | [bootstrap.md](./bootstrap.md) |
 | `/klyne:handoff` | `generate_handoff` | Deterministic handoff prompt for a fresh session | [handoff.md](./handoff.md) |
-| `/klyne:health` | `get_context_health` | Verdict (healthy / drifting / risky / rescue_now) + top bloat sources | [context-health.md](./context-health.md) |
+| `/klyne:status` | `get_session_status` | Unified context check: verdict (healthy / drifting / risky / rescue_now) + recommended action + per-turn token trajectory (sparkline + table) + top bloat sources | [context-health.md](./context-health.md) · [token-timeline.md](./token-timeline.md) |
 | `/klyne:precompact` | `get_pre_compact_context` | Messages from immediately before the last `/compact` | [pre-compact-recovery.md](./pre-compact-recovery.md) |
 | `/klyne:sessions` | `list_sessions` | Every Claude Code + Codex session in the current project | [sessions-list.md](./sessions-list.md) |
-| `/klyne:tokens` | `get_token_timeline` | Per-turn token usage with sparkline + heatmap | [token-timeline.md](./token-timeline.md) |
+
+The underlying MCP tools `get_context_health` and `get_token_timeline` remain registered and callable directly — `/klyne:status` composes both into one payload to back the unified slashcommand surface; the web cockpit and other internal callers still hit each tool individually for its structured output (timeline points feeding the session chart, verdict feeding the advisor lane, etc.).
 
 ## Skills — the agent-invoked path
 
-Slash commands are user-typed (`/klyne:health`). Skills are Claude-invoked — the agent reads each bundled `SKILL.md` description and auto-invokes when the description matches the current situation. No `/klyne:` typing required.
+Slash commands are user-typed (`/klyne:status`). Skills are Claude-invoked — the agent reads each bundled `SKILL.md` description and auto-invokes when the description matches the current situation. No `/klyne:` typing required.
 
 Skill bundles live under `~/.claude/skills/<skill-name>/SKILL.md` (Claude Code's standard skill directory format). `klyne mcp install` unpacks them; new versions overwrite on re-install (idempotent).
 
@@ -59,7 +60,7 @@ When the tool has nothing to show (no session, daemon down, ambiguous candidates
 
 ## Auto-resolution
 
-All slash-command-backed tools auto-resolve the session from the host's current working directory. The user typing `/klyne:health` doesn't have to remember a session ID. If multiple sessions live in the same cwd, the tool returns `ambiguous: true` with a candidate list and the user retries with `session_id=...`.
+All slash-command-backed tools auto-resolve the session from the host's current working directory. The user typing `/klyne:status` doesn't have to remember a session ID. If multiple sessions live in the same cwd, the tool returns `ambiguous: true` with a candidate list and the user retries with `session_id=...`.
 
 ## Implementation
 

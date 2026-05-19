@@ -149,7 +149,7 @@ $ mcp__klyne__get_context_health
 
 **Real-world story.** We're at 15 % context fill — verdict `healthy`. But notice the bloat: my single read of `README.md` already ate 15.6 % of the tool output, and the four largest reads collectively claim 50 % of the prefix. If this session ran 5 more hours, those reads would still be sitting there — even though I might be done with `proactive-session-advisor.md` an hour from now. That's the exact data the **stale-context** advisor trigger uses.
 
-**Useful for you?** Yes. The verdict is one of `healthy / drifting / risky / rescue_now`. The bloat scorecard is what makes `/klyne:health` instantly actionable — you can see *which file* is dragging the prefix down, not just "context is too big".
+**Useful for you?** Yes. The verdict is one of `healthy / drifting / risky / rescue_now`. The bloat scorecard is what makes `/klyne:status` instantly actionable — you can see *which file* is dragging the prefix down, not just "context is too big".
 
 ---
 
@@ -1103,55 +1103,31 @@ If any precondition fails, **stop and tell the human** — the rest of the playb
 
 ---
 
-### Shot 1 — `/klyne:health` in Claude Code chat
+### Shot 1 — `/klyne:status` in Claude Code chat
 
-**Goal.** Capture an inline-rendered context-health table showing verdict (`healthy` / `drifting` / `risky` / `rescue_now`), context-fill %, and top-3 bloat sources.
+**Goal.** Capture the unified context surface rendered inline — verdict header (`healthy` / `drifting` / `risky` / `rescue_now`) + recommended action + context fill %, trajectory headline + ASCII sparkline + per-turn token table, top-3 bloat sources.
 
-**Preconditions.** G1-G5 satisfied. The current Claude Code session must have ≥ 5 turns so the verdict isn't trivial.
+**Preconditions.** G1-G5 satisfied. The current Claude Code session must have ≥ 5 turns so the verdict isn't trivial and the timeline has rows.
 
 **Exact steps:**
 
 1. Click into the Claude Code chat input box at the bottom of the terminal.
-2. Type the literal characters: `/klyne:health`
-3. Wait for the autocomplete dropdown to show **`/klyne:health`** with the description **"Classify the current session's context health and list the top bloat sources"**.
+2. Type the literal characters: `/klyne:status`
+3. Wait for the autocomplete dropdown to show **`/klyne:status`** with the description **"Unified context check — health verdict + recommended action + token timeline + top bloat sources for the active session"**.
 4. Press **Enter** to select it.
 5. Press **Enter** again to submit (no argument needed).
 6. Wait for the AI response (typically 2-5 seconds).
 
-**Success signal.** A Markdown block renders inline with:
-- A heading `# Context health: <state>` where `<state>` is one of the four verdicts
-- A "Recommended action" line
-- A "Top context-bloat sources" section with up to 3 numbered items
+**Success signal.** A single Markdown block renders inline with:
+- A heading `# Session status — <short-session-id>`
+- A line like `**State:** drifting · **Action:** continue · **Context fill:** 14%`
+- A one-sentence reason quoted underneath
+- A `## Tokens` section with a `Started at X → peaked at Y → now at Z` trajectory headline, an ASCII sparkline of bar characters `▁▂▃▄▅▆▇█`, and a Markdown table with columns `time | input tokens | % of context | cached | uncached`
+- A `## Top context-bloat sources` section with up to 3 numbered items
 
-**Frame to capture.** Full-window screenshot showing the prompt (`/klyne:health`) plus the rendered table.
+**Frame to capture.** Full-window screenshot showing the prompt (`/klyne:status`) plus the rendered output. Likely needs a scroll-up after submit to capture the verdict header above the table.
 
-**If you can't:** if the slash dropdown doesn't show `/klyne:health`, run `./bin/klyne mcp install` in another pane, restart Claude Code, and try again.
-
----
-
-### Shot 2 — `/klyne:tokens` in Claude Code chat
-
-**Goal.** Capture the per-turn token timeline rendered inline — ASCII sparkline + Markdown table + activity heatmap.
-
-**Preconditions.** G1-G5. Same Claude Code session as Shot 1 ideally (continuity).
-
-**Exact steps:**
-
-1. Click into the chat input.
-2. Type: `/klyne:tokens`
-3. Wait for autocomplete with description **"Per-turn token usage for the active session — sparkline, % of context window, and cached vs uncached split"**.
-4. Press **Enter** to select, **Enter** again to submit.
-5. Wait 2-5 seconds for the rendered response.
-
-**Success signal.** The response contains:
-- A line like `Started at X → peaked at Y → now at Z`
-- An ASCII sparkline of bar characters `▁▂▃▄▅▆▇█`
-- A Markdown table with columns `time | input tokens | % of context | cached | uncached`
-- An "Activity heatmap (IST)" block at the bottom with dots/blocks (`··░░▒▒▓▓██`)
-
-**Frame to capture.** Full-window screenshot — the sparkline + table + heatmap should all be visible. May need to scroll up after submit to capture top of response.
-
-**If you can't:** if the response is "Session has no assistant turns within the last 24h", the session is too new. Send any prompt to Claude first (e.g. "say hi"), wait for reply, then retry.
+**If you can't:** if the slash dropdown doesn't show `/klyne:status`, run `./bin/klyne mcp install` in another pane, restart Claude Code, and try again. If the response says "Session has no assistant turns yet", the session is too new — send any prompt to Claude first ("say hi"), wait for the reply, then retry.
 
 ---
 
@@ -1382,16 +1358,16 @@ If you're going for a polished video, capture in this order so the narrative is 
 2. **Shot 4** (`/klyne:precompact` against `15009012`) — the killer-feature demo
 3. **Shot 3** (`/klyne:handoff`) — the second killer-feature demo
 4. **Shot 5** (advisor hook firing) — the differentiator
-5. **Shot 2** (`/klyne:tokens`) — the trust-the-numbers moment
+5. **Shot 1** (`/klyne:status`) — the trust-the-numbers moment (verdict + token table together)
 6. **Shot 10** (green audit) — the close: "every claim has a test"
 
-Shots 1, 6, 7, 9 are B-roll for the description / extended cut.
+Shots 6, 7, 9 are B-roll for the description / extended cut. (Shot 2 was merged into Shot 1 when `/klyne:tokens` and `/klyne:health` were unified into `/klyne:status`.)
 
 ---
 
 ### Honest fallback
 
-**If any shot is a hassle to set up, narrate over the relevant CLI output from this doc and the user will get it.** The CLI is the load-bearing surface; the slash commands are the chat-native versions of the same engine. A 30-second screenshare of `./bin/klyne tokens` is, content-wise, the same as a screenshare of `/klyne:tokens` in Claude Code.
+**If any shot is a hassle to set up, narrate over the relevant CLI output from this doc and the user will get it.** The CLI is the load-bearing surface; the slash commands are the chat-native versions of the same engine. A 30-second screenshare of `./bin/klyne tokens` is, content-wise, the same as the token table inside `/klyne:status` in Claude Code.
 
 ---
 
