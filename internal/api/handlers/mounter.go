@@ -132,4 +132,11 @@ func (m *Mounter) Mount(r chi.Router) {
 	// dollar figures (subscription users don't pay per-token).
 	hInsights := NewProjectInsightsHandler(m.deps.DB)
 	r.Get(api.RouteInsightsProjects, hInsights.Get)
+
+	// /productivity — the deterministic-first AI productivity dashboard.
+	// Fuses live git activity with session telemetry into a
+	// Service→Branch→Topic record + reflection_status/nudge. No LLM at
+	// render (spec §7.1 determinism boundary).
+	hProductivity := NewProductivityHandler(m.deps.DB)
+	r.Get(api.RouteProductivity, hProductivity.Get)
 }
