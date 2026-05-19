@@ -16,7 +16,7 @@
 
   type Unit = 'tokens' | 'messages' | 'sessions';
   type SortKey = Unit | 'trend' | 'cache' | 'compact';
-  type Window = '1d' | '7d' | '30d' | '90d' | '1y';
+  type Window = '1d' | '7d' | '30d' | '90d';
 
   let unit = $state<Unit>('tokens');
   let sortBy = $state<SortKey>('tokens');
@@ -34,8 +34,7 @@
     '1d':  1 * 86_400_000,
     '7d':  7 * 86_400_000,
     '30d': 30 * 86_400_000,
-    '90d': 90 * 86_400_000,
-    '1y':  365 * 86_400_000
+    '90d': 90 * 86_400_000
   };
 
   async function load(): Promise<void> {
@@ -167,8 +166,8 @@
         <button class:active={unit === 'sessions'} onclick={() => { unit = 'sessions'; sortBy = 'sessions'; }}>Sessions</button>
       </div>
       <div class="seg">
-        {#each (['1d', '7d', '30d', '90d', '1y'] as const) as w}
-          <button class:active={win === w} onclick={() => (win = w)} title={w === '1d' ? 'Past 24 hours' : w === '1y' ? 'Past year' : `Past ${w.replace('d', ' days')}`}>{w}</button>
+        {#each (['1d', '7d', '30d', '90d'] as const) as w}
+          <button class:active={win === w} onclick={() => (win = w)} title={w === '1d' ? 'Past 24 hours' : `Past ${w.replace('d', ' days')}`}>{w}</button>
         {/each}
       </div>
     </div>
