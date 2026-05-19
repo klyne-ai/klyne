@@ -47,6 +47,12 @@ type Commit struct {
 	Insertions  int       `json:"insertions"`
 	Deletions   int       `json:"deletions"`
 	IsUser      bool      `json:"is_user"`
+	// BranchName is the branch this commit belongs to. ScanRepo leaves
+	// it empty (the scan is single-branch — see ScanResult.Branch);
+	// report assembly uses it to group multi-branch fixtures and the
+	// future per-commit branch attribution. Additive to the locked
+	// Task-2 type — existing field names are unchanged.
+	BranchName string `json:"branch_name,omitempty"`
 }
 
 // Branch groups the commits on one branch with its ship state, the raw
