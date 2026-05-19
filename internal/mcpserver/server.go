@@ -116,6 +116,15 @@ When the user has configured a plan tier (klyne config set plan <tier>), the res
 	}, HandleGetTokenTimeline)
 
 	mcp.AddTool(srv, &mcp.Tool{
+		Name: "get_session_status",
+		Description: `Unified context check for a Claude Code session — verdict + recommended action + reason + context fill % + per-turn token trajectory (sparkline + table) + top bloat sources, in one Markdown payload.
+
+Backs the /klyne:status slashcommand. Resolves the session and loads the JSONL transcript once; runs both contexthealth.Classify and contexthealth.ComputeTimeline against that single snapshot so the verdict and the timeline are guaranteed to describe the same data.
+
+Same disambiguation behaviour as get_context_health / get_token_timeline — when session_id is omitted and the cwd's project tree has multiple sessions with none uniquely active, the response is marked ambiguous and the candidate list is returned. Render the response's markdown field verbatim.`,
+	}, HandleGetSessionStatus)
+
+	mcp.AddTool(srv, &mcp.Tool{
 		Name: "bootstrap",
 		Description: `Day-1 session briefing: recent sessions, klyne runbooks (project + global), Claude auto-memory, recent reflections, and cross-AI worklog entries — all in one call.
 
