@@ -389,3 +389,64 @@ export async function fetchProjectInsights(opts: InsightsQuery = {}): Promise<Pr
     top: opts.top
   });
 }
+
+// ---------------------------------------------------------------------------
+// /productivity
+// ---------------------------------------------------------------------------
+
+/**
+ * GET /productivity — the deterministic-first AI productivity dashboard
+ * (spec docs/superpowers/specs/2026-05-19-ai-productivity-dashboard-design.md).
+ *
+ * PROTOTYPE: the response is the Go `productivity.Report` shape. It is
+ * intentionally typed loosely here — the real wire contract + frozen
+ * types are deferred to the separate UI/UX brainstorm (spec scope).
+ * since/until are epoch-ms; both default server-side (today 00:00 -> now).
+ */
+export async function fetchProductivity(
+  since?: number,
+  until?: number
+): Promise<ProductivityReport> {
+  return get<ProductivityReport>('/productivity', { since, until });
+}
+
+/** Loose mirror of Go productivity.Report — prototype only. */
+export interface ProductivityReport {
+  day: string;
+  services: ProductivityService[];
+  reflection_status: string;
+  nudge: string;
+}
+export interface ProductivityService {
+  repo: string;
+  project_path: string;
+  branches: ProductivityBranch[];
+  risks: ProductivityRisk[];
+  manual_only: boolean;
+}
+export interface ProductivityBranch {
+  name: string;
+  ticket_id: string;
+  ship: string;
+  ahead: number;
+  behind: number;
+  commits: ProductivityCommit[];
+  attributed_minutes: number;
+  narrative: string;
+}
+export interface ProductivityCommit {
+  sha: string;
+  subject: string;
+  author: string;
+  author_email: string;
+  committed_at: string;
+  files: number;
+  insertions: number;
+  deletions: number;
+  is_user: boolean;
+}
+export interface ProductivityRisk {
+  kind: string;
+  detail: string;
+  age_minutes: number;
+}
