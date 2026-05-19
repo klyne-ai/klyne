@@ -53,6 +53,7 @@ func TestAllRoutesContainsExpected(t *testing.T) {
 		RouteWorklog,
 		RouteWorklogProject,
 		RouteInsightsProjects,
+		RouteProductivity,
 	}
 	got := AllRoutes()
 	if len(got) != len(expected) {
