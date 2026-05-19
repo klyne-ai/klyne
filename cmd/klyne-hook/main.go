@@ -99,20 +99,14 @@ func main() {
 
 	resp, callErr := hookrpc.Call(req)
 	if callErr != nil {
-		// ErrDaemonUnavailable is the documented "fall back" signal.
-		// Any other error type (none exist today) would also degrade
-		// to fallback — better to spawn the heavy binary than fail
-		// the hook silently.
-		if errors.Is(callErr, hookrpc.ErrDaemonUnavailable) {
-			// Emit a throttled, user-visible warning so the user
-			// knows the daemon needs to start. Silently falling back
-			// to the heavy exec means jetsam kills the subprocess on
-			// memory-pressured machines and the user sees a generic
-			// "non-blocking status code" error with no path forward.
-			warnDaemonDownIfNeeded()
-			exitViaFallback(event, payload, nil)
-		}
-		exitViaFallback(event, payload, callErr)
+		// Any call error (dial failure, write/read timeout, wedged
+		// handler) means the daemon's fast path is unusable. Emit the
+		// throttled, user-visible warning so the user knows what to
+		// do, then fall back to exec'ing the full binary. The warning
+		// covers every failure mode because from the user's
+		// perspective they all look the same: hooks not working.
+		warnDaemonDownIfNeeded()
+		exitViaFallback(event, payload, nil)
 	}
 
 	if len(resp.Stdout) > 0 {
@@ -132,11 +126,12 @@ func main() {
 func exitViaFallback(event hookrpc.Event, payload []byte, reason error) {
 	bin := findFallbackBinary()
 	if bin == "" {
-		// No klyne binary anywhere. The hook can't run — exit silent
-		// so Claude Code doesn't surface a noisy error.
-		if reason != nil {
-			fmt.Fprintf(os.Stderr, "klyne-hook: %v (no fallback binary)\n", reason)
-		}
+		// No klyne binary anywhere — neither the daemon's fast path
+		// nor the full-binary exec is available. Tell the user
+		// explicitly that klyne isn't installed correctly so they
+		// don't keep hitting silent hook failures. Throttled the same
+		// way the daemon-down warning is.
+		warnNoBinaryIfNeeded(reason)
 		os.Exit(0)
 	}
 
@@ -227,11 +222,8 @@ const daemonDownSentinelName = "daemon-down-warned-at"
 // warning and touch the file. Best-effort — any I/O failure is
 // swallowed because hooks must never block.
 func warnDaemonDownIfNeeded() {
-	sentinel := filepath.Join(config.ConfigDir(), daemonDownSentinelName)
-	if info, err := os.Stat(sentinel); err == nil {
-		if time.Since(info.ModTime()) < daemonDownWarningInterval {
-			return
-		}
+	if throttled(daemonDownSentinelName) {
+		return
 	}
 	fmt.Fprintln(os.Stderr,
 		"klyne: daemon not reachable. Start it with `klyne start` "+
@@ -240,11 +232,64 @@ func warnDaemonDownIfNeeded() {
 			"kernel may kill under memory pressure (you'll see "+
 			"\"Failed with non-blocking status code\" errors). Run "+
 			"`klyne start` once in any terminal — it backgrounds itself.")
-	// Touch the sentinel so we don't repeat for the throttle interval.
-	// MkdirAll handles the first-ever run where ~/.klyne doesn't exist yet.
-	if err := os.MkdirAll(filepath.Dir(sentinel), 0o700); err != nil {
+	touchSentinel(daemonDownSentinelName)
+}
+
+// noBinarySentinelName tracks throttle state for the "no klyne binary
+// anywhere" warning — distinct from the daemon-down sentinel because
+// the user's fix is different (install klyne, not start it).
+const noBinarySentinelName = "no-binary-warned-at"
+
+// warnNoBinaryIfNeeded fires when klyne-hook can find neither the
+// daemon socket nor a full klyne binary on disk. That state means the
+// install is broken: only the stub got laid down. Throttled the same
+// way as the daemon-down warning so we don't flood, but the message
+// is distinct so the user knows the fix is `make install`, not
+// `klyne start`. reason (if non-nil) is included for diagnostic
+// context — e.g. when stdin read failed.
+func warnNoBinaryIfNeeded(reason error) {
+	if throttled(noBinarySentinelName) {
 		return
 	}
+	if reason != nil {
+		fmt.Fprintf(os.Stderr,
+			"klyne: hook fired but neither the daemon nor a fallback "+
+				"klyne binary is available (and: %v). Reinstall with "+
+				"`make install` from the klyne repo, or set the "+
+				"KLYNE_BINARY env var to point at your klyne binary.\n",
+			reason)
+	} else {
+		fmt.Fprintln(os.Stderr,
+			"klyne: hook fired but neither the daemon nor a fallback "+
+				"klyne binary is available. Reinstall with `make install` "+
+				"from the klyne repo, or set the KLYNE_BINARY env var to "+
+				"point at your klyne binary.")
+	}
+	touchSentinel(noBinarySentinelName)
+}
+
+// throttled returns true when the named sentinel file was touched
+// within daemonDownWarningInterval. Used to suppress repeated warnings
+// inside the same window.
+func throttled(name string) bool {
+	sentinel := filepath.Join(config.ConfigDir(), name)
+	if info, err := os.Stat(sentinel); err == nil {
+		if time.Since(info.ModTime()) < daemonDownWarningInterval {
+			return true
+		}
+	}
+	return false
+}
+
+// touchSentinel writes (or refreshes the mtime of) the named sentinel
+// file in config.ConfigDir(). Best-effort — any I/O failure is
+// swallowed.
+func touchSentinel(name string) {
+	dir := config.ConfigDir()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return
+	}
+	sentinel := filepath.Join(dir, name)
 	f, err := os.Create(sentinel)
 	if err == nil {
 		_ = f.Close()
