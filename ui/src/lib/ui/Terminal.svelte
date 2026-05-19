@@ -45,9 +45,16 @@
   }
   const shortId = $derived(thread.session_id.slice(0, 8));
 
+  // Fetch a generous backlog so the focus-modal surface (which renders
+  // the same component fullscreen) has older turns to scroll back into.
+  // The conversational-message filter strips tool calls, so a session
+  // with heavy tool use can collapse a 20-msg tail down to 2-3 visible
+  // turns. Server cap is 500; 200 is the comfortable middle.
+  const FETCH_LIMIT = 200;
+
   async function load(): Promise<void> {
     try {
-      const resp = await fetchMessages(thread.session_id, { limit: 20, order: 'desc' });
+      const resp = await fetchMessages(thread.session_id, { limit: FETCH_LIMIT, order: 'desc' });
       messages = resp.messages.slice().reverse();
     } catch {
       messages = [];
