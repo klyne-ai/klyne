@@ -66,30 +66,18 @@ type BootstrapInput struct {
 	CWD string `json:"cwd,omitempty" jsonschema:"override the working directory; defaults to current process cwd"`
 }
 
-// BootstrapHealthSummary is the trimmed-down view of the latest
-// session's context-health verdict surfaced in the brief. Keeps the
-// payload small — the agent can call `get_context_health` directly for
-// the full bloat report.
-type BootstrapHealthSummary struct {
-	SessionID      string `json:"session_id" jsonschema:"the session id whose health is reported"`
-	State          string `json:"state" jsonschema:"context-health state classification (healthy / drifting / risky / rescue_now)"`
-	Action         string `json:"action" jsonschema:"recommended next action (continue / consider-handoff / handoff-now / compact-pending)"`
-	ContextFillPct int    `json:"context_fill_pct" jsonschema:"percent of context window consumed by the next turn (0..100)"`
-}
-
 // BootstrapOutput is the structured payload returned by HandleBootstrap.
 type BootstrapOutput struct {
-	CWD                   string                  `json:"cwd" jsonschema:"the working directory that was searched"`
-	Sessions              []CandidateRow          `json:"sessions" jsonschema:"up to 3 most-recent sessions in this project, newest first"`
-	ProjectMemories       []store.Decision        `json:"project_memories" jsonschema:"up to 5 most-recent project-scoped klyne (SQLite) memories"`
-	GlobalMemoryCount     int                     `json:"global_memory_count" jsonschema:"total global runbook count (project_path = \"\")"`
-	GlobalMemoriesPreview []store.Decision        `json:"global_memories_preview" jsonschema:"up to 3 most-recent global klyne (SQLite) memories"`
-	ClaudeAutoMemory      ClaudeAutoMemory        `json:"claude_auto_memory" jsonschema:"on-disk Claude auto-memory for this project (~/.claude/projects/<encoded-cwd>/memory/) — separate store, separate writer"`
-	LatestHealth          *BootstrapHealthSummary `json:"latest_health,omitempty" jsonschema:"context-health verdict for the most-recently modified session, when one exists"`
-	WorklogEntries        []RecapEntry            `json:"worklog_entries" jsonschema:"recent worklog entries from both Claude and Codex sessions in this project (capped, newest-first)"`
-	Reflections           []ReflectionSummary     `json:"reflections,omitempty" jsonschema:"latest synthesized daily reflections for this project"`
-	ReflectionDue         bool                    `json:"reflection_due" jsonschema:"true when importance-sum threshold or weekly-cron trigger fires; host should suggest /klyne:reflect to write per-day reflections"`
-	Markdown              string                  `json:"markdown" jsonschema:"slash-prompt-ready markdown rendering (verbatim-echo target)"`
+	CWD                   string              `json:"cwd" jsonschema:"the working directory that was searched"`
+	Sessions              []CandidateRow      `json:"sessions" jsonschema:"up to 3 most-recent sessions in this project, newest first"`
+	ProjectMemories       []store.Decision    `json:"project_memories" jsonschema:"up to 5 most-recent project-scoped klyne (SQLite) memories"`
+	GlobalMemoryCount     int                 `json:"global_memory_count" jsonschema:"total global runbook count (project_path = \"\")"`
+	GlobalMemoriesPreview []store.Decision    `json:"global_memories_preview" jsonschema:"up to 3 most-recent global klyne (SQLite) memories"`
+	ClaudeAutoMemory      ClaudeAutoMemory    `json:"claude_auto_memory" jsonschema:"on-disk Claude auto-memory for this project (~/.claude/projects/<encoded-cwd>/memory/) — separate store, separate writer"`
+	WorklogEntries        []RecapEntry        `json:"worklog_entries" jsonschema:"recent worklog entries from both Claude and Codex sessions in this project (capped, newest-first)"`
+	Reflections           []ReflectionSummary `json:"reflections,omitempty" jsonschema:"latest synthesized daily reflections for this project"`
+	ReflectionDue         bool                `json:"reflection_due" jsonschema:"true when importance-sum threshold or weekly-cron trigger fires; host should suggest /klyne:reflect to write per-day reflections"`
+	Markdown              string              `json:"markdown" jsonschema:"slash-prompt-ready markdown rendering (verbatim-echo target)"`
 }
 
 // HandleBootstrap synthesises the Day-1 briefing. Read-only across all
@@ -244,27 +232,6 @@ func HandleBootstrap(ctx context.Context, _ *mcp.CallToolRequest, in BootstrapIn
 		// unreadable file should not fail the bootstrap call.
 	}
 
-	// --- latest health: delegate to the existing handler ------------
-	// We pick the newest-modified session (cands[0]) so the verdict
-	// reflects whichever session the agent is most likely resuming.
-	// If the delegated call errors or returns an ambiguous /
-	// no-session result, we leave LatestHealth nil — the agent will
-	// see the absence and can decide whether to fetch directly.
-	if len(cands) > 0 {
-		_, hOut, hErr := HandleGetContextHealth(ctx, nil, GetContextHealthInput{
-			CWD:       cwd,
-			SessionID: cands[0].SessionID,
-		})
-		if hErr == nil && !hOut.Ambiguous && hOut.State != "" {
-			out.LatestHealth = &BootstrapHealthSummary{
-				SessionID:      hOut.SessionID,
-				State:          hOut.State,
-				Action:         hOut.Action,
-				ContextFillPct: int(hOut.ContextFillPct + 0.5),
-			}
-		}
-	}
-
 	out.Markdown = formatBootstrapAsMarkdown(out)
 
 	summary := fmt.Sprintf(
@@ -382,15 +349,6 @@ func formatBootstrapAsMarkdown(out BootstrapOutput) string {
 				e.CLI, title, humanAgo(e.TS), e.Importance)
 		}
 		b.WriteString("\n")
-	}
-
-	// --- latest health (only when populated) -----------------------
-	if out.LatestHealth != nil {
-		b.WriteString("## Current session health\n\n")
-		fmt.Fprintf(&b, "- Session: `%s`\n", short(out.LatestHealth.SessionID))
-		fmt.Fprintf(&b, "- State: `%s`\n", out.LatestHealth.State)
-		fmt.Fprintf(&b, "- Action: `%s`\n", out.LatestHealth.Action)
-		fmt.Fprintf(&b, "- Context fill: %d%%\n", out.LatestHealth.ContextFillPct)
 	}
 
 	return b.String()

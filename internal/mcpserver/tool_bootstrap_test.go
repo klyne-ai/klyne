@@ -69,9 +69,6 @@ func TestHandleBootstrap_EmptyProject(t *testing.T) {
 	if len(out.GlobalMemoriesPreview) != 0 {
 		t.Errorf("GlobalMemoriesPreview len = %d, want 0", len(out.GlobalMemoriesPreview))
 	}
-	if out.LatestHealth != nil {
-		t.Errorf("LatestHealth = %+v, want nil for empty project", out.LatestHealth)
-	}
 	// Every section must show `_(none)_` so the agent renders a
 	// stable shape even on a brand-new project.
 	for _, section := range []string{"Recent sessions", "klyne runbooks", "Claude auto-memory", "Recent reflections", "Recent worklog entries (cross-AI)"} {
@@ -82,9 +79,10 @@ func TestHandleBootstrap_EmptyProject(t *testing.T) {
 	if !strings.Contains(out.Markdown, "_(none)_") {
 		t.Errorf("Markdown missing _(none)_ placeholder\n%s", out.Markdown)
 	}
-	// LatestHealth absent → no "Current session health" section.
+	// /klyne:status now owns the health verdict. Bootstrap must not
+	// re-render it here.
 	if strings.Contains(out.Markdown, "Current session health") {
-		t.Errorf("Markdown should omit 'Current session health' when LatestHealth is nil\n%s", out.Markdown)
+		t.Errorf("Markdown must not include 'Current session health' — that surface moved to /klyne:status\n%s", out.Markdown)
 	}
 	// No entries → no reflection-due advisory.
 	if out.ReflectionDue {
