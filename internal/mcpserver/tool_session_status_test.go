@@ -1,6 +1,10 @@
 package mcpserver
 
 import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -155,5 +159,101 @@ func TestFormatSessionStatus_UnknownContextWindow(t *testing.T) {
 	}
 	if !strings.Contains(md, "input tokens") {
 		t.Errorf("4-col table variant must still include 'input tokens' header: %s", md)
+	}
+}
+
+// TestHandleGetSessionStatus_NoSession returns the no-session
+// markdown when the cwd has no candidates.
+func TestHandleGetSessionStatus_NoSession(t *testing.T) {
+	withFakeHome(t)
+	_, out, err := HandleGetSessionStatus(context.Background(), nil, GetSessionStatusInput{
+		CWD: "/tmp/proj-no-sessions",
+	})
+	if err != nil {
+		t.Fatalf("HandleGetSessionStatus: %v", err)
+	}
+	if !strings.Contains(out.Markdown, "No Claude Code session") {
+		t.Errorf("expected no-session markdown, got: %s", out.Markdown)
+	}
+	if out.State != "" {
+		t.Errorf("State must be empty when no session: %q", out.State)
+	}
+	if len(out.Points) != 0 {
+		t.Errorf("Points must be empty when no session")
+	}
+}
+
+// TestHandleGetSessionStatus_HappyPath seeds one session under the
+// cwd's project tree, calls the handler, and verifies the Markdown
+// contains both the verdict section and the Tokens section.
+func TestHandleGetSessionStatus_HappyPath(t *testing.T) {
+	home := withFakeHome(t)
+	cwd := "/tmp/proj-status-happy"
+	dir := filepath.Join(home, ".claude", "projects", EncodeCWD(cwd))
+	// Two assistant turns is the minimum the timeline needs to draw
+	// first/peak/latest distinctly. Pick token counts that produce a
+	// visible trajectory.
+	now := time.Now()
+	lines := []string{
+		fmt.Sprintf(`{"type":"user","sessionId":"sess-happy","timestamp":%q,"message":{"role":"user","content":[{"type":"text","text":"start"}]}}`, now.Add(-10*time.Minute).UTC().Format(time.RFC3339Nano)),
+		fmt.Sprintf(`{"type":"assistant","sessionId":"sess-happy","timestamp":%q,"message":{"role":"assistant","model":"claude-opus-4-7","usage":{"input_tokens":5000,"cache_read_input_tokens":2000,"output_tokens":100}}}`, now.Add(-9*time.Minute).UTC().Format(time.RFC3339Nano)),
+		fmt.Sprintf(`{"type":"user","sessionId":"sess-happy","timestamp":%q,"message":{"role":"user","content":[{"type":"text","text":"more"}]}}`, now.Add(-5*time.Minute).UTC().Format(time.RFC3339Nano)),
+		fmt.Sprintf(`{"type":"assistant","sessionId":"sess-happy","timestamp":%q,"message":{"role":"assistant","model":"claude-opus-4-7","usage":{"input_tokens":12000,"cache_read_input_tokens":8000,"output_tokens":200}}}`, now.Add(-4*time.Minute).UTC().Format(time.RFC3339Nano)),
+	}
+	writeJSONL(t, dir, "session-happy.jsonl", lines...)
+
+	_, out, err := HandleGetSessionStatus(context.Background(), nil, GetSessionStatusInput{CWD: cwd})
+	if err != nil {
+		t.Fatalf("HandleGetSessionStatus: %v", err)
+	}
+	if out.State == "" {
+		t.Errorf("State should be populated for a seeded session, got empty; markdown:\n%s", out.Markdown)
+	}
+	if !strings.Contains(out.Markdown, "# Session status") {
+		t.Errorf("happy-path markdown missing verdict header:\n%s", out.Markdown)
+	}
+	if !strings.Contains(out.Markdown, "## Tokens") {
+		t.Errorf("happy-path markdown missing Tokens section:\n%s", out.Markdown)
+	}
+}
+
+// TestHandleGetSessionStatus_AmbiguousCWD seeds two sessions in the
+// same project tree that are both within the active window so the
+// resolver cannot pick one — handler must surface candidates without
+// guessing.
+func TestHandleGetSessionStatus_AmbiguousCWD(t *testing.T) {
+	home := withFakeHome(t)
+	cwd := "/tmp/proj-status-ambiguous"
+	dir := filepath.Join(home, ".claude", "projects", EncodeCWD(cwd))
+	now := time.Now()
+	// Both sessions sit OUTSIDE the 30s active window (so neither
+	// triggers PickActiveSession's preference), forcing the resolver
+	// into the ambiguous branch.
+	base := now.Add(-2 * time.Hour)
+	for i := 1; i <= 2; i++ {
+		name := fmt.Sprintf("session-%d.jsonl", i)
+		line := fmt.Sprintf(
+			`{"type":"user","sessionId":"sess-%d","timestamp":%q,"message":{"role":"user","content":[{"type":"text","text":"a"}]}}`,
+			i, base.Add(time.Duration(i)*time.Minute).UTC().Format(time.RFC3339Nano),
+		)
+		p := writeJSONL(t, dir, name, line)
+		mtime := base.Add(time.Duration(i) * time.Minute)
+		if err := os.Chtimes(p, mtime, mtime); err != nil {
+			t.Fatalf("chtimes %s: %v", name, err)
+		}
+	}
+
+	_, out, err := HandleGetSessionStatus(context.Background(), nil, GetSessionStatusInput{CWD: cwd})
+	if err != nil {
+		t.Fatalf("HandleGetSessionStatus: %v", err)
+	}
+	if !out.Ambiguous {
+		t.Errorf("expected Ambiguous=true, got %+v", out)
+	}
+	if len(out.Candidates) != 2 {
+		t.Errorf("expected 2 candidates, got %d", len(out.Candidates))
+	}
+	if !strings.Contains(out.Markdown, "get_session_status") {
+		t.Errorf("ambiguous markdown must reference the tool name; got:\n%s", out.Markdown)
 	}
 }

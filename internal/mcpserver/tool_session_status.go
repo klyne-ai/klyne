@@ -2,14 +2,15 @@ package mcpserver
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/klyne-ai/klyne/internal/connectors"
 	"github.com/klyne-ai/klyne/internal/contexthealth"
+	"github.com/klyne-ai/klyne/internal/usage"
 )
 
 // tool_session_status.go — get_session_status MCP tool.
@@ -56,11 +57,108 @@ type GetSessionStatusOutput struct {
 	Markdown       string                        `json:"markdown" jsonschema:"slash-prompt-ready markdown rendering (verbatim-echo target)"`
 }
 
-// HandleGetSessionStatus is the MCP entry point. Stub — Task 5 wires
-// the real composition. Returns "not implemented" so the package
-// compiles before the renderer lands.
-func HandleGetSessionStatus(_ context.Context, _ *mcp.CallToolRequest, _ GetSessionStatusInput) (*mcp.CallToolResult, GetSessionStatusOutput, error) {
-	return nil, GetSessionStatusOutput{}, errors.New("not implemented")
+// HandleGetSessionStatus resolves the session, loads the JSONL
+// snapshot, runs Classify + ComputeTimeline against it, and composes
+// the unified Markdown. Single source of truth for /klyne:status.
+func HandleGetSessionStatus(ctx context.Context, _ *mcp.CallToolRequest, in GetSessionStatusInput) (*mcp.CallToolResult, GetSessionStatusOutput, error) {
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, contextHealthDefaultDeadline)
+		defer cancel()
+	}
+
+	path, ambiguous, cands, err := resolveSession(ctx, GetContextHealthInput{
+		SessionID: in.SessionID,
+		CWD:       in.CWD,
+	})
+	if err != nil {
+		return nil, GetSessionStatusOutput{}, err
+	}
+	if ambiguous {
+		rows := make([]CandidateRow, 0, len(cands))
+		for _, c := range cands {
+			rows = append(rows, CandidateRow{
+				SessionID: c.SessionID,
+				Preview:   c.Preview,
+				IsActive:  c.IsActive,
+				ModTime:   c.ModTime.UTC().Format(timeRFC3339),
+				MsgCount:  c.MsgCount,
+			})
+		}
+		const reason = "Multiple Claude Code sessions in this project. Pick one and call get_session_status again with session_id."
+		ambOut := GetSessionStatusOutput{Ambiguous: true, Candidates: rows}
+		ambOut.Markdown = formatSessionStatusAsMarkdown(ambOut, time.Local, "")
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: reason}},
+		}, ambOut, nil
+	}
+	if path == "" {
+		const msg = "No Claude Code session found for this working directory."
+		out := GetSessionStatusOutput{Reason: msg, Markdown: msg}
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: msg}},
+		}, out, nil
+	}
+
+	snap, err := LoadSnapshot(ctx, path)
+	if err != nil {
+		return nil, GetSessionStatusOutput{}, fmt.Errorf("load snapshot: %w", err)
+	}
+
+	// Verdict.
+	res := contexthealth.Classify(contexthealth.Input{
+		SessionID:      snap.SessionID,
+		CLI:            connectors.CLIClaude,
+		Model:          snap.Model,
+		ContextFillPct: snap.ContextFillPct,
+		MsgCount:       snap.MsgCount,
+		Messages:       snap.Messages,
+	})
+
+	// Timeline — same default window as /klyne:tokens (full session
+	// when no window passed, capped at 24h in resolveWindowMs).
+	now := time.Now().UnixMilli()
+	tl := contexthealth.ComputeTimeline(snap.Messages, now, resolveWindowMs("", 0), 0)
+	if tl.SessionID == "" {
+		tl.SessionID = snap.SessionID
+	}
+	if tl.Model == "" {
+		tl.Model = snap.Model
+	}
+	tl.ContextWindow = usage.ContextWindowForModel(tl.Model)
+
+	out := GetSessionStatusOutput{
+		SessionID:      snap.SessionID,
+		Path:           snap.Path,
+		Model:          snap.Model,
+		State:          string(res.State),
+		Action:         string(res.Action),
+		Reason:         res.Reason,
+		ContextFillPct: snap.ContextFillPct,
+		MsgCount:       snap.MsgCount,
+		Bloat:          res.Bloat,
+		Points:         tl.Points,
+		LatestInput:    tl.LatestInput,
+		PeakInput:      tl.PeakInput,
+		FirstInput:     tl.FirstInput,
+		ContextWindow:  tl.ContextWindow,
+		WindowStartMs:  tl.WindowStartMs,
+		WindowEndMs:    tl.WindowEndMs,
+	}
+
+	loc := time.Local
+	tzName, _ := time.Now().In(loc).Zone()
+	if tzName == "" {
+		tzName = "local"
+	}
+	out.Markdown = formatSessionStatusAsMarkdown(out, loc, tzName)
+
+	// AI-facing summary stays terse — one sentence. The Markdown is
+	// the verbatim-echo target.
+	summary := fmt.Sprintf("Session `%s`: %s · %s", short(out.SessionID), out.State, out.Action)
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{&mcp.TextContent{Text: summary}},
+	}, out, nil
 }
 
 // formatSessionStatusAsMarkdown renders the unified status output.
