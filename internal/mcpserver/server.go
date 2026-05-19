@@ -204,6 +204,8 @@ Useful before starting a refactor or code review to learn which files the projec
 
 Use this when the user states a load-bearing choice that you want to remember in a future Claude Code or Codex run — "we picked Postgres over SQLite because the team already runs PG", "drop /api/v1 — v2 was rolled out 2026-04-12", etc.
 
+BEFORE calling this tool: check the MCP Instructions inventory shown at session start. If an existing runbook for this project already covers the same topic, call mcp__klyne__recall to read it instead of creating a parallel entry. Re-recording reworded versions of the same content creates duplicates that pile up — the server will dedup an exact-text match in the same project, but reworded near-duplicates slip through and surface as separate runbooks in the UI.
+
 Inputs: text (required), optional project_path (defaults to cwd), optional session_id, optional tags. Returns the decision id so you can echo it back. Free-form text; keep it under ~300 chars for terminal readability.`,
 	}, HandleRecordDecision)
 

@@ -104,12 +104,32 @@ func HandleRecordDecision(ctx context.Context, _ *mcp.CallToolRequest, in Record
 	}
 	defer db.Close()
 
+	body := strings.TrimSpace(in.Text)
+
+	// Dedup: if the same body already exists in this project, return
+	// that id instead of inserting a parallel row. Catches the model
+	// fanning out the same runbook across multiple sessions.
+	if existing, err := store.FindDecisionByText(ctx, db, proj, body); err != nil {
+		return nil, RecordDecisionOutput{}, err
+	} else if existing != nil {
+		out := RecordDecisionOutput{
+			ID:          existing.ID,
+			Ts:          existing.Ts,
+			ProjectPath: existing.ProjectPath,
+			SessionID:   existing.SessionID,
+		}
+		summary := fmt.Sprintf("decision deduplicated against existing: %s", existing.ID)
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: summary}},
+		}, out, nil
+	}
+
 	d := &store.Decision{
 		ID:          mintDecisionID(),
 		Ts:          time.Now().UnixMilli(),
 		ProjectPath: proj,
 		SessionID:   in.SessionID,
-		Text:        strings.TrimSpace(in.Text),
+		Text:        body,
 		Tags:        sanitizeTags(in.Tags),
 	}
 	if err := store.InsertDecision(ctx, db, d); err != nil {

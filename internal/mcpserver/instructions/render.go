@@ -99,5 +99,11 @@ check whether one applies:
 
 If a runbook matches, echo the substituted commands in a fenced block
 and confirm BEFORE executing.
+
+Before calling mcp__klyne__record_decision for a new runbook, scan the
+inventory above. If a similar entry already exists for this project,
+call mcp__klyne__recall to read it. If it's still accurate, do NOT
+re-record — duplicates pile up. If it needs replacement, confirm with
+the user and delete the old one (mcp__klyne__delete_memory) first.
 `)
 }

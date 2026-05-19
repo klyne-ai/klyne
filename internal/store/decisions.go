@@ -32,6 +32,33 @@ type DecisionFilter struct {
 	Limit       int
 }
 
+// FindDecisionByText returns the most recent decision in projectPath
+// whose text exactly matches body (after caller-side TrimSpace). Returns
+// (nil, nil) when no match exists. Used by HandleRecordDecision to make
+// record_decision idempotent against same-text re-records within one
+// project — guards against the model accidentally creating parallel
+// runbook entries on a topic the project already has.
+func FindDecisionByText(ctx context.Context, db *DB, projectPath, body string) (*Decision, error) {
+	const q = `SELECT id, ts, project_path, session_id, text, tags_json
+FROM decisions
+WHERE project_path = ? AND text = ?
+ORDER BY ts DESC
+LIMIT 1`
+	row := db.Read().QueryRowContext(ctx, q, projectPath, body)
+	var d Decision
+	var tagsJSON string
+	if err := row.Scan(&d.ID, &d.Ts, &d.ProjectPath, &d.SessionID, &d.Text, &tagsJSON); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("store: find decision by text: %w", err)
+	}
+	if tagsJSON != "" {
+		_ = json.Unmarshal([]byte(tagsJSON), &d.Tags)
+	}
+	return &d, nil
+}
+
 // InsertDecision writes a new decision row. The id MUST already be set
 // by the caller (typically a UUID); we don't generate one here so the
 // caller can echo it back to the user.

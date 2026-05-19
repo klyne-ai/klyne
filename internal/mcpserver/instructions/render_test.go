@@ -117,6 +117,11 @@ func TestRenderDirective_ContainsKeyPhrases(t *testing.T) {
 		"Operational asks",
 		"Topical match",
 		"confirm BEFORE executing",
+		// Anti-duplication guidance — load-bearing for preventing the
+		// model from re-recording the same runbook across sessions.
+		"Before calling mcp__klyne__record_decision",
+		"do NOT\nre-record",
+		"mcp__klyne__delete_memory",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("directive missing %q\nfull text:\n%s", want, got)
