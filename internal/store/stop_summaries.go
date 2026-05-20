@@ -251,6 +251,85 @@ func ReadWorklogEntry(ctx context.Context, db *DB, sessionID string, ts int64) (
 	return entry, verdict, nil
 }
 
+// PendingWorklogEntry is one row the Phase 5 worker queue surfaces —
+// the base stop_summaries data plus the worklog_attempts counter the
+// worker needs to compute the next attempts value when persisting.
+// Embeds StopSummary so the worker code reads naturally (row.SessionID,
+// row.Ts, row.Summary).
+type PendingWorklogEntry struct {
+	StopSummary
+	WorklogAttempts int
+}
+
+// ListPendingWorklogEntries returns rows the worker queue should
+// drain: verdict IN ('','pending') AND attempts < maxAttempts,
+// oldest first. limit caps the batch size; the worker uses small
+// batches so a slow LLM doesn't starve later turns.
+//
+// The "verdict='' OR verdict='pending'" filter is the persistent
+// queue signal (Phase 5 design): '' is "never processed" (Stop hook
+// wrote the row but worker hasn't seen it yet) and 'pending' is
+// "worker has attempted at least once and is retrying". Both should
+// be picked up; terminal states (admitted-*, skipped-*, failed-permanent)
+// are excluded so the worker doesn't reprocess them.
+func ListPendingWorklogEntries(ctx context.Context, db *DB, limit, maxAttempts int) ([]PendingWorklogEntry, error) {
+	if limit <= 0 {
+		limit = 25
+	}
+	const q = `
+SELECT session_id, ts, project_path, cli, summary, last_user, last_bash, files_json,
+       worklog_attempts
+  FROM stop_summaries
+ WHERE worklog_gate_verdict IN ('', 'pending')
+   AND worklog_attempts < ?
+ ORDER BY ts ASC
+ LIMIT ?`
+	rows, err := db.Read().QueryContext(ctx, q, maxAttempts, limit)
+	if err != nil {
+		return nil, fmt.Errorf("store: list pending worklog entries: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+
+	out := make([]PendingWorklogEntry, 0)
+	for rows.Next() {
+		var e PendingWorklogEntry
+		var filesJSON string
+		if err := rows.Scan(&e.SessionID, &e.Ts, &e.ProjectPath, &e.CLI, &e.Summary,
+			&e.LastUser, &e.LastBash, &filesJSON, &e.WorklogAttempts); err != nil {
+			return nil, fmt.Errorf("store: scan pending: %w", err)
+		}
+		if filesJSON != "" {
+			_ = json.Unmarshal([]byte(filesJSON), &e.Files)
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// IncrementWorklogAttempts bumps worklog_attempts by 1 and sets the
+// verdict, leaving everything else (the deterministic body, the 015
+// worklog metadata, the rich entry_json) untouched. Used by the
+// worker on transient LLM failures to schedule a retry on the next
+// tick without clobbering any earlier successful entry write.
+func IncrementWorklogAttempts(ctx context.Context, db *DB, sessionID string, ts int64, verdict string) error {
+	if strings.TrimSpace(sessionID) == "" {
+		return errors.New("store: increment attempts: session_id required")
+	}
+	const q = `
+UPDATE stop_summaries
+   SET worklog_gate_verdict = ?,
+       worklog_attempts     = worklog_attempts + 1
+ WHERE session_id = ? AND ts = ?`
+	res, err := db.Write().ExecContext(ctx, q, verdict, sessionID, ts)
+	if err != nil {
+		return fmt.Errorf("store: increment worklog attempts: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("store: increment worklog attempts: no row for (%s, %d)", sessionID, ts)
+	}
+	return nil
+}
+
 // LatestStopSummaryForProject returns the most recent stop-hook
 // summary scoped to projectPath, or nil if there is none. Empty
 // projectPath returns the most recent summary across all projects.
