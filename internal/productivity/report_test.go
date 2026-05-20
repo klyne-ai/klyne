@@ -219,6 +219,100 @@ func TestBuildReport_WorktreesCollapseToOneServicePerCanonicalRepo(t *testing.T)
 	}
 }
 
+// TestBuildReport_MinutesByCLI checks Change 2 surfacing: RepoTime.ByCLI
+// must reach the API as Service.MinutesByCLI (Service-level: time is
+// repo-scoped, not branch-scoped) and roll up into Report.MinutesByCLI.
+// TestBuildBranches_ShipSpan checks Change 3: a branch's ShipSpanMinutes
+// is the minutes between its earliest and latest commit CommittedAt, and
+// FirstCommitAt/LastCommitAt carry those anchors.
+func TestBuildBranches_ShipSpan(t *testing.T) {
+	base := time.Date(2026, 5, 19, 9, 0, 0, 0, time.UTC)
+	sc := ScanResult{Repo: "svc", Dir: "/svc", Branch: "feat/x", Ship: ShipLocal}
+	commits := []Commit{
+		{SHA: "11111111", Subject: "first", CommittedAt: base, IsUser: true},
+		{SHA: "22222222", Subject: "mid", CommittedAt: base.Add(45 * time.Minute), IsUser: true},
+		{SHA: "33333333", Subject: "last", CommittedAt: base.Add(150 * time.Minute), IsUser: true},
+	}
+	branches := buildBranches(sc, commits, RepoTime{AIMinutes: 60})
+	if len(branches) != 1 {
+		t.Fatalf("len(branches) = %d; want 1", len(branches))
+	}
+	b := branches[0]
+	if !b.FirstCommitAt.Equal(base) {
+		t.Errorf("FirstCommitAt = %v; want %v", b.FirstCommitAt, base)
+	}
+	if !b.LastCommitAt.Equal(base.Add(150 * time.Minute)) {
+		t.Errorf("LastCommitAt = %v; want %v", b.LastCommitAt, base.Add(150*time.Minute))
+	}
+	if b.ShipSpanMinutes != 150 {
+		t.Errorf("ShipSpanMinutes = %d; want 150 (earliest→latest commit)", b.ShipSpanMinutes)
+	}
+}
+
+// TestBuildBranches_ShipSpanSingleCommitIsZero checks Change 3 edge: a
+// branch with fewer than 2 commits has ShipSpanMinutes 0 (no span).
+func TestBuildBranches_ShipSpanSingleCommitIsZero(t *testing.T) {
+	base := time.Date(2026, 5, 19, 9, 0, 0, 0, time.UTC)
+	sc := ScanResult{Repo: "svc", Dir: "/svc", Branch: "feat/x", Ship: ShipLocal}
+	commits := []Commit{{SHA: "11111111", Subject: "only", CommittedAt: base, IsUser: true}}
+	b := buildBranches(sc, commits, RepoTime{})[0]
+	if b.ShipSpanMinutes != 0 {
+		t.Errorf("ShipSpanMinutes = %d; want 0 (<2 commits)", b.ShipSpanMinutes)
+	}
+	if !b.FirstCommitAt.Equal(base) || !b.LastCommitAt.Equal(base) {
+		t.Errorf("single-commit anchors = %v/%v; want both %v", b.FirstCommitAt, b.LastCommitAt, base)
+	}
+}
+
+// TestBuildReport_MinutesByCLI checks Change 2 surfacing: RepoTime.ByCLI
+// must reach the API as Service.MinutesByCLI (Service-level: time is
+// repo-scoped, not branch-scoped) and roll up into Report.MinutesByCLI.
+func TestBuildReport_MinutesByCLI(t *testing.T) {
+	now := time.Date(2026, 5, 19, 16, 0, 0, 0, time.UTC)
+	in := ReportInput{
+		Day: "2026-05-19",
+		Now: now,
+		Scans: []ScanResult{
+			{
+				Repo: "svc-a", Dir: "/r/a", Branch: "main", Ship: ShipLocal, Ahead: 1,
+				Commits: []Commit{{SHA: "aaaaaaaa", Subject: "a work", CommittedAt: now, IsUser: true}},
+			},
+			{
+				Repo: "svc-b", Dir: "/r/b", Branch: "main", Ship: ShipLocal, Ahead: 1,
+				Commits: []Commit{{SHA: "bbbbbbbb", Subject: "b work", CommittedAt: now, IsUser: true}},
+			},
+		},
+		Attribution: map[string]RepoTime{
+			"/r/a": {AIMinutes: 100, ByCLI: map[string]int{"claude": 80, "codex": 40}},
+			"/r/b": {AIMinutes: 30, ByCLI: map[string]int{"claude": 30}},
+		},
+		ProjectPaths: map[string]string{"/r/a": "/r/a", "/r/b": "/r/b"},
+	}
+	rep, err := BuildReport(context.Background(), in, fakeReflections{has: false})
+	if err != nil {
+		t.Fatalf("BuildReport: %v", err)
+	}
+	byPath := map[string]Service{}
+	for _, s := range rep.Services {
+		byPath[s.ProjectPath] = s
+	}
+	a := byPath["/r/a"]
+	if a.MinutesByCLI["claude"] != 80 || a.MinutesByCLI["codex"] != 40 {
+		t.Errorf("/r/a MinutesByCLI = %v; want claude:80 codex:40", a.MinutesByCLI)
+	}
+	b := byPath["/r/b"]
+	if b.MinutesByCLI["claude"] != 30 {
+		t.Errorf("/r/b MinutesByCLI = %v; want claude:30", b.MinutesByCLI)
+	}
+	// Report-level rollup: claude 80+30=110, codex 40.
+	if rep.MinutesByCLI["claude"] != 110 {
+		t.Errorf("Report.MinutesByCLI[claude] = %d; want 110", rep.MinutesByCLI["claude"])
+	}
+	if rep.MinutesByCLI["codex"] != 40 {
+		t.Errorf("Report.MinutesByCLI[codex] = %d; want 40", rep.MinutesByCLI["codex"])
+	}
+}
+
 func TestBuildReport_SalienceLeadsWithHighestCommitBranch(t *testing.T) {
 	now := time.Date(2026, 5, 19, 10, 0, 0, 0, time.UTC)
 	in := ReportInput{

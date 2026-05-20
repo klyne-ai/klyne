@@ -78,6 +78,9 @@ func BuildReport(ctx context.Context, in ReportInput, refl ReflectionLookup) (Re
 
 		manualOnly := true
 		anyUserCommits := false
+		// Per-CLI minutes for the Service: aggregated across every
+		// worktree/scan of the canonical repo (time is repo-scoped).
+		minutesByCLI := map[string]int{}
 		for _, sc := range g.scans {
 			// §6.3 identity filter: only the user's commits count toward
 			// the productivity figures. Co-actors/bots (Jenkins,
@@ -96,6 +99,9 @@ func BuildReport(ctx context.Context, in ReportInput, refl ReflectionLookup) (Re
 					manualOnly = false
 				}
 			}
+			for cli, mins := range rt.ByCLI {
+				minutesByCLI[cli] += mins
+			}
 
 			svc.Branches = append(svc.Branches, buildBranches(sc, userCommits, rt)...)
 
@@ -104,15 +110,19 @@ func BuildReport(ctx context.Context, in ReportInput, refl ReflectionLookup) (Re
 			svc.Risks = append(svc.Risks, riskSignals(sc, userCommits, in.DirtyRepos[sc.Dir], in.Now)...)
 		}
 		svc.ManualOnly = manualOnly && anyUserCommits
+		svc.MinutesByCLI = minutesByCLI
 
-		// Always emit JSON arrays, never null, so UI consumers can
-		// rely on the [] contract (a service with no branches/risks
-		// would otherwise marshal nil slices to null).
+		// Always emit JSON objects/arrays, never null, so UI consumers
+		// can rely on the {}/[] contract (a service with no
+		// branches/risks/CLI time would otherwise marshal nil to null).
 		if svc.Branches == nil {
 			svc.Branches = []Branch{}
 		}
 		if svc.Risks == nil {
 			svc.Risks = []RiskSignal{}
+		}
+		if svc.MinutesByCLI == nil {
+			svc.MinutesByCLI = map[string]int{}
 		}
 
 		// Salience ordering (§7.1 rule 5) applied across the merged
@@ -131,6 +141,14 @@ func BuildReport(ctx context.Context, in ReportInput, refl ReflectionLookup) (Re
 		}
 
 		rep.Services = append(rep.Services, svc)
+	}
+
+	// Report-wide per-CLI roll-up across every Service (Change 2).
+	rep.MinutesByCLI = map[string]int{}
+	for _, svc := range rep.Services {
+		for cli, mins := range svc.MinutesByCLI {
+			rep.MinutesByCLI[cli] += mins
+		}
 	}
 
 	if anyReflection {
@@ -172,6 +190,7 @@ func buildBranches(sc ScanResult, userCommits []Commit, rt RepoTime) []Branch {
 	branches := make([]Branch, 0, len(groups))
 	for _, name := range order {
 		cs := groups[name]
+		first, last := commitSpan(cs)
 		b := Branch{
 			Name:              name,
 			TicketID:          ticketFor(name, sc),
@@ -180,6 +199,9 @@ func buildBranches(sc ScanResult, userCommits []Commit, rt RepoTime) []Branch {
 			Behind:            sc.Behind,
 			Commits:           cs,
 			AttributedMinutes: rt.AIMinutes,
+			FirstCommitAt:     first,
+			LastCommitAt:      last,
+			ShipSpanMinutes:   shipSpanMinutes(cs),
 		}
 		b.Narrative = layer1Narrative(b, rt)
 		branches = append(branches, b)
@@ -316,6 +338,42 @@ func (in ReportInput) projectPath(dir string) string {
 		return p
 	}
 	return dir
+}
+
+// commitSpan returns the earliest and latest commit CommittedAt across
+// cs (zero-valued times are ignored). Both are zero when cs has no
+// timestamped commits.
+func commitSpan(cs []Commit) (first, last time.Time) {
+	for _, c := range cs {
+		if c.CommittedAt.IsZero() {
+			continue
+		}
+		if first.IsZero() || c.CommittedAt.Before(first) {
+			first = c.CommittedAt
+		}
+		if last.IsZero() || c.CommittedAt.After(last) {
+			last = c.CommittedAt
+		}
+	}
+	return first, last
+}
+
+// shipSpanMinutes is the honest "work span / time to ship" proxy
+// (Change 3): minutes between the earliest and latest commit on the
+// branch. It is 0 when the branch has fewer than 2 timestamped commits
+// — a single commit has no span.
+func shipSpanMinutes(cs []Commit) int {
+	timestamped := 0
+	for _, c := range cs {
+		if !c.CommittedAt.IsZero() {
+			timestamped++
+		}
+	}
+	if timestamped < 2 {
+		return 0
+	}
+	first, last := commitSpan(cs)
+	return minutesBetween(first, last)
 }
 
 func oldestCommitTime(cs []Commit) time.Time {

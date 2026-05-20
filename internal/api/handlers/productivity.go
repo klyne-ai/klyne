@@ -179,15 +179,17 @@ GROUP BY project_path`
 
 // sessionActivity loads one SessionActivity per session with at least one
 // message in the window, carrying every in-window message timestamp so
-// the substrate can compute the active-span (§6.4). Repos is left empty:
-// the prototype attributes a session wholly to its ProjectPath (the
-// multi-repo split is exercised by the substrate's own tests; a
-// cwd-switch heuristic from message events is a documented follow-up).
+// the substrate can compute the active-span (§6.4) and the session's CLI
+// ("claude" | "codex") so AI time can be broken down per CLI (Change 2).
+// Repos is left empty: the prototype attributes a session wholly to its
+// ProjectPath (the multi-repo split is exercised by the substrate's own
+// tests; a cwd-switch heuristic from message events is a documented
+// follow-up).
 func (h *ProductivityHandler) sessionActivity(
 	ctx context.Context, since, until time.Time,
 ) ([]productivity.SessionActivity, error) {
 	const q = `
-SELECT s.id, s.project_path, m.ts
+SELECT s.id, s.project_path, s.cli, m.ts
 FROM messages m
 JOIN sessions s ON s.id = m.session_id
 WHERE m.ts >= ? AND m.ts <= ?
@@ -202,14 +204,14 @@ ORDER BY s.id, m.ts ASC`
 	bySession := map[string]*productivity.SessionActivity{}
 	var order []string
 	for rows.Next() {
-		var id, path string
+		var id, path, cli string
 		var ts int64
-		if err := rows.Scan(&id, &path, &ts); err != nil {
+		if err := rows.Scan(&id, &path, &cli, &ts); err != nil {
 			return nil, fmt.Errorf("productivity: session-activity scan: %w", err)
 		}
 		sa, ok := bySession[id]
 		if !ok {
-			sa = &productivity.SessionActivity{SessionID: id, ProjectPath: path}
+			sa = &productivity.SessionActivity{SessionID: id, ProjectPath: path, CLI: cli}
 			bySession[id] = sa
 			order = append(order, id)
 		}

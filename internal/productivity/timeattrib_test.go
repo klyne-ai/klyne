@@ -166,6 +166,39 @@ func TestAttributeMinutes_OverlappingSessionsUnionNotSum(t *testing.T) {
 	}
 }
 
+// TestAttributeMinutes_ByCLISplit checks Change 2: a repo worked by both
+// claude and codex breaks down per CLI. The two CLIs ran in overlapping
+// wall-clock windows (claude 09:00-11:00, codex 10:00-12:00), so:
+//   - AIMinutes is the all-CLI UNION → 180m.
+//   - ByCLI["claude"] and ByCLI["codex"] are each their own union → 120m.
+//   - claude + codex (240m) intentionally exceeds AIMinutes (180m) when
+//     both CLIs ran at once — that is correct and expected.
+func TestAttributeMinutes_ByCLISplit(t *testing.T) {
+	day := time.Date(2026, 5, 19, 0, 0, 0, 0, time.UTC)
+	mk := func(startH, spanMin int) []time.Time {
+		var out []time.Time
+		for m := 0; m <= spanMin; m += 10 {
+			out = append(out, day.Add(time.Duration(startH)*time.Hour+time.Duration(m)*time.Minute))
+		}
+		return out
+	}
+	sessions := []SessionActivity{
+		{SessionID: "a", ProjectPath: "/repo/x", CLI: "claude", MessageTimes: mk(9, 120)},
+		{SessionID: "b", ProjectPath: "/repo/x", CLI: "codex", MessageTimes: mk(10, 120)},
+	}
+	res := AttributeMinutes(sessions, map[string]int{"/repo/x": 2}, 30)
+	rt := res["/repo/x"]
+	if rt.AIMinutes != 180 {
+		t.Errorf("AIMinutes = %d; want 180 (all-CLI union)", rt.AIMinutes)
+	}
+	if rt.ByCLI["claude"] != 120 {
+		t.Errorf("ByCLI[claude] = %d; want 120", rt.ByCLI["claude"])
+	}
+	if rt.ByCLI["codex"] != 120 {
+		t.Errorf("ByCLI[codex] = %d; want 120", rt.ByCLI["codex"])
+	}
+}
+
 // TestAttributeMinutes_DisjointSessionsSumNormally confirms the union
 // fix does not under-count: two non-overlapping sessions still total the
 // sum of their individual spans (60m + 60m = 120m).

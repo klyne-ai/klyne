@@ -63,15 +63,23 @@ type Commit struct {
 // Branch groups the commits on one branch with its ship state, the raw
 // branch-derived ticket ID (no external lookup — D3), the deterministic
 // attributed minutes (D1), and the Layer-1 narrative (§7 L1).
+//
+// FirstCommitAt/LastCommitAt are the earliest and latest commit
+// CommittedAt on the branch; ShipSpanMinutes is the minutes between them
+// (0 when the branch has fewer than 2 commits) — the honest "work span /
+// time to ship" proxy.
 type Branch struct {
-	Name              string       `json:"name"`
-	TicketID          string       `json:"ticket_id"`
-	Ship              ShipState    `json:"ship"`
-	Ahead             int          `json:"ahead"`
-	Behind            int          `json:"behind"`
-	Commits           []Commit     `json:"commits"`
-	AttributedMinutes int          `json:"attributed_minutes"`
-	Narrative         string       `json:"narrative"`
+	Name              string    `json:"name"`
+	TicketID          string    `json:"ticket_id"`
+	Ship              ShipState `json:"ship"`
+	Ahead             int       `json:"ahead"`
+	Behind            int       `json:"behind"`
+	Commits           []Commit  `json:"commits"`
+	AttributedMinutes int       `json:"attributed_minutes"`
+	Narrative         string    `json:"narrative"`
+	FirstCommitAt     time.Time `json:"first_commit_at"`
+	LastCommitAt      time.Time `json:"last_commit_at"`
+	ShipSpanMinutes   int       `json:"ship_span_minutes"`
 }
 
 // RiskSignal is a current-state risk (§6.5). Kind is "unpushed" or
@@ -86,20 +94,32 @@ type RiskSignal struct {
 // Service is one repo (canonical root) with its branches and risks.
 // ManualOnly is true when the repo had in-window commits but no AI
 // session active-time (D4: manual time is never folded into AI time).
+//
+// MinutesByCLI breaks the repo's AI session time down per CLI
+// ("claude" / "codex" → merged active minutes for that CLI within the
+// repo). Time is repo-scoped, not branch-scoped, so this lives on the
+// Service. Per-CLI values are themselves union totals (§6.4), so when
+// the user ran both CLIs at once they may sum to slightly more than the
+// all-CLI attributed total — that is correct and expected.
 type Service struct {
-	Repo        string       `json:"repo"`
-	ProjectPath string       `json:"project_path"`
-	Branches    []Branch     `json:"branches"`
-	Risks       []RiskSignal `json:"risks"`
-	ManualOnly  bool         `json:"manual_only"`
+	Repo         string         `json:"repo"`
+	ProjectPath  string         `json:"project_path"`
+	Branches     []Branch       `json:"branches"`
+	Risks        []RiskSignal   `json:"risks"`
+	ManualOnly   bool           `json:"manual_only"`
+	MinutesByCLI map[string]int `json:"minutes_by_cli"`
 }
 
 // Report is the top-level fused record served to the API/UI.
 // ReflectionStatus is "missing" | "stale" | "current" (§7 L3); Nudge is
 // the human prompt shown when no/stale reflection exists.
+//
+// MinutesByCLI is the report-wide roll-up of every Service's
+// MinutesByCLI (per-CLI merged active minutes across all repos).
 type Report struct {
-	Day              string    `json:"day"`
-	Services         []Service `json:"services"`
-	ReflectionStatus string    `json:"reflection_status"`
-	Nudge            string    `json:"nudge"`
+	Day              string         `json:"day"`
+	Services         []Service      `json:"services"`
+	ReflectionStatus string         `json:"reflection_status"`
+	Nudge            string         `json:"nudge"`
+	MinutesByCLI     map[string]int `json:"minutes_by_cli"`
 }
