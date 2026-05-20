@@ -3,6 +3,7 @@ package productivity
 import (
 	"context"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -44,6 +45,16 @@ func DiscoverRepos(ctx context.Context, l SessionPathLister, since, until time.T
 		if strings.TrimSpace(p) == "" {
 			continue
 		}
+		// Skip klyne's own showcase test artifacts. The showcase tests
+		// create ephemeral git repos under T/ (klyne-showcase-meaningful-…,
+		// klyne-showcase-trivial-…) and run real sessions against them;
+		// those sessions get recorded in the DB and would otherwise
+		// surface as Services on the dashboard. The basename prefix is
+		// the precise signal — t.TempDir() repos from unrelated tests
+		// stay untouched.
+		if isShowcaseTestRepo(p) {
+			continue
+		}
 		// D5/§6.1: only sessions that ran inside a real git work tree
 		// describe a repo. A non-git project_path (e.g. a parent dir
 		// like /Users/x/Desktop, or observer/agent sessions with cwd at
@@ -76,6 +87,16 @@ func DiscoverRepos(ctx context.Context, l SessionPathLister, since, until time.T
 		}
 	}
 	return out, nil
+}
+
+// isShowcaseTestRepo reports whether p is one of klyne's own
+// showcase-test artifact repos (created under T/ by the showcase test
+// suite). The basename prefix is the precise signal; we deliberately
+// don't blanket-skip os.TempDir() because unrelated tests legitimately
+// use t.TempDir() and must keep working.
+func isShowcaseTestRepo(p string) bool {
+	base := filepath.Base(strings.TrimRight(p, string(filepath.Separator)))
+	return strings.HasPrefix(base, "klyne-showcase-")
 }
 
 // insideGitWorkTree reports whether dir is within a git working tree.

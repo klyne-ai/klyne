@@ -81,6 +81,17 @@ func (h *ProductivityHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 	userEmails := productivity.UserEmails()
 
+	// Refresh stale origin/* refs BEFORE scanning so ahead/behind and
+	// ship-state read current GitHub state, not a stale mirror. Same
+	// TTL as the merged-PR cache; best-effort, bounded by an overall
+	// timeout. The fetch failure mode is harmless — the scan just sees
+	// whatever the local mirror has.
+	dirs := make([]string, 0, len(targets))
+	for _, t := range targets {
+		dirs = append(dirs, t.Dir)
+	}
+	refreshStaleRemotes(ctx, dirs, prCacheTTL())
+
 	var scans []productivity.ScanResult
 	commitCounts := map[string]int{}
 	projectPaths := map[string]string{}
@@ -154,6 +165,13 @@ func (h *ProductivityHandler) Get(w http.ResponseWriter, r *http.Request) {
 	// TTL-cached `gh pr list` (productivity_github.go). Best-effort —
 	// never fails the request; the deterministic report stands alone.
 	h.enrichMergedPRs(ctx, &rep, since, until)
+
+	// Per-Service "git as of N ago" — reads FETCH_HEAD mtime that the
+	// refreshStaleRemotes step (or an earlier user-run git fetch) just
+	// updated. Zero when no fetch has ever run here.
+	for i := range rep.Services {
+		rep.Services[i].GitFetchedAt = gitFetchedAt(rep.Services[i].ProjectPath)
+	}
 
 	writeJSON(w, http.StatusOK, rep)
 }

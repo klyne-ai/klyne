@@ -140,6 +140,13 @@ type Service struct {
 	// data is available. MergedPRs is always emitted as [] not null.
 	MergedPRs     []MergedPR `json:"merged_prs"`
 	MergedPRsAsOf time.Time  `json:"merged_prs_as_of"`
+	// GitFetchedAt is when `git fetch` last refreshed the local
+	// mirror of origin for this repo (FETCH_HEAD mtime). The
+	// dashboard piggybacks on the merged-PR cache TTL to auto-refresh
+	// stale remotes, so ahead/behind and ship-state stay honest;
+	// surface "git as of N ago" so the user can see it. Zero when no
+	// fetch has ever run in this clone.
+	GitFetchedAt time.Time `json:"git_fetched_at"`
 }
 
 // MergedPR is one GitHub pull request the user authored and merged
