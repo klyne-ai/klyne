@@ -338,6 +338,67 @@
 
   /** Row height in px for each Gantt lane. */
   const LANE_H = 26;
+
+  // --- floating tooltip ----------------------------------------------------
+  //
+  // Native `title` shows after ~1s of hover and can't be styled. Track a
+  // small piece of state for a custom tooltip — far more informative,
+  // appears instantly, follows the bar (position: fixed so the page can
+  // scroll). The `iv` is set when the user hovers a specific active
+  // segment; `null` means they hovered the dim presence track instead.
+  interface Tip {
+    row: TimedSession;
+    iv: MsInterval | null;
+    x: number; // viewport px, center of bar (clamped to stay on-screen)
+    y: number; // viewport px, anchor for above/below placement
+    placement: 'above' | 'below';
+  }
+  let tip = $state<Tip | null>(null);
+
+  /** Half the tooltip's max width — used to clamp x against viewport edges. */
+  const TIP_HALF = 160;
+  /** Min space above the bar before we flip to placing the tooltip below it. */
+  const TIP_ABOVE_NEED = 160;
+
+  function showTip(row: TimedSession, iv: MsInterval | null, e: MouseEvent): void {
+    const el = e.currentTarget as HTMLElement | null;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const margin = 10;
+    const clampedX = Math.min(
+      Math.max(cx, TIP_HALF + margin),
+      window.innerWidth - TIP_HALF - margin
+    );
+    // If there isn't enough room above the bar, flip the tooltip below
+    // it so the user always sees the full content.
+    const placement: 'above' | 'below' =
+      rect.top < TIP_ABOVE_NEED ? 'below' : 'above';
+    tip = {
+      row,
+      iv,
+      x: clampedX,
+      y: placement === 'above' ? rect.top : rect.bottom,
+      placement
+    };
+  }
+  function hideTip(): void {
+    tip = null;
+  }
+
+  /** "14:23 → 14:37  (14m)" — for the active-segment line in the tooltip. */
+  function formatIvLine(iv: MsInterval): string {
+    const startISO = new Date(iv.start).toISOString();
+    const endISO = new Date(iv.end).toISOString();
+    return `${formatClock(startISO)} → ${formatClock(endISO)}  (${formatHM(
+      (iv.end - iv.start) / 60_000
+    )})`;
+  }
+
+  /** "a1b2c3d4" — shortened session id for the tooltip footer. */
+  function shortId(id: string): string {
+    return id ? id.slice(0, 8) : '';
+  }
 </script>
 
 <section class="st" aria-label="Session parallelism timeline">
@@ -420,8 +481,10 @@
             style:left="{track.leftPct}%"
             style:width="max(3px, {track.widthPct}%)"
             style:top="{top + 8}px"
-            title={barLabel(row)}
             aria-label={barLabel(row)}
+            onmouseenter={(e) => showTip(row, null, e)}
+            onmouseleave={hideTip}
+            role="presentation"
           ></div>
 
           {#if row.active.length === 0}
@@ -431,7 +494,9 @@
               style:left="{track.leftPct}%"
               style:width="max(3px, {track.widthPct}%)"
               style:top="{top}px"
-              aria-hidden="true"
+              onmouseenter={(e) => showTip(row, null, e)}
+              onmouseleave={hideTip}
+              role="presentation"
             >
               <span class="st-bar-label">{row.s.repo || row.s.cli || '—'}</span>
             </div>
@@ -443,8 +508,10 @@
                 style:left="{seg.leftPct}%"
                 style:width="max(3px, {seg.widthPct}%)"
                 style:top="{top}px"
-                title={segLabel(row, iv)}
                 aria-label={segLabel(row, iv)}
+                onmouseenter={(e) => showTip(row, iv, e)}
+                onmouseleave={hideTip}
+                role="presentation"
               >
                 {#if j === 0}
                   <span class="st-bar-label"
@@ -525,6 +592,65 @@
         </ul>
       </div>
     {/if}
+  {/if}
+
+  {#if tip}
+    {@const r = tip.row}
+    {@const s = r.s}
+    {@const cliK = cliKey(s.cli)}
+    <!-- Floating tooltip: anchored to the hovered bar via fixed
+         positioning + getBoundingClientRect. Pointer-events: none so
+         it never steals hovers / disrupts the mouseenter / mouseleave
+         pairing. -->
+    <div
+      class="st-tip st-tip--{tip.placement}"
+      style:left="{tip.x}px"
+      style:top="{tip.y}px"
+      role="tooltip"
+    >
+      <div class="st-tip-hd">
+        <span class="st-tip-cli st-tip-cli--{cliK}">{s.cli || 'session'}</span>
+        <span class="st-tip-repo ad-mono" title={s.repo}>{s.repo || '—'}</span>
+      </div>
+      <dl class="st-tip-rows">
+        <div class="st-tip-row">
+          <dt>Presence</dt>
+          <dd class="ad-mono ad-tnum">
+            {formatClock(s.started_at)} → {formatClock(s.ended_at)}
+            <span class="st-tip-dim">· {formatHM((r.end - r.start) / 60_000)} span</span>
+          </dd>
+        </div>
+        <div class="st-tip-row">
+          <dt>Active</dt>
+          <dd class="ad-mono ad-tnum">
+            {formatHM(s.active_minutes)}
+            {#if r.active.length > 0}
+              <span class="st-tip-dim">
+                · {r.active.length} segment{r.active.length === 1 ? '' : 's'}
+              </span>
+            {:else}
+              <span class="st-tip-dim">· no measurable active time</span>
+            {/if}
+          </dd>
+        </div>
+        <div class="st-tip-row">
+          <dt>Messages</dt>
+          <dd class="ad-mono ad-tnum">{s.message_count}</dd>
+        </div>
+        {#if tip.iv}
+          <div class="st-tip-row st-tip-row--accent">
+            <dt>This segment</dt>
+            <dd class="ad-mono ad-tnum">{formatIvLine(tip.iv)}</dd>
+          </div>
+        {/if}
+        {#if s.session_id}
+          <div class="st-tip-row st-tip-foot">
+            <dt>Session</dt>
+            <dd class="ad-mono">{shortId(s.session_id)}</dd>
+          </div>
+        {/if}
+      </dl>
+    </div>
   {/if}
 </section>
 
@@ -842,5 +968,119 @@
   .st-conc-desc {
     font-size: 10.5px;
     color: var(--ad-muted);
+  }
+
+  /* ---- floating tooltip ---- */
+  .st-tip {
+    position: fixed;
+    z-index: 50;
+    pointer-events: none;
+    background: var(--ad-panel);
+    color: var(--ad-fg);
+    border: 1px solid var(--ad-border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    min-width: 240px;
+    max-width: 320px;
+    box-shadow:
+      0 6px 24px -8px rgba(0, 0, 0, 0.5),
+      0 2px 6px -2px rgba(0, 0, 0, 0.3);
+    font-size: 12px;
+    line-height: 1.4;
+  }
+  /* (x, y) is the top-center of the hovered bar; translateX(-50%)
+     centers the tooltip and the Y translate places it above (default)
+     or below the bar with a 10px breathing gap. */
+  .st-tip--above {
+    transform: translate(-50%, calc(-100% - 10px));
+  }
+  .st-tip--below {
+    transform: translate(-50%, 10px);
+  }
+
+  .st-tip-hd {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 7px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--ad-border-soft);
+    min-width: 0;
+  }
+  .st-tip-cli {
+    font-size: 9.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    padding: 2px 6px;
+    border-radius: 4px;
+    border: 1px solid transparent;
+    flex: none;
+  }
+  .st-tip-cli--claude {
+    color: var(--ad-claude);
+    background: color-mix(in oklch, var(--ad-claude) 14%, transparent);
+    border-color: color-mix(in oklch, var(--ad-claude) 40%, var(--ad-border));
+  }
+  .st-tip-cli--codex {
+    color: var(--ad-codex);
+    background: color-mix(in oklch, var(--ad-codex) 14%, transparent);
+    border-color: color-mix(in oklch, var(--ad-codex) 40%, var(--ad-border));
+  }
+  .st-tip-cli:not(.st-tip-cli--claude):not(.st-tip-cli--codex) {
+    color: var(--ad-fg-2);
+    background: var(--ad-bg-2);
+    border-color: var(--ad-border-soft);
+  }
+  .st-tip-repo {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ad-fg);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .st-tip-rows {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .st-tip-row {
+    display: grid;
+    grid-template-columns: 78px 1fr;
+    gap: 8px;
+    align-items: baseline;
+  }
+  .st-tip-row dt {
+    font-size: 9.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--ad-faint);
+  }
+  .st-tip-row dd {
+    margin: 0;
+    font-size: 11.5px;
+    color: var(--ad-fg-2);
+    min-width: 0;
+  }
+  .st-tip-dim {
+    color: var(--ad-faint);
+    font-weight: 400;
+  }
+  .st-tip-row--accent dd {
+    color: var(--ad-fg);
+  }
+  .st-tip-foot {
+    margin-top: 4px;
+    padding-top: 6px;
+    border-top: 1px solid var(--ad-border-soft);
+  }
+  .st-tip-foot dd {
+    color: var(--ad-faint);
+    font-size: 10.5px;
   }
 </style>
