@@ -13,6 +13,7 @@
 -->
 <script lang="ts">
   import type { ProductivityReport, ProductivitySessionStat } from '$lib/api';
+  import SessionTimeline from './SessionTimeline.svelte';
 
   interface Props {
     report: ProductivityReport;
@@ -69,13 +70,17 @@
   );
   const rawSum = $derived(formatMinutes(rawSumMinutes));
 
-  /** True when overlap actually shrank the number — drives the note copy. */
-  const overlapRemoved = $derived(
+  /** True when sessions overlapped — i.e. agents ran in parallel. */
+  const hasOverlap = $derived(
     rawSumMinutes > Math.round(report.total_active_minutes || 0)
   );
 
-  /** How much wall-clock the union removed, formatted. */
-  const overlapSaved = $derived(
+  /**
+   * The amount of parallel work — wall-clock minutes that two or more
+   * sessions shared. It is the gap between raw sum and elapsed union, and
+   * it is *shown* in the timeline below, not discarded.
+   */
+  const parallelMinutes = $derived(
     formatMinutes(rawSumMinutes - Math.round(report.total_active_minutes || 0))
   );
 
@@ -111,18 +116,19 @@
   <header class="pow-hd">
     <h2 class="pow-title">Proof of work</h2>
     <p class="pow-lead">
-      The headline AI time is the <strong>interval-union</strong> of every
-      session's active wall-clock — overlapping parallel agents are counted
-      once, not twice.
+      The headline AI time is the <strong>true elapsed wall-clock</strong> across
+      every session. When agents run in parallel the raw per-session sum runs
+      longer than real time — the timeline below shows that parallel structure
+      in full.
     </p>
   </header>
 
   <!-- Union vs sum, side by side -->
   <dl class="pow-figures">
     <div class="pow-fig pow-fig--primary">
-      <dt>Measured</dt>
+      <dt>Elapsed AI time</dt>
       <dd class="ad-mono ad-tnum pow-fig-v">{measured}</dd>
-      <div class="pow-fig-sub">true union of session intervals</div>
+      <div class="pow-fig-sub">true wall-clock across all sessions</div>
     </div>
 
     <div class="pow-fig">
@@ -134,24 +140,30 @@
     <div class="pow-fig">
       <dt>Raw session sum</dt>
       <dd class="ad-mono ad-tnum pow-fig-v pow-fig-v--muted">{rawSum}</dd>
-      <div class="pow-fig-sub">before overlaps removed</div>
+      <div class="pow-fig-sub">work done across parallel agents</div>
     </div>
   </dl>
 
   {#if sessionCount > 0}
     <p class="pow-note">
-      {#if overlapRemoved}
-        Raw session time sums to
-        <span class="ad-mono ad-tnum">{rawSum}</span>; overlaps removed —
-        the union is <span class="ad-mono ad-tnum">{overlapSaved}</span> shorter
-        because sessions ran in parallel wall-clock.
+      {#if hasOverlap}
+        Per-session work sums to
+        <span class="ad-mono ad-tnum">{rawSum}</span>, while only
+        <span class="ad-mono ad-tnum">{measured}</span> of wall-clock actually
+        elapsed — <span class="ad-mono ad-tnum">{parallelMinutes}</span> of that
+        work happened <strong>in parallel</strong>. That parallelism is the
+        productivity story: the timeline below breaks down exactly how many
+        sessions ran at once, and for how long.
       {:else}
-        Raw session time sums to
-        <span class="ad-mono ad-tnum">{rawSum}</span> — no overlap detected,
-        so the union equals the sum.
+        Per-session work sums to
+        <span class="ad-mono ad-tnum">{rawSum}</span> — sessions ran one at a
+        time, so the elapsed wall-clock equals the sum.
       {/if}
     </p>
   {/if}
+
+  <!-- Parallelism made visible: lane-packed Gantt + concurrency breakdown -->
+  <SessionTimeline {report} />
 
   <!-- Session evidence list -->
   {#if sessionCount === 0}
@@ -305,6 +317,10 @@
   }
   .pow-note .ad-mono {
     color: var(--ad-fg-2);
+  }
+  .pow-note strong {
+    color: var(--ad-fg-2);
+    font-weight: 600;
   }
 
   /* ---- empty state ---- */
