@@ -14,9 +14,13 @@
 // with `fmt` only and is structurally prevented from emitting invented
 // PR/ticket IDs (the "PR #57" regression guard).
 //
-// Prototype boundary (spec §11): this package is the substrate. Layer-2
-// reflection enrichment + the 7 worklog improvements, and dashboard_cache
-// memoization are documented follow-ups, NOT built here.
+// Scope (spec §11 / D8): this package is the deterministic substrate.
+// The Layer-2 reflection enrichment + the 7 worklog improvements (§7.2)
+// are BUILT in internal/worklog and consume this package read-only
+// (worklog.BuildProjectSubstrate / RecordReflectionWithSubstrate). The
+// D6 session-end snapshot CAPTURE half is BUILT in internal/hooks via
+// productivity.CaptureSessionSnapshots. Remaining follow-up: the
+// dashboard_cache render-time memoization.
 package productivity
 
 import "time"

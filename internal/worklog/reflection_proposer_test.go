@@ -155,3 +155,46 @@ func TestLoadPendingEntries_NoEntriesUserInvoked(t *testing.T) {
 func startsWith(s, prefix string) bool {
 	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
 }
+
+// Improvements 2 & 4 (prompt-contract half): ProposalGitBrief renders the
+// salience-ranked git facts plus the §7.1 grounding contract that the AI
+// host reads before synthesizing — so the reflection leads with
+// high-impact work and never invents PR IDs.
+func TestProposalGitBrief_IncludesSalienceFactsAndContract(t *testing.T) {
+	rep := salienceFixture()
+	brief := ProposalGitBrief(rep, "/repos/svc")
+	if brief == "" {
+		t.Fatal("expected a non-empty git brief for a known repo")
+	}
+	// Salience facts present and ranked.
+	idxFeat := indexOf(brief, "feat/CLI-9-core")
+	idxDocs := indexOf(brief, "docs/cleanup")
+	if idxFeat < 0 || idxDocs < 0 {
+		t.Fatalf("brief must list both branches, got:\n%s", brief)
+	}
+	if idxFeat > idxDocs {
+		t.Errorf("brief must lead with the high-impact branch, got:\n%s", brief)
+	}
+	// Grounding contract present.
+	if indexOf(brief, "Grounding contract") < 0 {
+		t.Errorf("brief must embed the §7.1 grounding contract, got:\n%s", brief)
+	}
+}
+
+// Graceful degradation: an unknown / non-git project yields an empty
+// brief, so the existing proposer flow is unchanged for those projects.
+func TestProposalGitBrief_EmptyForUnknownProject(t *testing.T) {
+	rep := salienceFixture()
+	if b := ProposalGitBrief(rep, "/not/a/repo"); b != "" {
+		t.Errorf("expected empty brief for non-git project, got:\n%s", b)
+	}
+}
+
+func indexOf(s, sub string) int {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return i
+		}
+	}
+	return -1
+}

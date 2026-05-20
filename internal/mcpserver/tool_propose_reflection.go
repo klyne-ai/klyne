@@ -45,6 +45,20 @@ func handleProposeReflection(ctx context.Context, db *store.DB, in ProposeReflec
 		return nil, err
 	}
 	md := formatProposeReflectionMD(in.ProjectPath, reason, entries)
+
+	// Layer-2 grounding (spec §7.2 improvements 2 & 4): append the
+	// deterministic, salience-ranked git brief + the §7.1 grounding
+	// contract so the AI host leads with the highest-impact work and
+	// never invents a PR/ticket id. The brief is empty for a non-git
+	// project — the proposal markdown is then unchanged (D8).
+	now := time.Now()
+	since := now.Add(-7 * 24 * time.Hour)
+	if rep, serr := worklog.BuildProjectSubstrate(in.ProjectPath, since, now); serr == nil {
+		if brief := worklog.ProposalGitBrief(rep, in.ProjectPath); brief != "" {
+			md = md + "\n\n" + brief + "\n"
+		}
+	}
+
 	return &ProposeReflectionOutput{
 		ProjectPath: in.ProjectPath,
 		Reason:      reason,

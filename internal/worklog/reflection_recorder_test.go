@@ -130,6 +130,104 @@ func TestRecordReflection_RejectsEmptyProject(t *testing.T) {
 	}
 }
 
+// Improvement 4: the unverified-artifact-ID guard runs inside
+// RecordReflection. A "PR #57" in insight text that is not backed by any
+// evidence string must never reach body_md (the documented "PR #57"
+// hallucination guard).
+func TestRecordReflection_StripsUnverifiedPRRef(t *testing.T) {
+	db := newRecorderTestDB(t)
+	insights := []Insight{
+		{Text: "Shipped the labstack pipeline via PR #57", Evidence: []string{"entry-1"}},
+	}
+	day := time.Date(2026, 5, 19, 0, 0, 0, 0, time.UTC)
+	refl, err := RecordReflection(context.Background(), db, "/p", day, insights)
+	if err != nil {
+		t.Fatalf("record: %v", err)
+	}
+	if strings.Contains(refl.BodyMD, "PR #57") {
+		t.Errorf("unverified 'PR #57' must be stripped from body_md, got:\n%s", refl.BodyMD)
+	}
+	// The rest of the insight prose must survive — only the bad ref goes.
+	if !strings.Contains(refl.BodyMD, "labstack pipeline") {
+		t.Errorf("guard over-stripped — insight prose lost, got:\n%s", refl.BodyMD)
+	}
+}
+
+// Improvements 1, 3, 5, 7: RecordReflectionWithSubstrate appends the
+// deterministic git-grounded sections (open loops, shipped ledger,
+// commit-dated, cross-project thread) to body_md after the AI insights.
+func TestRecordReflectionWithSubstrate_AppendsGitSections(t *testing.T) {
+	db := newRecorderTestDB(t)
+	insights := []Insight{
+		{Text: "Built the labstack pipeline", Evidence: []string{"entry-1"}},
+	}
+	day := time.Date(2026, 5, 19, 0, 0, 0, 0, time.UTC)
+	rep := fixtureReport()
+	refl, err := RecordReflectionWithSubstrate(
+		context.Background(), db, "/repos/consultation-service", day, insights, rep)
+	if err != nil {
+		t.Fatalf("record: %v", err)
+	}
+	// AI insight prose still present.
+	if !strings.Contains(refl.BodyMD, "labstack pipeline") {
+		t.Errorf("AI insight lost from body, got:\n%s", refl.BodyMD)
+	}
+	// Improvement 1: open-loops block appended.
+	if !strings.Contains(refl.BodyMD, "Open Loops") {
+		t.Errorf("expected Open Loops block in body, got:\n%s", refl.BodyMD)
+	}
+	// Improvement 5: shipped ledger appended.
+	if !strings.Contains(refl.BodyMD, "Shipped") {
+		t.Errorf("expected Shipped ledger in body, got:\n%s", refl.BodyMD)
+	}
+	// Improvement 3: commit-date present.
+	if !strings.Contains(refl.BodyMD, "2026-05-19") {
+		t.Errorf("expected commit date in body, got:\n%s", refl.BodyMD)
+	}
+}
+
+// Improvement 4 end-to-end via the substrate path: a "PR #57" not backed
+// by any commit subject/branch in the report is stripped even when the
+// insight cites it.
+func TestRecordReflectionWithSubstrate_GuardUsesGitEvidence(t *testing.T) {
+	db := newRecorderTestDB(t)
+	rep := fixtureReport()
+	insights := []Insight{
+		// Cites a real SHA but invents PR #57 — must be stripped.
+		{Text: "wired pipeline (aaaaaaaa) and opened PR #57", Evidence: []string{"entry-1"}},
+	}
+	day := time.Date(2026, 5, 19, 0, 0, 0, 0, time.UTC)
+	refl, err := RecordReflectionWithSubstrate(
+		context.Background(), db, "/repos/consultation-service", day, insights, rep)
+	if err != nil {
+		t.Fatalf("record: %v", err)
+	}
+	if strings.Contains(refl.BodyMD, "PR #57") {
+		t.Errorf("unverified PR #57 must be stripped even with git evidence, got:\n%s", refl.BodyMD)
+	}
+}
+
+// Graceful degradation (D8): a project with no matching Service in the
+// report behaves exactly like plain RecordReflection — no git sections,
+// no error.
+func TestRecordReflectionWithSubstrate_DegradesWhenNoRepo(t *testing.T) {
+	db := newRecorderTestDB(t)
+	insights := []Insight{{Text: "did work", Evidence: []string{"e1"}}}
+	day := time.Date(2026, 5, 19, 0, 0, 0, 0, time.UTC)
+	rep := fixtureReport() // has no Service for /not/a/repo
+	refl, err := RecordReflectionWithSubstrate(
+		context.Background(), db, "/not/a/repo", day, insights, rep)
+	if err != nil {
+		t.Fatalf("record: %v", err)
+	}
+	if strings.Contains(refl.BodyMD, "Open Loops") || strings.Contains(refl.BodyMD, "Shipped") {
+		t.Errorf("non-git project must get no git sections, got:\n%s", refl.BodyMD)
+	}
+	if !strings.Contains(refl.BodyMD, "did work") {
+		t.Errorf("existing reflection body must be preserved, got:\n%s", refl.BodyMD)
+	}
+}
+
 func TestRecordReflection_WritesOnePerDay(t *testing.T) {
 	db := newRecorderTestDB(t)
 	days := []time.Time{
