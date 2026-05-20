@@ -462,6 +462,11 @@ export interface ProductivityService {
    * reflection exists for the project+day.
    */
   reflection_markdown: string;
+  /**
+   * Distinct PR numbers referenced in the repo's commit subjects (the
+   * "(#124)" squash/merge titles) — a deterministic merged-PR signal.
+   */
+  merged_prs: number[];
 }
 /**
  * One gap-capped active wall-clock sub-interval of a session. The union

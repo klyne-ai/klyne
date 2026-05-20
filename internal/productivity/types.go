@@ -113,6 +113,10 @@ type Service struct {
 	ManualOnly         bool           `json:"manual_only"`
 	MinutesByCLI       map[string]int `json:"minutes_by_cli"`
 	ReflectionMarkdown string         `json:"reflection_markdown"`
+	// MergedPRs is the distinct PR numbers referenced in the repo's
+	// commit subjects (the "(#124)" squash/merge titles) — a
+	// deterministic merged-PR signal, no GitHub API.
+	MergedPRs []int `json:"merged_prs"`
 }
 
 // SessionStat is the per-session proof-of-work breakdown (Change 2): the
