@@ -266,6 +266,38 @@ func TestSessionActiveMinutes(t *testing.T) {
 	}
 }
 
+// TestSessionActiveIntervals checks the exported per-session active
+// sub-interval list: a session with a >cap gap yields two intervals, and
+// the intervals' lengths sum to the same scalar SessionActiveMinutes
+// produces — the consistency contract the dashboard depends on.
+func TestSessionActiveIntervals(t *testing.T) {
+	base := time.Date(2026, 5, 19, 9, 0, 0, 0, time.UTC)
+	// 0,5,10 then 90-min gap then 100,105 → two intervals: [0,10] and
+	// [100,105], 10m + 5m = 15m total.
+	ivs := SessionActiveIntervals(ts(base, 0, 5, 10, 100, 105), 30)
+	if len(ivs) != 2 {
+		t.Fatalf("SessionActiveIntervals len = %d; want 2 (gap > cap splits)", len(ivs))
+	}
+	if !ivs[0].Start.Equal(base) || !ivs[0].End.Equal(base.Add(10*time.Minute)) {
+		t.Errorf("interval[0] = %v..%v; want 09:00..09:10", ivs[0].Start, ivs[0].End)
+	}
+	if !ivs[1].Start.Equal(base.Add(100*time.Minute)) || !ivs[1].End.Equal(base.Add(105*time.Minute)) {
+		t.Errorf("interval[1] = %v..%v; want 10:40..10:45", ivs[1].Start, ivs[1].End)
+	}
+	// The interval lengths must sum to the scalar SessionActiveMinutes.
+	var sum time.Duration
+	for _, iv := range ivs {
+		sum += iv.End.Sub(iv.Start)
+	}
+	if int(sum.Minutes()) != SessionActiveMinutes(ts(base, 0, 5, 10, 100, 105), 30) {
+		t.Errorf("interval lengths sum = %v; want == SessionActiveMinutes", sum.Minutes())
+	}
+	// A single message has no measurable interval.
+	if got := SessionActiveIntervals(ts(base, 0), 30); len(got) != 0 {
+		t.Errorf("SessionActiveIntervals single message len = %d; want 0", len(got))
+	}
+}
+
 // TestAttributeMinutes_DisjointSessionsSumNormally confirms the union
 // fix does not under-count: two non-overlapping sessions still total the
 // sum of their individual spans (60m + 60m = 120m).

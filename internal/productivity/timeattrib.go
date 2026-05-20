@@ -297,6 +297,34 @@ func SessionActiveMinutes(times []time.Time, idleCapMin int) int {
 	return totalMinutes(mergeIntervals(activeIntervals(times, cap)))
 }
 
+// ActiveInterval is one of a session's gap-capped active wall-clock
+// sub-intervals, exported so the dashboard timeline can draw the SAME
+// active segments that the headline TotalActiveMinutes union is built
+// from. The lengths of a session's ActiveIntervals sum to its scalar
+// SessionActiveMinutes — the consistency contract that keeps the
+// concurrency breakdown summing to the headline elapsed wall-clock.
+type ActiveInterval struct {
+	Start time.Time `json:"start"`
+	End   time.Time `json:"end"`
+}
+
+// SessionActiveIntervals returns one session's gap-capped active
+// sub-intervals as exported ActiveInterval values: consecutive
+// timestamps within idleCap extend the current interval, a larger gap
+// closes it and opens a new one. The lengths sum to
+// SessionActiveMinutes for the same input. The result is always
+// non-nil (an empty slice for a session with no measurable span) so
+// the JSON wire form is [] not null.
+func SessionActiveIntervals(times []time.Time, idleCapMin int) []ActiveInterval {
+	cap := time.Duration(idleCapMin) * time.Minute
+	raw := activeIntervals(times, cap)
+	out := make([]ActiveInterval, 0, len(raw))
+	for _, iv := range raw {
+		out = append(out, ActiveInterval{Start: iv.start, End: iv.end})
+	}
+	return out
+}
+
 // activeIntervals walks consecutive (sorted) message timestamps and
 // builds the session's list of active sub-intervals: a gap ≤ cap extends
 // the current interval, a larger gap closes it and starts a new one. A

@@ -492,6 +492,46 @@ func TestBuildReport_SessionsProofOfWork(t *testing.T) {
 	if rep.TotalActiveMinutes != 90 {
 		t.Errorf("TotalActiveMinutes = %d; want 90", rep.TotalActiveMinutes)
 	}
+	// Each session's ActiveIntervals lengths must sum to its scalar
+	// ActiveMinutes — the consistency contract the timeline relies on.
+	for _, st := range rep.Sessions {
+		if st.ActiveIntervals == nil {
+			t.Errorf("%s ActiveIntervals is nil; want [] (never null)", st.SessionID)
+		}
+		var sum time.Duration
+		for _, iv := range st.ActiveIntervals {
+			sum += iv.End.Sub(iv.Start)
+		}
+		if int(sum.Minutes()) != st.ActiveMinutes {
+			t.Errorf("%s ActiveIntervals sum = %v; want == ActiveMinutes %d",
+				st.SessionID, sum.Minutes(), st.ActiveMinutes)
+		}
+	}
+}
+
+// TestBuildSessionStats_ActiveIntervalsSplitOnGap checks a session with
+// an idle gap longer than the cap yields two ActiveIntervals — the gap
+// is visible evidence, not silently bridged.
+func TestBuildSessionStats_ActiveIntervalsSplitOnGap(t *testing.T) {
+	base := time.Date(2026, 5, 19, 9, 0, 0, 0, time.UTC)
+	// 0,5,10 then a 90-min gap then 100,105 → two active intervals.
+	sessions := []SessionActivity{
+		{SessionID: "gappy", ProjectPath: "/r/a", CLI: "claude", MessageTimes: ts(base, 0, 5, 10, 100, 105)},
+	}
+	stats := buildSessionStats(sessions, map[string]string{"/r/a": "/r/a"})
+	if len(stats) != 1 {
+		t.Fatalf("len(stats) = %d; want 1", len(stats))
+	}
+	if got := len(stats[0].ActiveIntervals); got != 2 {
+		t.Errorf("ActiveIntervals len = %d; want 2 (gap > cap splits)", got)
+	}
+	var sum time.Duration
+	for _, iv := range stats[0].ActiveIntervals {
+		sum += iv.End.Sub(iv.Start)
+	}
+	if int(sum.Minutes()) != stats[0].ActiveMinutes {
+		t.Errorf("ActiveIntervals sum = %v; want == ActiveMinutes %d", sum.Minutes(), stats[0].ActiveMinutes)
+	}
 }
 
 // TestBuildReport_ReflectionMarkdownSurfaced checks Change 3: when a

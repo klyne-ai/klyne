@@ -123,14 +123,23 @@ type Service struct {
 // sub-intervals' lengths summed). Repo is the repo/Service the session
 // is attributed to (derived from its project_path). StartedAt/EndedAt
 // are the first and last in-window message timestamps.
+//
+// ActiveIntervals is the session's gap-capped active sub-intervals — the
+// same intervals whose global union produces Report.TotalActiveMinutes.
+// The dashboard timeline draws these as solid segments (with
+// StartedAt→EndedAt as a faint presence track behind them), and runs the
+// concurrency sweep-line over them so the breakdown sums to the headline
+// elapsed wall-clock. The interval lengths sum to ActiveMinutes. Always
+// emitted as [] not null.
 type SessionStat struct {
-	SessionID     string    `json:"session_id"`
-	CLI           string    `json:"cli"`
-	Repo          string    `json:"repo"`
-	StartedAt     time.Time `json:"started_at"`
-	EndedAt       time.Time `json:"ended_at"`
-	ActiveMinutes int       `json:"active_minutes"`
-	MessageCount  int       `json:"message_count"`
+	SessionID       string           `json:"session_id"`
+	CLI             string           `json:"cli"`
+	Repo            string           `json:"repo"`
+	StartedAt       time.Time        `json:"started_at"`
+	EndedAt         time.Time        `json:"ended_at"`
+	ActiveMinutes   int              `json:"active_minutes"`
+	ActiveIntervals []ActiveInterval `json:"active_intervals"`
+	MessageCount    int              `json:"message_count"`
 }
 
 // Report is the top-level fused record served to the API/UI.

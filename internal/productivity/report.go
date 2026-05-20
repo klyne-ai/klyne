@@ -196,8 +196,11 @@ func BuildReport(ctx context.Context, in ReportInput, refl ReflectionLookup) (Re
 
 // buildSessionStats builds the per-session proof-of-work evidence list
 // (Change 2): one SessionStat per contributing session, sorted by
-// StartedAt. Each carries its own gap-capped active total — the
-// deterministic minutes that, unioned, produce the headline number.
+// StartedAt. Each carries its own gap-capped active total AND the
+// gap-capped active sub-intervals behind it (ActiveIntervals) — the
+// deterministic minutes/intervals that, unioned, produce the headline
+// number. The dashboard timeline draws the SAME intervals so the
+// concurrency breakdown sums to TotalActiveMinutes.
 //
 // Sessions with no measurable activity (fewer than two in-window
 // timestamps → no span) are still listed: they are honest evidence that
@@ -219,13 +222,14 @@ func buildSessionStats(sessions []SessionActivity, projectPaths map[string]strin
 			pp = canon
 		}
 		out = append(out, SessionStat{
-			SessionID:     s.SessionID,
-			CLI:           s.CLI,
-			Repo:          RepoName(pp),
-			StartedAt:     started,
-			EndedAt:       ended,
-			ActiveMinutes: SessionActiveMinutes(s.MessageTimes, idleCapMinutes),
-			MessageCount:  count,
+			SessionID:       s.SessionID,
+			CLI:             s.CLI,
+			Repo:            RepoName(pp),
+			StartedAt:       started,
+			EndedAt:         ended,
+			ActiveMinutes:   SessionActiveMinutes(s.MessageTimes, idleCapMinutes),
+			ActiveIntervals: SessionActiveIntervals(s.MessageTimes, idleCapMinutes),
+			MessageCount:    count,
 		})
 	}
 	sort.SliceStable(out, func(i, j int) bool {
