@@ -1,7 +1,16 @@
-<!-- PROTOTYPE: deliberately rough; real UI/UX is a separate brainstorm (spec scope) -->
+<!--
+  Productivity dashboard — composes the four productivity components
+  (SummaryBar, RiskPanel, TimeBarChart, ServiceCard) over the
+  deterministic /productivity report. Real UI; the prior "dirt"
+  prototype is retired.
+-->
 <script lang="ts">
   import { onMount } from 'svelte';
   import { fetchProductivity, type ProductivityReport } from '$lib/api.js';
+  import SummaryBar from '$lib/components/productivity/SummaryBar.svelte';
+  import RiskPanel from '$lib/components/productivity/RiskPanel.svelte';
+  import TimeBarChart from '$lib/components/productivity/TimeBarChart.svelte';
+  import ServiceCard from '$lib/components/productivity/ServiceCard.svelte';
 
   let rep = $state<ProductivityReport | null>(null);
   let loading = $state(true);
@@ -25,69 +34,69 @@
   }
 
   onMount(() => { void load(); });
-
-  function hm(min: number): string {
-    const h = Math.floor(min / 60);
-    const m = min % 60;
-    return `~${h}h ${m}m`;
-  }
 </script>
 
-<h1>Productivity (prototype "dirt dashboard")</h1>
+<div class="prod-page">
+  {#if loading}
+    <p class="prod-state">Loading…</p>
+  {:else if error}
+    <p class="prod-state prod-state--err">Error: {error}</p>
+  {:else if rep}
+    <SummaryBar report={rep} />
 
-{#if loading}
-  <p>loading…</p>
-{:else if error}
-  <p style="color:red">error: {error}</p>
-{:else if rep}
-  <!-- Top banner: reflection status (L3) + nudge -->
-  <div style="border:1px solid #999; padding:8px; margin-bottom:12px;">
-    <strong>Day:</strong> {rep.day}
-    &nbsp;|&nbsp;
-    <strong>reflection_status:</strong> {rep.reflection_status}
-    {#if rep.nudge}
-      <div style="color:#a60; margin-top:4px;">{rep.nudge}</div>
+    <div class="prod-row">
+      <RiskPanel report={rep} />
+      <TimeBarChart report={rep} />
+    </div>
+
+    {#if rep.services.length === 0}
+      <p class="prod-state">No services in this window.</p>
+    {:else}
+      <div class="prod-grid">
+        {#each rep.services as svc, si (svc.repo + '|' + si)}
+          <ServiceCard service={svc} />
+        {/each}
+      </div>
     {/if}
-  </div>
-
-  {#if rep.services.length === 0}
-    <p>No services in this window.</p>
   {/if}
+</div>
 
-  {#each rep.services as svc (svc.repo + svc.project_path)}
-    <section style="margin-bottom:20px;">
-      <h2>{svc.repo} {#if svc.manual_only}<small>(manual — no AI session)</small>{/if}</h2>
-      <div style="font-size:12px; color:#666;">{svc.project_path}</div>
+<style>
+  .prod-page {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ad-s4);
+    padding: var(--ad-s5);
+    max-width: 1180px;
+    margin: 0 auto;
+    width: 100%;
+  }
 
-      {#if svc.risks.length > 0}
-        <ul style="color:red;">
-          {#each svc.risks as risk, ri (ri)}
-            <li>
-              <strong>{risk.kind}</strong>: {risk.detail}
-              {#if risk.age_minutes > 0}({hm(risk.age_minutes)} ago){/if}
-            </li>
-          {/each}
-        </ul>
-      {/if}
+  .prod-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--ad-s4);
+    align-items: start;
+  }
 
-      {#each svc.branches as br, bi (br.name + '|' + bi)}
-        <div style="margin:8px 0; padding-left:12px; border-left:3px solid #ccc;">
-          <div>
-            <code>{br.ship}</code>
-            &middot; {br.ticket_id || '(no ticket)'}
-            &middot; {hm(br.attributed_minutes)}
-            &middot; {br.narrative}
-          </div>
-          <details>
-            <summary>{br.commits.length} commit(s)</summary>
-            <ul>
-              {#each br.commits as c, ci (c.sha + '|' + ci)}
-                <li><code>{c.sha}</code> {c.subject}</li>
-              {/each}
-            </ul>
-          </details>
-        </div>
-      {/each}
-    </section>
-  {/each}
-{/if}
+  .prod-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+    gap: var(--ad-s4);
+  }
+
+  .prod-state {
+    color: var(--ad-muted);
+    font-size: var(--ad-fs-sm);
+    padding: var(--ad-s5);
+  }
+  .prod-state--err {
+    color: var(--ad-danger);
+  }
+
+  @media (max-width: 860px) {
+    .prod-row {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
