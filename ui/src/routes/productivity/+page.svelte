@@ -24,11 +24,54 @@
   import ServiceCard from '$lib/components/productivity/ServiceCard.svelte';
 
   const STORAGE_KEY = 'klyne.productivity.range';
+  // The dashboard is a SNAPSHOT — once loaded we persist it and
+  // restore on every subsequent reload / tab change, so the data is
+  // only re-fetched when the user explicitly clicks Refresh or picks
+  // a new range. The cache key bakes in the range so a range switch
+  // always fetches fresh.
+  const REPORT_KEY = 'klyne.productivity.lastReport';
 
   let rep = $state<ProductivityReport | null>(null);
   let loading = $state(true);
   let error = $state<string | null>(null);
   let loadedAt = $state<number | null>(null);
+
+  interface CachedReport {
+    since: number;
+    until: number;
+    loadedAt: number;
+    rep: ProductivityReport;
+  }
+
+  function loadCachedReport(): CachedReport | null {
+    try {
+      const raw = localStorage.getItem(REPORT_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (
+        typeof parsed?.since === 'number' &&
+        typeof parsed?.until === 'number' &&
+        typeof parsed?.loadedAt === 'number' &&
+        parsed?.rep
+      ) {
+        return parsed as CachedReport;
+      }
+    } catch {
+      /* ignore corrupt / oversized entries */
+    }
+    return null;
+  }
+
+  function saveCachedReport(r: ProductivityReport, s: number, u: number, at: number): void {
+    try {
+      localStorage.setItem(
+        REPORT_KEY,
+        JSON.stringify({ since: s, until: u, loadedAt: at, rep: r })
+      );
+    } catch {
+      /* quota full / private mode → silently degrade */
+    }
+  }
 
   // Selected window in epoch-ms. Initialised in onMount via resolveRange.
   let since = $state<number>(0);
@@ -95,6 +138,10 @@
       rep = await fetchProductivity(since, until, opts?.refresh);
       loadedAt = Date.now();
       error = null;
+      // Persist the snapshot so reload / tab-change restores it
+      // instead of re-fetching. Only an explicit Refresh or range
+      // change should re-hit the backend.
+      saveCachedReport(rep, since, until, loadedAt);
     } catch (e: unknown) {
       error = e instanceof Error ? e.message : 'failed to load productivity';
     } finally {
@@ -123,6 +170,18 @@
     until = r.until;
     saveRange(since, until);
     syncUrl(since, until);
+
+    // Restore the cached snapshot when it matches the resolved range
+    // — reload, tab-switch, and in-app navigation all become free.
+    // A fresh fetch only happens on first-ever load OR when the
+    // saved snapshot is for a different range.
+    const cached = loadCachedReport();
+    if (cached && cached.since === since && cached.until === until) {
+      rep = cached.rep;
+      loadedAt = cached.loadedAt;
+      loading = false;
+      return;
+    }
     void load();
   });
 </script>
