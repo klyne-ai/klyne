@@ -27,6 +27,11 @@
   /** How many sessions to show before the "show all" toggle kicks in. */
   const TOP_N = 12;
 
+  /** Per-session is the default — the granular evidence; per-repo
+   *  collapses each repo's sessions into one row with a union-active
+   *  total so duplicate-looking rows on the same project disappear. */
+  let groupBy = $state<'session' | 'repo'>('session');
+
   /** Format minutes as "Xh Ym" — or "Nm" under an hour. Clamps negatives. */
   function formatMinutes(value: number): string {
     const mins = Math.max(0, Math.round(value || 0));
@@ -110,6 +115,93 @@
   });
 
   const hasMore = $derived(sortedSessions.length > TOP_N);
+
+  // --- per-repo rollup (groupBy='repo') ------------------------------------
+
+  /** One row per repo when the user picks "By repo". Active is the
+   *  interval UNION of the repo's sessions (not naive sum) so when two
+   *  sessions ran in parallel on the same repo we don't double-count. */
+  interface RepoRow {
+    repo: string;
+    sessions: number;
+    /** cli → number of sessions for that CLI on this repo. */
+    cliCounts: Array<[string, number]>;
+    /** Earliest started_at across the repo's sessions (epoch-ms). */
+    startedAt: number;
+    /** Latest ended_at across the repo's sessions (epoch-ms). */
+    endedAt: number;
+    /** Active minutes — union of every active interval on this repo. */
+    activeMinutes: number;
+    /** Total in-window messages across the repo. */
+    messages: number;
+  }
+
+  /** Compute the union (in ms) of a list of [start, end) intervals.
+   *  Sort + sweep — handles overlap correctly so parallel sessions on
+   *  the same repo aren't double-counted. */
+  function unionMs(intervals: Array<[number, number]>): number {
+    if (intervals.length === 0) return 0;
+    const sorted = [...intervals].sort((a, b) => a[0] - b[0]);
+    let total = 0;
+    let curStart = sorted[0][0];
+    let curEnd = sorted[0][1];
+    for (let i = 1; i < sorted.length; i++) {
+      const [a, b] = sorted[i];
+      if (a > curEnd) {
+        total += curEnd - curStart;
+        curStart = a;
+        curEnd = b;
+      } else if (b > curEnd) {
+        curEnd = b;
+      }
+    }
+    total += curEnd - curStart;
+    return total;
+  }
+
+  const repoRows = $derived.by<RepoRow[]>(() => {
+    const byRepo = new Map<string, ProductivitySessionStat[]>();
+    for (const s of sessions) {
+      const key = s.repo || '—';
+      const bucket = byRepo.get(key);
+      if (bucket) bucket.push(s);
+      else byRepo.set(key, [s]);
+    }
+    const rows: RepoRow[] = [];
+    for (const [repo, list] of byRepo) {
+      const starts: number[] = [];
+      const ends: number[] = [];
+      const intervals: Array<[number, number]> = [];
+      const cliMap = new Map<string, number>();
+      let messages = 0;
+      for (const s of list) {
+        const st = Date.parse(s.started_at);
+        const en = Date.parse(s.ended_at);
+        if (!Number.isNaN(st)) starts.push(st);
+        if (!Number.isNaN(en)) ends.push(en);
+        for (const iv of s.active_intervals ?? []) {
+          const a = Date.parse(iv.start);
+          const b = Date.parse(iv.end);
+          if (!Number.isNaN(a) && !Number.isNaN(b) && b > a) {
+            intervals.push([a, b]);
+          }
+        }
+        const ck = (s.cli || 'unknown').toLowerCase();
+        cliMap.set(ck, (cliMap.get(ck) ?? 0) + 1);
+        messages += s.message_count || 0;
+      }
+      rows.push({
+        repo,
+        sessions: list.length,
+        cliCounts: [...cliMap.entries()].sort((a, b) => b[1] - a[1]),
+        startedAt: starts.length ? Math.min(...starts) : 0,
+        endedAt: ends.length ? Math.max(...ends) : 0,
+        activeMinutes: Math.round(unionMs(intervals) / 60_000),
+        messages
+      });
+    }
+    return rows.sort((a, b) => b.activeMinutes - a.activeMinutes);
+  });
 </script>
 
 <section class="ad-card pow" aria-label="Proof of work">
@@ -169,59 +261,136 @@
   {#if sessionCount === 0}
     <p class="pow-empty">No sessions in this window.</p>
   {:else}
-    <div class="pow-list-hd" aria-hidden="true">
-      <span class="pow-col pow-col--cli">CLI</span>
-      <span class="pow-col pow-col--repo">Repo</span>
-      <span class="pow-col pow-col--span">Span</span>
-      <span class="pow-col pow-col--time">Active</span>
-      <span class="pow-col pow-col--msgs">Messages</span>
-    </div>
-
-    <ul class="pow-list">
-      {#each visibleSessions as s, i (s.session_id || i)}
-        {@const key = cliKey(s.cli)}
-        <li class="pow-row">
-          <span
-            class="ad-badge pow-cli pow-cli--{key}"
-            title={s.session_id}
-          >
-            <span class="ad-dot pow-cli-dot pow-cli-dot--{key}" aria-hidden="true"
-            ></span>
-            {s.cli || 'unknown'}
-          </span>
-
-          <span class="pow-repo ad-truncate" title={s.repo}>
-            {s.repo || '—'}
-          </span>
-
-          <span class="pow-span ad-mono ad-tnum">
-            {formatClock(s.started_at)}–{formatClock(s.ended_at)}
-          </span>
-
-          <span class="pow-time ad-mono ad-tnum">
-            {formatMinutes(s.active_minutes)}
-          </span>
-
-          <span class="pow-msgs ad-mono ad-tnum">
-            {s.message_count} msg{s.message_count === 1 ? '' : 's'}
-          </span>
-        </li>
-      {/each}
-    </ul>
-
-    {#if hasMore}
+    <!-- view toggle: per-session evidence vs per-repo rollup -->
+    <div class="pow-view" role="tablist" aria-label="Group sessions by">
       <button
         type="button"
-        class="pow-toggle"
-        onclick={() => (showAll = !showAll)}
-        aria-expanded={showAll}
+        class="pow-view-btn"
+        class:pow-view-btn--active={groupBy === 'session'}
+        aria-pressed={groupBy === 'session'}
+        onclick={() => (groupBy = 'session')}
       >
-        {#if showAll}
-          Show top {TOP_N} only
-        {:else}
-          Show all {sessionCount} sessions
-        {/if}
+        By session
+        <span class="pow-view-count ad-mono ad-tnum">{sessionCount}</span>
       </button>
+      <button
+        type="button"
+        class="pow-view-btn"
+        class:pow-view-btn--active={groupBy === 'repo'}
+        aria-pressed={groupBy === 'repo'}
+        onclick={() => (groupBy = 'repo')}
+      >
+        By repo
+        <span class="pow-view-count ad-mono ad-tnum">{repoRows.length}</span>
+      </button>
+    </div>
+
+    {#if groupBy === 'session'}
+      <div class="pow-list-hd" aria-hidden="true">
+        <span class="pow-col pow-col--cli">CLI</span>
+        <span class="pow-col pow-col--repo">Repo</span>
+        <span class="pow-col pow-col--span">Span</span>
+        <span class="pow-col pow-col--time">Active</span>
+        <span class="pow-col pow-col--msgs">Messages</span>
+      </div>
+
+      <ul class="pow-list">
+        {#each visibleSessions as s, i (s.session_id || i)}
+          {@const key = cliKey(s.cli)}
+          <li class="pow-row">
+            <span
+              class="ad-badge pow-cli pow-cli--{key}"
+              title={s.session_id}
+            >
+              <span class="ad-dot pow-cli-dot pow-cli-dot--{key}" aria-hidden="true"
+              ></span>
+              {s.cli || 'unknown'}
+            </span>
+
+            <span class="pow-repo ad-truncate" title={s.repo}>
+              {s.repo || '—'}
+            </span>
+
+            <span class="pow-span ad-mono ad-tnum">
+              {formatClock(s.started_at)}–{formatClock(s.ended_at)}
+            </span>
+
+            <span class="pow-time ad-mono ad-tnum">
+              {formatMinutes(s.active_minutes)}
+            </span>
+
+            <span class="pow-msgs ad-mono ad-tnum">
+              {s.message_count} msg{s.message_count === 1 ? '' : 's'}
+            </span>
+          </li>
+        {/each}
+      </ul>
+
+      {#if hasMore}
+        <button
+          type="button"
+          class="pow-toggle"
+          onclick={() => (showAll = !showAll)}
+          aria-expanded={showAll}
+        >
+          {#if showAll}
+            Show top {TOP_N} only
+          {:else}
+            Show all {sessionCount} sessions
+          {/if}
+        </button>
+      {/if}
+    {:else}
+      <!-- per-repo rollup: one row per repo, active is interval-UNION -->
+      <div class="pow-list-hd pow-list-hd--repo" aria-hidden="true">
+        <span class="pow-col pow-col--cli">CLI</span>
+        <span class="pow-col pow-col--repo">Repo</span>
+        <span class="pow-col pow-col--sess">Sessions</span>
+        <span class="pow-col pow-col--span">Span</span>
+        <span class="pow-col pow-col--time">Active</span>
+        <span class="pow-col pow-col--msgs">Messages</span>
+      </div>
+
+      <ul class="pow-list">
+        {#each repoRows as r, i (r.repo + '|' + i)}
+          <li class="pow-row pow-row--repo">
+            <span class="pow-cli-mix">
+              {#each r.cliCounts as [cli, count] (cli)}
+                {@const k = cliKey(cli)}
+                <span
+                  class="ad-badge pow-cli pow-cli--{k}"
+                  title="{count} {cli} session{count === 1 ? '' : 's'}"
+                >
+                  <span class="ad-dot pow-cli-dot pow-cli-dot--{k}" aria-hidden="true"></span>
+                  {cli}{count > 1 ? `·${count}` : ''}
+                </span>
+              {/each}
+            </span>
+
+            <span class="pow-repo ad-truncate" title={r.repo}>
+              {r.repo || '—'}
+            </span>
+
+            <span class="pow-sess ad-mono ad-tnum">
+              {r.sessions}
+            </span>
+
+            <span class="pow-span ad-mono ad-tnum">
+              {formatClock(new Date(r.startedAt).toISOString())}–{formatClock(
+                new Date(r.endedAt).toISOString()
+              )}
+            </span>
+
+            <span class="pow-time ad-mono ad-tnum">
+              {formatMinutes(r.activeMinutes)}
+            </span>
+
+            <span class="pow-msgs ad-mono ad-tnum">
+              {r.messages} msg{r.messages === 1 ? '' : 's'}
+            </span>
+          </li>
+        {/each}
+      </ul>
     {/if}
   {/if}
 </section>
@@ -332,6 +501,54 @@
     text-align: center;
   }
 
+  /* ---- view-mode toggle (session / repo) ---- */
+  .pow-view {
+    display: inline-flex;
+    align-self: flex-start;
+    background: var(--ad-bg-2);
+    border: 1px solid var(--ad-border-soft);
+    border-radius: var(--ad-r-sm);
+    padding: 2px;
+    gap: 2px;
+  }
+  .pow-view-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font: inherit;
+    font-size: 11.5px;
+    font-weight: 500;
+    color: var(--ad-faint);
+    background: transparent;
+    border: 0;
+    border-radius: 5px;
+    padding: 4px 10px;
+    cursor: pointer;
+    transition: background 100ms ease, color 100ms ease;
+  }
+  .pow-view-btn:hover {
+    color: var(--ad-fg-2);
+  }
+  .pow-view-btn--active {
+    color: var(--ad-fg);
+    background: var(--ad-panel);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  }
+  .pow-view-count {
+    font-size: 10px;
+    color: var(--ad-faint);
+    background: var(--ad-bg);
+    border: 1px solid var(--ad-border-soft);
+    border-radius: 4px;
+    padding: 0 5px;
+    min-width: 18px;
+    text-align: center;
+  }
+  .pow-view-btn--active .pow-view-count {
+    color: var(--ad-fg-2);
+    border-color: var(--ad-border);
+  }
+
   /* ---- session list ---- */
   .pow-list-hd,
   .pow-row {
@@ -339,6 +556,28 @@
     grid-template-columns: 88px minmax(0, 1fr) 116px 78px 78px;
     gap: var(--ad-s3);
     align-items: center;
+  }
+
+  /* per-repo rollup adds a Sessions column between Repo and Span. */
+  .pow-list-hd--repo,
+  .pow-row--repo {
+    grid-template-columns: minmax(140px, auto) minmax(0, 1fr) 64px 116px 78px 78px;
+  }
+
+  .pow-cli-mix {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .pow-sess {
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--ad-fg-2);
+    text-align: right;
+  }
+  .pow-col--sess {
+    text-align: right;
   }
 
   .pow-list-hd {
