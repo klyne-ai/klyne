@@ -13,13 +13,34 @@
 -->
 <script lang="ts">
   import type { ProductivityReport, ProductivitySessionStat } from '$lib/api';
+  import {
+    hiddenSessionIds,
+    toggleHidden,
+    hideMany,
+    showMany
+  } from '$lib/hidden-sessions.svelte';
   import SessionTimeline from './SessionTimeline.svelte';
 
   interface Props {
+    /** Filtered report — hidden sessions already removed, totals recomputed. */
     report: ProductivityReport;
+    /** Unfiltered report — used to surface the "Show hidden (N)" expandable
+     *  list and to compute repo-level hide-all groupings. Optional so the
+     *  component still renders if a caller hasn't migrated. */
+    fullReport?: ProductivityReport;
   }
 
-  const { report }: Props = $props();
+  const { report, fullReport }: Props = $props();
+
+  /** Sessions ONLY present in the full report (hidden by the user). */
+  const hiddenList = $derived.by<ProductivitySessionStat[]>(() => {
+    const ids = hiddenSessionIds();
+    const all = fullReport?.sessions ?? report.sessions ?? [];
+    return all.filter((s) => ids.has(s.session_id));
+  });
+
+  /** Reveal the hidden list below the visible rows. */
+  let showHiddenList = $state(false);
 
   /** When false, only the top N sessions by active_minutes are shown. */
   let showAll = $state(false);
@@ -158,6 +179,18 @@
     total += curEnd - curStart;
     return total;
   }
+
+  /** session_ids grouped by their repo — used by "Hide all from this repo". */
+  const sessionIdsByRepo = $derived.by(() => {
+    const map = new Map<string, string[]>();
+    for (const s of sessions) {
+      const key = s.repo || '—';
+      const bucket = map.get(key);
+      if (bucket) bucket.push(s.session_id);
+      else map.set(key, [s.session_id]);
+    }
+    return map;
+  });
 
   const repoRows = $derived.by<RepoRow[]>(() => {
     const byRepo = new Map<string, ProductivitySessionStat[]>();
@@ -322,6 +355,16 @@
             <span class="pow-msgs ad-mono ad-tnum">
               {s.message_count} msg{s.message_count === 1 ? '' : 's'}
             </span>
+
+            <button
+              type="button"
+              class="pow-hide-btn"
+              title="Hide this session from totals, timeline, and lists"
+              aria-label="Hide session {s.session_id}"
+              onclick={() => toggleHidden(s.session_id)}
+            >
+              hide
+            </button>
           </li>
         {/each}
       </ul>
@@ -388,9 +431,75 @@
             <span class="pow-msgs ad-mono ad-tnum">
               {r.messages} msg{r.messages === 1 ? '' : 's'}
             </span>
+
+            <button
+              type="button"
+              class="pow-hide-btn"
+              title="Hide every session attributed to this repo"
+              aria-label="Hide all sessions for {r.repo}"
+              onclick={() => hideMany(sessionIdsByRepo.get(r.repo) ?? [])}
+            >
+              hide all
+            </button>
           </li>
         {/each}
       </ul>
+    {/if}
+
+    <!-- Hidden-session reveal: shown when the user has anything stashed. -->
+    {#if hiddenList.length > 0}
+      <div class="pow-hidden">
+        <div class="pow-hidden-row">
+          <button
+            type="button"
+            class="pow-hidden-toggle"
+            onclick={() => (showHiddenList = !showHiddenList)}
+            aria-expanded={showHiddenList}
+          >
+            {showHiddenList ? 'Hide' : 'Show'} hidden ({hiddenList.length})
+          </button>
+          <button
+            type="button"
+            class="pow-hidden-restore-all"
+            title="Restore every hidden session"
+            onclick={() => showMany(hiddenList.map((s) => s.session_id))}
+          >
+            restore all
+          </button>
+        </div>
+        {#if showHiddenList}
+          <ul class="pow-list pow-list--hidden">
+            {#each hiddenList as s, i (s.session_id || `h${i}`)}
+              {@const key = cliKey(s.cli)}
+              <li class="pow-row pow-row--hidden">
+                <span class="ad-badge pow-cli pow-cli--{key}" title={s.session_id}>
+                  <span class="ad-dot pow-cli-dot pow-cli-dot--{key}" aria-hidden="true"></span>
+                  {s.cli || 'unknown'}
+                </span>
+                <span class="pow-repo ad-truncate" title={s.repo}>{s.repo || '—'}</span>
+                <span class="pow-span ad-mono ad-tnum">
+                  {formatClock(s.started_at)}–{formatClock(s.ended_at)}
+                </span>
+                <span class="pow-time ad-mono ad-tnum">
+                  {formatMinutes(s.active_minutes)}
+                </span>
+                <span class="pow-msgs ad-mono ad-tnum">
+                  {s.message_count} msg{s.message_count === 1 ? '' : 's'}
+                </span>
+                <button
+                  type="button"
+                  class="pow-hide-btn pow-hide-btn--restore"
+                  title="Show this session again"
+                  aria-label="Show session {s.session_id}"
+                  onclick={() => toggleHidden(s.session_id)}
+                >
+                  show
+                </button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </div>
     {/if}
   {/if}
 </section>
@@ -682,5 +791,74 @@
   .pow-toggle:hover {
     color: var(--ad-fg-2);
     border-color: var(--ad-border);
+  }
+
+  /* ---- per-row hide buttons + hidden-session reveal ---- */
+  .pow-hide-btn {
+    margin-left: auto;
+    align-self: center;
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--ad-faint);
+    font-family: var(--ad-font-mono);
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: var(--ad-r-sm);
+    cursor: pointer;
+    opacity: 0;
+    transition:
+      opacity 120ms ease,
+      color 120ms ease,
+      border-color 120ms ease;
+  }
+  .pow-row:hover .pow-hide-btn,
+  .pow-hide-btn:focus-visible {
+    opacity: 1;
+  }
+  .pow-hide-btn:hover {
+    color: var(--ad-fg-2);
+    border-color: var(--ad-border);
+  }
+  .pow-hide-btn--restore {
+    color: var(--ad-accent, var(--ad-fg-2));
+    opacity: 1; /* always visible in the hidden list — that's its whole point */
+  }
+
+  .pow-hidden {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ad-s2);
+    margin-top: var(--ad-s2);
+  }
+  .pow-hidden-row {
+    display: inline-flex;
+    align-self: flex-start;
+    gap: var(--ad-s2);
+    align-items: center;
+  }
+  .pow-hidden-toggle,
+  .pow-hidden-restore-all {
+    background: transparent;
+    border: 1px solid var(--ad-border-soft);
+    border-radius: var(--ad-r-sm);
+    padding: 5px 11px;
+    cursor: pointer;
+    font-family: var(--ad-font-mono);
+    font-size: 11px;
+    color: var(--ad-muted);
+    transition:
+      color 120ms ease,
+      border-color 120ms ease;
+  }
+  .pow-hidden-toggle:hover,
+  .pow-hidden-restore-all:hover {
+    color: var(--ad-fg-2);
+    border-color: var(--ad-border);
+  }
+  .pow-list--hidden {
+    opacity: 0.65;
+  }
+  .pow-row--hidden {
+    background: color-mix(in oklch, var(--ad-bg-2) 70%, transparent);
   }
 </style>

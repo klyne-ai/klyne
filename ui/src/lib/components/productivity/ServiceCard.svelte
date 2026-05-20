@@ -551,6 +551,7 @@
       {detailOpen ? 'Hide detail' : 'Show detail'}
       <span class="detail-meta ad-mono">
         {branches.length} branch{branches.length === 1 ? '' : 'es'}
+        {#if mergedPrs.length > 0} · {mergedPrs.length} merged PR{mergedPrs.length === 1 ? '' : 's'}{/if}
         {#if service.reflection_markdown} · worklog note{/if}
       </span>
     </button>

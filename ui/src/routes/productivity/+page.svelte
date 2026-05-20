@@ -15,6 +15,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { fetchProductivity, type ProductivityReport } from '$lib/api.js';
+  import { applyHiddenFilter, hiddenSessionIds } from '$lib/hidden-sessions.svelte';
   import RangeBar from '$lib/components/productivity/RangeBar.svelte';
   import SummaryBar from '$lib/components/productivity/SummaryBar.svelte';
   import DaySummary from '$lib/components/productivity/DaySummary.svelte';
@@ -203,16 +204,18 @@
   {:else if error}
     <p class="prod-state prod-state--err">Error: {error}</p>
   {:else if rep}
-    <SummaryBar report={rep} />
+    {@const _hidden = hiddenSessionIds()}
+    {@const visibleRep = applyHiddenFilter(rep)}
+    <SummaryBar report={visibleRep} />
 
-    <DaySummary report={rep} />
+    <DaySummary report={visibleRep} />
 
     <div class="prod-row">
-      <RiskPanel report={rep} />
-      <TimeBarChart report={rep} />
+      <RiskPanel report={visibleRep} />
+      <TimeBarChart report={visibleRep} />
     </div>
 
-    <ProofOfWork report={rep} />
+    <ProofOfWork report={visibleRep} fullReport={rep} />
 
     {#if rep.services.length === 0}
       <p class="prod-state">No services in this window.</p>
