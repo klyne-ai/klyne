@@ -172,6 +172,90 @@ func TestCrossProjectThread_NoUmbrellaForSingleRepoTicket(t *testing.T) {
 	}
 }
 
+// salienceFixture: one repo, two branches — a 3-commit high-impact
+// feature branch and a 1-commit trivial docs branch, plus a bot commit
+// that the productivity layer would have filtered out (it never reaches
+// a Branch). Used for the salience-gate and grounding-prompt tests.
+func salienceFixture() productivity.Report {
+	d := time.Date(2026, 5, 19, 0, 0, 0, 0, time.UTC)
+	return productivity.Report{
+		Day: "2026-05-19",
+		Services: []productivity.Service{{
+			Repo:        "svc",
+			ProjectPath: "/repos/svc",
+			Branches: []productivity.Branch{
+				{
+					Name: "docs/cleanup", Ship: productivity.ShipLocal,
+					Commits: []productivity.Commit{
+						{SHA: "d0000000", Subject: "tidy README", CommittedAt: d.Add(8 * time.Hour), IsUser: true, Insertions: 3},
+					},
+				},
+				{
+					Name: "feat/CLI-9-core", TicketID: "CLI-9", Ship: productivity.ShipLocal,
+					Commits: []productivity.Commit{
+						{SHA: "f1000000", Subject: "core pipeline a", CommittedAt: d.Add(9 * time.Hour), IsUser: true, Insertions: 200},
+						{SHA: "f2000000", Subject: "core pipeline b", CommittedAt: d.Add(10 * time.Hour), IsUser: true, Insertions: 150},
+						{SHA: "f3000000", Subject: "core pipeline c", CommittedAt: d.Add(11 * time.Hour), IsUser: true, Insertions: 80},
+					},
+				},
+			},
+		}},
+	}
+}
+
+// Improvement 2: the salience gate. The git-facts block fed to the LLM
+// must LEAD with the highest-code-impact branch, not chronological or
+// trivial work.
+func TestSalienceRankedFacts_LeadsWithHighestImpact(t *testing.T) {
+	rep := salienceFixture()
+	facts := SalienceRankedFacts(rep, "/repos/svc")
+	if facts == "" {
+		t.Fatal("expected a non-empty salience-ranked facts block")
+	}
+	idxFeat := strings.Index(facts, "feat/CLI-9-core")
+	idxDocs := strings.Index(facts, "docs/cleanup")
+	if idxFeat < 0 || idxDocs < 0 {
+		t.Fatalf("facts block must mention both branches, got:\n%s", facts)
+	}
+	if idxFeat > idxDocs {
+		t.Errorf("salience gate: high-impact feat/CLI-9-core (3 commits) must lead docs/cleanup (1 commit), got:\n%s", facts)
+	}
+}
+
+// Improvement 6: the author/identity filter. The git facts are sourced
+// from productivity.Service.Branches, which carry only IsUser commits —
+// so a bot/co-actor SHA can never appear in the facts block. This test
+// proves the substrate path is identity-filtered by construction.
+func TestSalienceRankedFacts_ExcludesNonUserCommits(t *testing.T) {
+	rep := salienceFixture()
+	// Inject a bot commit as if it had leaked through — it must not be
+	// surfaced because the substrate Branch only ever holds IsUser
+	// commits; SalienceRankedFacts must additionally drop any IsUser=false
+	// commit defensively.
+	rep.Services[0].Branches[1].Commits = append(rep.Services[0].Branches[1].Commits,
+		productivity.Commit{SHA: "b0700000", Subject: "Jenkins: bump build", IsUser: false})
+	facts := SalienceRankedFacts(rep, "/repos/svc")
+	if strings.Contains(facts, "b0700000") || strings.Contains(facts, "Jenkins") {
+		t.Errorf("identity filter: bot commit must be excluded from facts, got:\n%s", facts)
+	}
+	// The real user commits are still there.
+	if !strings.Contains(facts, "f1000000") {
+		t.Errorf("user commits must remain in facts, got:\n%s", facts)
+	}
+}
+
+// Improvement 2 (prompt-contract half): the grounding contract text
+// states the §7.1 rules the LLM must follow, including the salience rule
+// and the no-invented-PR rule.
+func TestGroundingContractText_StatesKeyRules(t *testing.T) {
+	c := GroundingContractText()
+	for _, want := range []string{"salience", "PR", "sha", "verbatim"} {
+		if !strings.Contains(strings.ToLower(c), strings.ToLower(want)) {
+			t.Errorf("grounding contract must mention %q, got:\n%s", want, c)
+		}
+	}
+}
+
 // Improvement 4: the unverified-artifact-ID guard. A "PR #<n>" not
 // backed by any branch name or commit message is the documented
 // "PR #57" hallucination — it must be stripped/flagged.

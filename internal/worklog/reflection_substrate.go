@@ -108,6 +108,117 @@ func threadMentionsService(thread string, svc productivity.Service) bool {
 	return strings.Contains(thread, svc.Repo)
 }
 
+// ProposalGitBrief renders the deterministic git brief the AI host reads
+// before synthesizing a reflection (spec §7.2 improvements 2 & 4,
+// prompt-contract half). It is the salience-ranked git facts
+// (SalienceRankedFacts) followed by the §7.1 grounding contract
+// (GroundingContractText). The proposer embeds it in the proposal
+// markdown so the host leads with high-impact work and never invents a
+// PR/ticket id.
+//
+// Returns "" when projectPath has no Service in the report (not a git
+// repo / no in-window activity) — the proposer keeps its existing
+// markdown unchanged for those projects (graceful degradation, D8).
+func ProposalGitBrief(rep productivity.Report, projectPath string) string {
+	facts := SalienceRankedFacts(rep, projectPath)
+	if facts == "" {
+		return ""
+	}
+	return facts + "\n\n" + GroundingContractText()
+}
+
+// GroundingContractText returns the spec §7.1 Anti-Hallucination
+// Grounding Contract as prompt text. The proposer embeds it in the
+// reflection-proposal markdown so the AI host writes prose that obeys
+// the determinism boundary: it cites short SHAs, quotes deterministic
+// numbers/state verbatim, never invents a PR/ticket/external ID, and
+// LEADS with the highest-code-impact work (the salience rule —
+// improvement 2's prompt-contract half).
+func GroundingContractText() string {
+	return strings.TrimSpace(`
+## Grounding contract (spec §7.1 — follow exactly)
+
+The git facts below are deterministic and FIXED. You write prose only.
+
+1. Every factual claim must trace to an allowlisted input; cite the
+   short sha(s) it comes from.
+2. NEVER write a PR number, ticket id, or external id unless it appears
+   literally in a branch name or commit message above. Inventing
+   "PR #<n>" is a hard failure.
+3. State unknowns as unknown — do not guess.
+4. Quote time figures and ship state verbatim from the facts.
+5. Salience rule: LEAD the narrative with the highest-code-impact work
+   (most commits / net-new lines), never with chronological or trivial
+   work. The git facts are already ranked by impact — follow that order.`)
+}
+
+// SalienceRankedFacts renders improvement 2's deterministic half: a
+// git-facts block for one project, with branches ranked by code impact
+// (commit count, then net-new lines) so the highest-impact work LEADS.
+// The AI host is instructed (via GroundingContractText) to narrate in
+// this order — the structural fix for the documented salience-inversion
+// failure (a docs cleanup foregrounded over a 9-commit pipeline).
+//
+// Improvement 6: facts are sourced from productivity.Service.Branches,
+// which carry only identity-filtered (IsUser) commits; any IsUser=false
+// commit is additionally dropped here defensively. Bot/co-actor work
+// never reaches the prompt. Deterministic, no LLM.
+func SalienceRankedFacts(rep productivity.Report, projectPath string) string {
+	svc := findService(rep, projectPath)
+	if svc == nil {
+		return ""
+	}
+	branches := rankBranches(svc.Branches)
+	if len(branches) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "## Git facts — %s (ranked by code impact, lead with the first)\n", svc.Repo)
+	for _, b := range branches {
+		user := userCommits(b.Commits)
+		if len(user) == 0 {
+			continue
+		}
+		ticket := ""
+		if b.TicketID != "" {
+			ticket = " [" + b.TicketID + "]"
+		}
+		fmt.Fprintf(&sb, "- `%s`%s — %s, %d commit(s), %d net-new lines\n",
+			b.Name, ticket, b.Ship, len(user), netLines(user))
+		ranked := rankCommitsByImpact(user)
+		for _, c := range ranked {
+			fmt.Fprintf(&sb, "  - %s (%s) +%d/-%d on %s\n",
+				c.Subject, c.SHA, c.Insertions, c.Deletions,
+				c.CommittedAt.Format("2006-01-02"))
+		}
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+// userCommits returns only the identity-filtered (IsUser) commits — the
+// §6.3 / improvement-6 filter, applied defensively even though the
+// substrate Branch already excludes co-actors/bots.
+func userCommits(cs []productivity.Commit) []productivity.Commit {
+	var out []productivity.Commit
+	for _, c := range cs {
+		if c.IsUser {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// rankCommitsByImpact orders commits by net-new lines descending — the
+// per-commit salience order inside a branch.
+func rankCommitsByImpact(cs []productivity.Commit) []productivity.Commit {
+	out := make([]productivity.Commit, len(cs))
+	copy(out, cs)
+	sort.SliceStable(out, func(i, j int) bool {
+		return (out[i].Insertions - out[i].Deletions) > (out[j].Insertions - out[j].Deletions)
+	})
+	return out
+}
+
 // CrossProjectThread renders improvement 7: the cross-project initiative
 // thread. When the same raw ticket-id token appears on branches in more
 // than one repo within the same daily report, one umbrella entry is
