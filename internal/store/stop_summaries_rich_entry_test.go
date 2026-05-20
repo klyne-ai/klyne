@@ -8,6 +8,55 @@ import (
 	"github.com/klyne-ai/klyne/internal/store"
 )
 
+// TestReadWorklogEntry_RoundTrip writes a rich entry then reads it
+// back through the typed helper. Asserts the helper returns the
+// schema_version, the populated category, AND the gate verdict — all
+// the fields downstream consumers (Phase 5 worker, Phase 6 reflection)
+// will read.
+func TestReadWorklogEntry_RoundTrip(t *testing.T) {
+	db := openStopSummariesDB(t)
+	ctx := context.Background()
+	entry := store.WorklogEntryJSON{SchemaVersion: 1, Categories: map[string][]store.WorklogItem{
+		"shipped": {{Summary: "merged PR #400", Refs: []string{"#400"}}},
+	}}
+	if err := store.UpsertStopSummaryWithEntry(ctx, db,
+		store.StopSummary{SessionID: "s-read", Ts: 1, Summary: "body"},
+		entry, "admitted-heuristic", 0); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	got, verdict, err := store.ReadWorklogEntry(ctx, db, "s-read", 1)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if verdict != "admitted-heuristic" {
+		t.Errorf("verdict: got %q", verdict)
+	}
+	if got.SchemaVersion != 1 {
+		t.Errorf("schema_version: got %d", got.SchemaVersion)
+	}
+	shipped := got.Categories["shipped"]
+	if len(shipped) != 1 || shipped[0].Refs[0] != "#400" {
+		t.Errorf("shipped lost: %+v", shipped)
+	}
+}
+
+// TestReadWorklogEntry_MissingRow returns the zero entry + empty
+// verdict + nil error — Phase 5's worker uses this to distinguish
+// "queue is empty for this id" from a real DB error.
+func TestReadWorklogEntry_MissingRow(t *testing.T) {
+	db := openStopSummariesDB(t)
+	got, verdict, err := store.ReadWorklogEntry(context.Background(), db, "nope", 42)
+	if err != nil {
+		t.Fatalf("err on missing row: %v", err)
+	}
+	if verdict != "" {
+		t.Errorf("verdict on missing: %q", verdict)
+	}
+	if got.SchemaVersion != 0 || got.Categories != nil {
+		t.Errorf("entry on missing: %+v", got)
+	}
+}
+
 // TestUpsertStopSummaryWithEntry_RoundTrip writes a row with a rich
 // worklog entry + gate verdict and reads back every column we care
 // about — entry JSON, verdict, attempts. Asserts the JSON round-trips

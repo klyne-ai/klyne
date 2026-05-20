@@ -226,6 +226,31 @@ ON CONFLICT(session_id, ts) DO UPDATE SET
 	return nil
 }
 
+// ReadWorklogEntry returns the migration-019 rich entry + gate verdict
+// for one (session_id, ts). Missing rows are not an error: returns the
+// zero WorklogEntryJSON + empty verdict + nil so Phase 5's worker can
+// distinguish "queue is empty / row not processed yet" from a real DB
+// failure.
+func ReadWorklogEntry(ctx context.Context, db *DB, sessionID string, ts int64) (WorklogEntryJSON, string, error) {
+	const q = `SELECT worklog_entry_json, worklog_gate_verdict
+	             FROM stop_summaries WHERE session_id = ? AND ts = ?`
+	var raw, verdict string
+	if err := db.Read().QueryRowContext(ctx, q, sessionID, ts).Scan(&raw, &verdict); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return WorklogEntryJSON{}, "", nil
+		}
+		return WorklogEntryJSON{}, "", fmt.Errorf("store: read worklog entry: %w", err)
+	}
+	var entry WorklogEntryJSON
+	if raw != "" {
+		// Unmarshal best-effort: a malformed JSON column shouldn't take
+		// down the whole reflection-consumer scan. Caller sees the
+		// empty entry + verdict and can log the row id.
+		_ = json.Unmarshal([]byte(raw), &entry)
+	}
+	return entry, verdict, nil
+}
+
 // LatestStopSummaryForProject returns the most recent stop-hook
 // summary scoped to projectPath, or nil if there is none. Empty
 // projectPath returns the most recent summary across all projects.
