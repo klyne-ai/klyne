@@ -20,22 +20,45 @@
 
   // --- Aggregations across every branch of every service -------------------
 
-  /** Total AI-attributed minutes summed across all branches. */
-  const totalMinutes = $derived(
-    report.services.reduce(
-      (sum, svc) =>
-        sum + svc.branches.reduce((b, br) => b + (br.attributed_minutes || 0), 0),
-      0
-    )
-  );
-
-  /** "Xh Ym" — always renders, "0h 0m" for an empty report. */
-  const totalTime = $derived.by(() => {
-    const mins = Math.max(0, Math.round(totalMinutes));
+  /** Format minutes as "Xh Ym" — clamps negatives, "0h 0m" for empty. */
+  function formatMinutes(value: number): string {
+    const mins = Math.max(0, Math.round(value || 0));
     const h = Math.floor(mins / 60);
     const m = mins % 60;
     return `${h}h ${m}m`;
+  }
+
+  /**
+   * Headline "Total AI time" — the backend's true global interval-union
+   * of every session's active wall-clock across all CLIs. Replaces the old
+   * sum-of-branch-minutes, which double-counted overlapping sessions.
+   */
+  const totalTime = $derived(formatMinutes(report.total_active_minutes));
+
+  /** Per-CLI global union, ordered claude-first then any others, formatted. */
+  const cliBreakdown = $derived.by(() => {
+    const by = report.minutes_by_cli ?? {};
+    const order = ['claude', 'codex'];
+    const keys = [
+      ...order.filter((k) => k in by || k === 'claude' || k === 'codex'),
+      ...Object.keys(by).filter((k) => !order.includes(k))
+    ];
+    const seen = new Set<string>();
+    const out: { cli: string; label: string; time: string }[] = [];
+    for (const k of keys) {
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push({
+        cli: k,
+        label: k.charAt(0).toUpperCase() + k.slice(1),
+        time: formatMinutes(by[k] ?? 0)
+      });
+    }
+    return out;
   });
+
+  /** Count of contributing sessions behind the headline number. */
+  const sessionCount = $derived(report.sessions?.length ?? 0);
 
   const serviceCount = $derived(report.services.length);
 
@@ -119,9 +142,27 @@
 
   <!-- Row 2: stat tiles -->
   <dl class="sb-tiles">
-    <div class="sb-tile">
+    <div class="sb-tile sb-tile--wide">
       <dt>Total AI time</dt>
       <dd class="ad-mono ad-tnum sb-tile-v">{totalTime}</dd>
+      {#if cliBreakdown.length}
+        <div class="sb-cli">
+          {#each cliBreakdown as c, i (c.cli)}
+            {#if i > 0}
+              <span class="sb-cli-sep" aria-hidden="true">·</span>
+            {/if}
+            <span class="sb-cli-item">
+              <span class="sb-cli-l">{c.label}</span>
+              <span class="ad-mono ad-tnum">{c.time}</span>
+            </span>
+          {/each}
+        </div>
+      {/if}
+      {#if sessionCount > 0}
+        <div class="sb-cli-cap">
+          union of {sessionCount} session{sessionCount === 1 ? '' : 's'} — overlaps removed
+        </div>
+      {/if}
     </div>
 
     <div class="sb-tile">
@@ -256,6 +297,35 @@
   }
   .sb-tile-v--alert {
     color: var(--ad-danger);
+  }
+
+  /* --- Per-CLI breakdown under the Total AI time tile ------------------ */
+  .sb-cli {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 6px;
+    font-size: var(--ad-fs-md);
+    color: var(--ad-fg-2);
+  }
+  .sb-cli-item {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 4px;
+  }
+  .sb-cli-l {
+    color: var(--ad-faint);
+    font-weight: 400;
+    font-size: var(--ad-fs-xs);
+  }
+  .sb-cli-sep {
+    color: var(--ad-border);
+    font-weight: 400;
+  }
+  .sb-cli-cap {
+    color: var(--ad-muted);
+    font-size: 10px;
+    line-height: var(--ad-lh-base);
   }
 
   .sb-ship {

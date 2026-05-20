@@ -37,6 +37,88 @@
     return `~${h}h ${m}m`;
   }
 
+  // Format a minute count as "Xh Ym" / "Nm" (no leading "~"). For the
+  // per-CLI split and the per-branch ship span.
+  function hmPlain(min: number): string {
+    const h = Math.floor(min / 60);
+    const m = min % 60;
+    if (h <= 0) return `${m}m`;
+    return `${h}h ${m}m`;
+  }
+
+  // Human-readable branch ship span. 0 means <2 commits → no real span.
+  function shipSpan(min: number): string {
+    if (!min || min <= 0) return 'single commit';
+    return hmPlain(min);
+  }
+
+  // Title-case a CLI key for display ("claude" → "Claude").
+  function cliLabel(cli: string): string {
+    return cli.length === 0 ? cli : cli[0].toUpperCase() + cli.slice(1);
+  }
+
+  // Per-CLI time split for the service header — non-zero entries only.
+  const cliSplit = $derived(
+    Object.entries(service.minutes_by_cli ?? {})
+      .filter(([, min]) => min > 0)
+      .sort((a, b) => b[1] - a[1])
+  );
+
+  // Worklog reflection section — collapsed by default.
+  let worklogOpen = $state(false);
+
+  // Format an RFC3339 timestamp as a short local time (HH:MM). Returns ''
+  // when the input is missing or unparseable.
+  function shortTime(iso: string): string {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+
+  // Minimal, safe Markdown → HTML. Escapes all HTML entities first, then
+  // applies a tiny subset: **bold**, `- ` / `* ` bullet lines, and line
+  // breaks. Never receives or emits unescaped input.
+  function renderWorklog(md: string): string {
+    const escaped = md
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+    const lines = escaped.split(/\r?\n/);
+    const out: string[] = [];
+    let inList = false;
+    for (const raw of lines) {
+      const line = raw.trimEnd();
+      const bullet = line.match(/^\s*[-*]\s+(.*)$/);
+      if (bullet) {
+        if (!inList) {
+          out.push('<ul>');
+          inList = true;
+        }
+        out.push(`<li>${inline(bullet[1])}</li>`);
+        continue;
+      }
+      if (inList) {
+        out.push('</ul>');
+        inList = false;
+      }
+      if (line.length === 0) {
+        out.push('<br />');
+      } else {
+        out.push(`<p>${inline(line)}</p>`);
+      }
+    }
+    if (inList) out.push('</ul>');
+    return out.join('');
+  }
+
+  // Inline span: only **bold** is supported. Input is already escaped.
+  function inline(text: string): string {
+    return text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  }
+
   // Ship-state → badge color class + readable label.
   const shipMeta: Record<string, { cls: string; label: string }> = {
     'merged-to-default': { cls: 'ship--merged', label: 'merged' },
@@ -75,6 +157,17 @@
       <div class="svc-path ad-mono ad-truncate" title={service.project_path}>
         {service.project_path}
       </div>
+
+      {#if cliSplit.length > 0}
+        <ul class="cli-split" aria-label="AI time by CLI">
+          {#each cliSplit as [cli, min], ci (ci)}
+            <li class="cli-chip">
+              <span class="cli-name">{cliLabel(cli)}</span>
+              <span class="cli-time ad-mono ad-tnum">{hmPlain(min)}</span>
+            </li>
+          {/each}
+        </ul>
+      {/if}
     </div>
 
     {#if service.risks.length > 0}
@@ -122,6 +215,14 @@
                 {time}
               </span>
             {/if}
+
+            <span
+              class="branch-span ad-mono ad-tnum"
+              title="Time to ship — span between first and last commit"
+            >
+              <span class="span-label">ship span</span>
+              {shipSpan(br.ship_span_minutes)}
+            </span>
           </div>
 
           {#if br.narrative}
@@ -141,6 +242,13 @@
             </button>
 
             {#if isOpen}
+              {@const firstAt = shortTime(br.first_commit_at)}
+              {@const lastAt = shortTime(br.last_commit_at)}
+              {#if firstAt && lastAt}
+                <p class="commit-window ad-mono ad-tnum">
+                  {firstAt} → {lastAt}
+                </p>
+              {/if}
               <ul id="commits-{bi}" class="commit-list">
                 {#each br.commits as c, ci (ci)}
                   <li class="commit-row" class:commit-row--ai={!c.is_user}>
@@ -156,6 +264,20 @@
         </li>
       {/each}
     </ul>
+  {/if}
+
+  {#if service.reflection_markdown}
+    <details class="worklog" bind:open={worklogOpen}>
+      <summary class="worklog-summary">
+        <span class="worklog-caret" class:open={worklogOpen} aria-hidden="true">▸</span>
+        Worklog note
+      </summary>
+      <!-- renderWorklog() escapes all HTML entities before applying a
+           minimal Markdown subset, so this @html input is safe. -->
+      <div class="worklog-body">
+        {@html renderWorklog(service.reflection_markdown)}
+      </div>
+    </details>
   {/if}
 </article>
 
@@ -209,6 +331,38 @@
     font-size: var(--ad-fs-xs);
     color: var(--ad-faint);
     max-width: 100%;
+  }
+
+  /* ---- per-CLI time split ---- */
+  .cli-split {
+    list-style: none;
+    margin: 8px 0 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .cli-chip {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 5px;
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    color: var(--ad-fg-2);
+    background: var(--ad-bg-2);
+    border: 1px solid var(--ad-border-soft);
+    white-space: nowrap;
+  }
+
+  .cli-name {
+    font-weight: 600;
+    letter-spacing: 0.01em;
+  }
+
+  .cli-time {
+    color: var(--ad-muted);
   }
 
   /* ---- risk chips ---- */
@@ -356,6 +510,24 @@
     flex: none;
   }
 
+  .branch-span {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 5px;
+    font-size: 11.5px;
+    color: var(--ad-muted);
+    white-space: nowrap;
+    flex: none;
+  }
+
+  .span-label {
+    font-size: 9.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--ad-faint);
+  }
+
   .branch-narrative {
     margin: 7px 0 0;
     font-size: var(--ad-fs-sm);
@@ -397,6 +569,13 @@
     transform: rotate(90deg);
   }
 
+  .commit-window {
+    margin: 7px 0 0;
+    font-size: 10.5px;
+    color: var(--ad-faint);
+    letter-spacing: 0.02em;
+  }
+
   .commit-list {
     list-style: none;
     margin: 8px 0 0;
@@ -436,5 +615,70 @@
     font-size: var(--ad-fs-sm);
     color: var(--ad-muted);
     min-width: 0;
+  }
+
+  /* ---- worklog note ---- */
+  .worklog {
+    border-top: 1px solid var(--ad-border-soft);
+    background: linear-gradient(
+      180deg,
+      transparent,
+      color-mix(in oklch, var(--ad-bg-2) 50%, transparent)
+    );
+  }
+
+  .worklog-summary {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 9px 15px;
+    cursor: pointer;
+    font-family: var(--ad-font-mono);
+    font-size: 11px;
+    color: var(--ad-faint);
+    list-style: none;
+    transition: color 120ms ease;
+  }
+  .worklog-summary::-webkit-details-marker {
+    display: none;
+  }
+  .worklog-summary:hover {
+    color: var(--ad-fg-2);
+  }
+
+  .worklog-caret {
+    display: inline-block;
+    font-size: 9px;
+    transition: transform 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  .worklog-caret.open {
+    transform: rotate(90deg);
+  }
+
+  .worklog-body {
+    padding: 0 15px 13px;
+    font-size: var(--ad-fs-sm);
+    line-height: 1.55;
+    color: var(--ad-muted);
+  }
+  .worklog-body :global(p) {
+    margin: 0 0 6px;
+  }
+  .worklog-body :global(p:last-child) {
+    margin-bottom: 0;
+  }
+  .worklog-body :global(ul) {
+    margin: 0 0 6px;
+    padding-left: 18px;
+  }
+  .worklog-body :global(li) {
+    margin: 2px 0;
+  }
+  .worklog-body :global(strong) {
+    color: var(--ad-fg-2);
+    font-weight: 600;
+  }
+  .worklog-body :global(br) {
+    line-height: 0.5;
   }
 </style>

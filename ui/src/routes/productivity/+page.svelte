@@ -1,15 +1,15 @@
 <!--
-  Productivity dashboard — composes the four productivity components
-  (SummaryBar, RiskPanel, TimeBarChart, ServiceCard) over the
-  deterministic /productivity report. Real UI; the prior "dirt"
-  prototype is retired.
+  Productivity dashboard — composes the productivity components over the
+  deterministic /productivity report.
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
   import { fetchProductivity, type ProductivityReport } from '$lib/api.js';
   import SummaryBar from '$lib/components/productivity/SummaryBar.svelte';
+  import DaySummary from '$lib/components/productivity/DaySummary.svelte';
   import RiskPanel from '$lib/components/productivity/RiskPanel.svelte';
   import TimeBarChart from '$lib/components/productivity/TimeBarChart.svelte';
+  import ProofOfWork from '$lib/components/productivity/ProofOfWork.svelte';
   import ServiceCard from '$lib/components/productivity/ServiceCard.svelte';
 
   let rep = $state<ProductivityReport | null>(null);
@@ -44,10 +44,14 @@
   {:else if rep}
     <SummaryBar report={rep} />
 
+    <DaySummary report={rep} />
+
     <div class="prod-row">
       <RiskPanel report={rep} />
       <TimeBarChart report={rep} />
     </div>
+
+    <ProofOfWork report={rep} />
 
     {#if rep.services.length === 0}
       <p class="prod-state">No services in this window.</p>
