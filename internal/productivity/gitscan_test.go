@@ -115,6 +115,37 @@ func TestScanRepo_LocalCommitsNoRemote(t *testing.T) {
 	}
 }
 
+// TestScanRepo_PushedWithoutLocalTracking covers the bug where a branch
+// pushed to origin without -u (no local @{u} tracking ref) was treated
+// as "no remote at all", reporting its entire history as unpushed.
+func TestScanRepo_PushedWithoutLocalTracking(t *testing.T) {
+	origin := t.TempDir()
+	gitCmd(t, origin, "init", "-q", "--bare", "-b", "main")
+
+	dir := t.TempDir()
+	gitCmd(t, dir, "init", "-q", "-b", "main")
+	base := time.Now().Add(-2 * time.Hour)
+	commitFile(t, dir, "main.go", "package main\n", "init", "mohitpatel9753@gmail.com", base)
+	gitCmd(t, dir, "remote", "add", "origin", origin)
+	gitCmd(t, dir, "push", "-q", "origin", "main")
+
+	gitCmd(t, dir, "checkout", "-q", "-b", "feat/x")
+	commitFile(t, dir, "f1.go", "package x\n", "feature commit one", "mohitpatel9753@gmail.com", base.Add(10*time.Minute))
+	gitCmd(t, dir, "push", "-q", "origin", "feat/x") // no -u: origin/feat/x exists, no @{u}
+	commitFile(t, dir, "f2.go", "package x\n", "feature commit two (local)", "mohitpatel9753@gmail.com", base.Add(20*time.Minute))
+
+	sr, err := ScanRepo(dir, base.Add(-time.Hour), time.Now(), map[string]bool{"mohitpatel9753@gmail.com": true})
+	if err != nil {
+		t.Fatalf("ScanRepo: %v", err)
+	}
+	if sr.Ship != ShipPushed {
+		t.Errorf("Ship = %q; want %q (origin/feat/x exists despite no local tracking)", sr.Ship, ShipPushed)
+	}
+	if sr.Ahead != 1 {
+		t.Errorf("Ahead = %d; want 1 (one commit beyond origin/feat/x, not whole history)", sr.Ahead)
+	}
+}
+
 func TestScanRepo_WindowExcludesOldCommits(t *testing.T) {
 	dir := t.TempDir()
 	gitCmd(t, dir, "init", "-q", "-b", "main")

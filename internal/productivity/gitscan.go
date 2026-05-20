@@ -149,22 +149,62 @@ func scanCommits(dir string, since, until time.Time, userEmails map[string]bool)
 	return commits, nil
 }
 
-// aheadBehind returns commits ahead/behind the upstream. With no
-// upstream configured (the typical local-only branch), every reachable
-// commit counts as ahead and behind is 0 — this is what drives the
-// committed-local-only ship state (the CLI-1396 blind-spot fix).
+// aheadBehind returns commits ahead/behind the branch's effective
+// remote counterpart. It tries, in order: the configured upstream
+// tracking ref (@{u}); origin/<current-branch> (a branch pushed
+// without -u has no @{u} but does have this); the remote default
+// branch. Only when the repo has no origin remote at all does it fall
+// back to counting HEAD's whole history as ahead (a genuinely local,
+// never-pushed repo). This prevents a detached or untracked checkout
+// from reporting its entire history as "unpushed".
 func aheadBehind(dir string) (ahead, behind int) {
-	if out, err := gitOut(dir, "rev-list", "--left-right", "--count", "@{u}...HEAD"); err == nil {
-		parts := strings.Fields(out)
-		if len(parts) == 2 {
-			return atoiSafe(parts[1]), atoiSafe(parts[0])
+	if a, b, ok := countRange(dir, "@{u}...HEAD"); ok {
+		return a, b
+	}
+	if br, err := gitOut(dir, "rev-parse", "--abbrev-ref", "HEAD"); err == nil && br != "HEAD" {
+		if a, b, ok := countRange(dir, "origin/"+br+"...HEAD"); ok {
+			return a, b
 		}
 	}
-	// No upstream: count all commits on HEAD as ahead.
+	if ref := remoteDefaultRef(dir); ref != "" {
+		if a, b, ok := countRange(dir, ref+"...HEAD"); ok {
+			return a, b
+		}
+	}
+	// No remote at all: a genuinely local repo — every commit is ahead.
 	if out, err := gitOut(dir, "rev-list", "--count", "HEAD"); err == nil {
 		return atoiSafe(out), 0
 	}
 	return 0, 0
+}
+
+// countRange runs `git rev-list --left-right --count <left>...<right>`
+// and returns (ahead, behind, ok): ahead = commits on the right (HEAD)
+// not on the left (remote/base), behind = the reverse.
+func countRange(dir, spec string) (ahead, behind int, ok bool) {
+	out, err := gitOut(dir, "rev-list", "--left-right", "--count", spec)
+	if err != nil {
+		return 0, 0, false
+	}
+	parts := strings.Fields(out)
+	if len(parts) != 2 {
+		return 0, 0, false
+	}
+	return atoiSafe(parts[1]), atoiSafe(parts[0]), true
+}
+
+// remoteDefaultRef resolves the repo's default remote-tracking ref
+// (e.g. "origin/main"), or "" when the repo has no usable origin ref.
+func remoteDefaultRef(dir string) string {
+	if out, err := gitOut(dir, "symbolic-ref", "refs/remotes/origin/HEAD"); err == nil {
+		return strings.TrimPrefix(out, "refs/remotes/")
+	}
+	for _, cand := range []string{"origin/main", "origin/master", "origin/init", "origin/develop"} {
+		if _, err := gitOut(dir, "rev-parse", "--verify", "--quiet", cand); err == nil {
+			return cand
+		}
+	}
+	return ""
 }
 
 // shipState resolves the locked three-state machine (D2/§6.5):
@@ -182,9 +222,19 @@ func shipState(dir string, ahead, behind int) ShipState {
 	return ShipLocal
 }
 
+// hasUpstream reports whether the current branch exists on the remote —
+// via a configured upstream tracking ref, OR as origin/<branch> even
+// when no local tracking ref is set (a branch pushed without -u).
 func hasUpstream(dir string) bool {
-	_, err := gitOut(dir, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
-	return err == nil
+	if _, err := gitOut(dir, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"); err == nil {
+		return true
+	}
+	if br, err := gitOut(dir, "rev-parse", "--abbrev-ref", "HEAD"); err == nil && br != "HEAD" {
+		if _, err := gitOut(dir, "rev-parse", "--verify", "--quiet", "origin/"+br); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // defaultBranch resolves the repo's default branch robustly (spec §10):
