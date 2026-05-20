@@ -405,9 +405,17 @@ export async function fetchProjectInsights(opts: InsightsQuery = {}): Promise<Pr
  */
 export async function fetchProductivity(
   since?: number,
-  until?: number
+  until?: number,
+  refresh?: boolean
 ): Promise<ProductivityReport> {
-  return get<ProductivityReport>('/productivity', { since, until });
+  return get<ProductivityReport>('/productivity', {
+    since,
+    until,
+    // `refresh=1` bypasses both the merged-PR cache TTL and the
+    // FETCH_HEAD staleness gate on the backend — the user's explicit
+    // "I want fresh data NOW" path.
+    refresh: refresh ? 1 : undefined
+  });
 }
 
 /** Loose mirror of Go productivity.Report — prototype only. */

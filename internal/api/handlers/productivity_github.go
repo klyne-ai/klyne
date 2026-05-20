@@ -46,11 +46,13 @@ func prCacheTTL() time.Duration {
 
 // enrichMergedPRs attaches the user's merged GitHub PRs to each Service
 // in rep, serving the TTL cache and issuing a live `gh pr list` only
-// for stale/missing entries. Safe to call unconditionally — when
-// nothing can be resolved or fetched the report is left unchanged
-// (Service.MergedPRs stays the deterministic empty slice).
+// for stale/missing entries. When force=true the cache freshness check
+// is skipped and every slug is re-fetched (the user's explicit
+// "refresh now" path). Safe to call unconditionally — when nothing can
+// be resolved or fetched the report is left unchanged (Service.MergedPRs
+// stays the deterministic empty slice).
 func (h *ProductivityHandler) enrichMergedPRs(
-	ctx context.Context, rep *productivity.Report, since, until time.Time,
+	ctx context.Context, rep *productivity.Report, since, until time.Time, force bool,
 ) {
 	// Resolve each service's GitHub repo; group service indices by slug
 	// so worktrees of one repo trigger exactly one query.
@@ -81,7 +83,7 @@ func (h *ProductivityHandler) enrichMergedPRs(
 			// Keep the cached value as a fallback regardless of age — a
 			// failed refresh below should still serve last-known data.
 			results[slug] = result{prs: prs, fetched: fetchedAt}
-			if time.Since(fetchedAt) < ttl {
+			if !force && time.Since(fetchedAt) < ttl {
 				continue // fresh — no fetch needed
 			}
 		}

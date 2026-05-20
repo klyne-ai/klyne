@@ -66,6 +66,11 @@ func (h *ProductivityHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 	since := time.UnixMilli(sinceMs)
 	until := time.UnixMilli(untilMs)
+	// `?refresh=1` is the user's explicit "I want fresh data NOW"
+	// signal — it bypasses both the merged-PR cache TTL and the
+	// FETCH_HEAD staleness gate so we re-query gh and run `git fetch`
+	// regardless of when we last did. Absent → normal TTL behaviour.
+	force := r.URL.Query().Get("refresh") == "1"
 	ctx := r.Context()
 
 	// §6.1 / D5: discover the repos to scan from the session
@@ -90,7 +95,7 @@ func (h *ProductivityHandler) Get(w http.ResponseWriter, r *http.Request) {
 	for _, t := range targets {
 		dirs = append(dirs, t.Dir)
 	}
-	refreshStaleRemotes(ctx, dirs, prCacheTTL())
+	refreshStaleRemotes(ctx, dirs, prCacheTTL(), force)
 
 	var scans []productivity.ScanResult
 	commitCounts := map[string]int{}
@@ -164,7 +169,7 @@ func (h *ProductivityHandler) Get(w http.ResponseWriter, r *http.Request) {
 	// Layer-2 GitHub enrichment: attach merged PRs per Service via the
 	// TTL-cached `gh pr list` (productivity_github.go). Best-effort —
 	// never fails the request; the deterministic report stands alone.
-	h.enrichMergedPRs(ctx, &rep, since, until)
+	h.enrichMergedPRs(ctx, &rep, since, until, force)
 
 	// Per-Service "git as of N ago" — reads FETCH_HEAD mtime that the
 	// refreshStaleRemotes step (or an earlier user-run git fetch) just

@@ -35,8 +35,26 @@ const gitFetchOverall = 12 * time.Second
 // bounded by gitFetchOverall. dirs may include both canonical roots
 // and sibling worktrees — fetching from any of them updates the
 // shared origin/* refs once.
-func refreshStaleRemotes(ctx context.Context, dirs []string, ttl time.Duration) {
-	stale := stalemarkRepoDirs(dirs, ttl)
+//
+// When force=true the FETCH_HEAD age gate is bypassed and every
+// distinct git dir is fetched — the user's explicit "refresh now"
+// path triggered from the dashboard's refresh button.
+func refreshStaleRemotes(ctx context.Context, dirs []string, ttl time.Duration, force bool) {
+	var stale []string
+	if force {
+		// Dedupe by canonical git dir so shared worktrees fetch once.
+		seen := map[string]bool{}
+		for _, d := range dirs {
+			gd := gitDir(d)
+			if gd == "" || seen[gd] {
+				continue
+			}
+			seen[gd] = true
+			stale = append(stale, d)
+		}
+	} else {
+		stale = stalemarkRepoDirs(dirs, ttl)
+	}
 	if len(stale) == 0 {
 		return
 	}
