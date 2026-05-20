@@ -167,6 +167,19 @@ func (h *ProductivityHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Report-level "What was done": prefer the cross-project rich-entry
+	// merge over the legacy first-service body BuildReport assigned. The
+	// merge names each bullet's source repo (renderItem) so a multi-
+	// service day reads cleanly as one timeline. Falls back silently to
+	// whatever BuildReport set when there are no admitted entries for
+	// the day OR the lookup errors — the deterministic numbers stand
+	// regardless.
+	if dayTime, dayErr := time.Parse("2006-01-02", rep.Day); dayErr == nil {
+		if globalMerge, mErr := richentry.MergeDayAll(ctx, h.db, dayTime); mErr == nil && globalMerge != "" {
+			rep.ReflectionMarkdown = globalMerge
+		}
+	}
+
 	// Layer-2 GitHub enrichment: attach merged PRs per Service via the
 	// TTL-cached `gh pr list` (productivity_github.go). Best-effort —
 	// never fails the request; the deterministic report stands alone.

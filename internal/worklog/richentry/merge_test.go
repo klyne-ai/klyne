@@ -113,6 +113,39 @@ func TestMergeMarkdown_SingleEntry_RendersSection(t *testing.T) {
 	}
 }
 
+// Regression — bullets must surface the source repo so the reader can
+// tell which codebase each line came from. A pre-fix renderItem
+// dropped it.Repo, making cross-service days look like one
+// undifferentiated stream of work.
+func TestMergeMarkdown_BulletIncludesRepoPrefix(t *testing.T) {
+	rows := []store.DayEntry{
+		{SessionID: "s1", Entry: entryWithCategory("shipped", store.WorklogItem{
+			Summary: "merged labstack flow",
+			Repo:    "consultation-service",
+			Refs:    []string{"#146"},
+		})},
+		{SessionID: "s2", Entry: entryWithCategory("shipped", store.WorklogItem{
+			Summary: "ran cli-1412 discount-engine flag",
+			Repo:    "oms-service",
+			Refs:    []string{"4848e18a"},
+		})},
+		{SessionID: "s3", Entry: entryWithCategory("features_worked_on", store.WorklogItem{
+			Summary: "rich-entry pipeline + CLI subprocess providers",
+			Repo:    "klyne",
+		})},
+	}
+	got := richentry.MergeMarkdown(rows)
+	for _, want := range []string{
+		"- **consultation-service** — merged labstack flow",
+		"- **oms-service** — ran cli-1412 discount-engine flag",
+		"- **klyne** — rich-entry pipeline + CLI subprocess providers",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing bullet %q in:\n%s", want, got)
+		}
+	}
+}
+
 func TestMergeMarkdown_AggregatesAcrossRows(t *testing.T) {
 	rows := []store.DayEntry{
 		{SessionID: "s1", Entry: entryWithCategory("shipped", store.WorklogItem{Summary: "a"})},
