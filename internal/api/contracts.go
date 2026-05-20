@@ -332,7 +332,8 @@ type BreakAdviceResponse struct {
 	// "start_fresh" (e.g. "refactor cost engine"). Empty otherwise.
 	SuggestedTopic string `json:"suggested_topic,omitempty"`
 	// Provider is the AI provider that generated the advice
-	// (e.g. "anthropic", "gemini"). Empty when Verdict is "unavailable".
+	// (e.g. "claude-cli", "codex-cli", "ollama"). Empty when Verdict
+	// is "unavailable".
 	Provider string `json:"provider,omitempty"`
 	// Model is the model identifier used. Empty when "unavailable".
 	Model string `json:"model,omitempty"`

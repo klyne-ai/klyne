@@ -992,14 +992,16 @@ func buildBreakAdviceFactory(cfg *config.Config, logger *slog.Logger) handlers.A
 
 // buildProvider wires concrete provider constructors. Returns nil for
 // unknown names — the caller falls back to noopProvider.
+//
+// Post 2026-05-20: the Anthropic and OpenAI cloud providers are reached
+// only via subprocess wrappers around the user's already-authenticated
+// `claude` / `codex` CLIs. No env-var keys, no credential file reads.
 func buildProvider(name string) ai.Provider {
 	switch name {
-	case "anthropic":
-		return providers.NewAnthropic(providers.AnthropicOpts{})
-	case "openai":
-		return providers.NewOpenAI(providers.OpenAIOpts{})
-	case "gemini":
-		return providers.NewGemini(providers.GeminiOpts{})
+	case "claude-cli":
+		return providers.NewClaudeCLI(providers.ClaudeCLIOpts{})
+	case "codex-cli":
+		return providers.NewCodexCLI(providers.CodexCLIOpts{})
 	case "ollama":
 		return providers.NewOllama(providers.OllamaOpts{})
 	default:

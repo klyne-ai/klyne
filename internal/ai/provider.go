@@ -1,12 +1,19 @@
-// Package ai defines the Provider interface and shared types for AI model
-// access in klyne. All providers are keyed by BYOK (Bring Your Own Key)
-// using environment variables only.
+// Package ai defines the Provider interface and shared types for AI
+// model access in klyne.
 //
-// CRITICAL LEGAL CONSTRAINT (spec §8, enforced 2026-04-04):
-// Anthropic enforces server-side that Claude Code OAuth tokens (~/.claude)
-// cannot be reused by third-party tools. This package NEVER reads any file
-// under ~/.claude or ~/.codex. API keys come exclusively from environment
-// variables.
+// Providers fall into two camps:
+//
+//   - CLI subprocess providers (`claude-cli`, `codex-cli`) shell out to
+//     the user's already-authenticated CLI binary. Auth is handled by
+//     the CLI itself — klyne NEVER reads ~/.claude or ~/.codex
+//     credential files directly (spec §8 — Anthropic enforcement of
+//     OAuth-token reuse, 2026-04-04 — and spec §17).
+//   - Local providers (`ollama`) probe a local server and use it
+//     directly. No credential needed.
+//
+// API-key BYOK is gone: klyne's product promise is "no separate API
+// key", so every cloud provider goes through the user's CLI
+// subscription.
 package ai
 
 import (
@@ -90,14 +97,15 @@ type Message struct {
 // ProviderInfo describes a discovered provider and its availability. It is
 // returned by providers.DetectAvailable and consumed by the wizard UI (W15).
 type ProviderInfo struct {
-	// Name is the stable provider identifier ("anthropic", "openai",
-	// "gemini", "ollama").
+	// Name is the stable provider identifier ("claude-cli",
+	// "codex-cli", "ollama").
 	Name string
 	// Available is true when the provider can accept requests right now.
 	Available bool
 	// Reason is a human-readable explanation shown in the wizard UI.
-	// Examples: "ANTHROPIC_API_KEY set", "OPENAI_API_KEY not set",
-	// "localhost:11434 unreachable".
+	// Examples: "`claude` binary on PATH — using your Claude Code
+	// subscription", "`codex` binary not on PATH — install OpenAI
+	// Codex CLI to enable", "Ollama server unreachable at <url>".
 	Reason string
 	// Models is the default model list for this provider.
 	Models []string
@@ -107,16 +115,20 @@ type ProviderInfo struct {
 
 // Sentinel errors returned by Provider implementations.
 var (
-	// ErrNoCredential is returned by Chat/Embed when the required API key
-	// environment variable is unset. Providers MUST return this and MUST NOT
-	// fall back to reading credential files (spec §8).
-	ErrNoCredential = errors.New("ai: no credential — set the provider's API key environment variable")
+	// ErrNoCredential is the legacy "no API key" signal. Post 2026-05-20
+	// no provider depends on an API key — the CLI subprocess providers
+	// pick up the user's existing subscription auth, and Ollama needs
+	// no credential at all. Kept for the noopProvider fallback and any
+	// remaining tests that simulate "everything is offline".
+	ErrNoCredential = errors.New("ai: no usable provider — install `claude`/`codex` CLI or start Ollama")
 
-	// ErrProviderUnavailable is returned when the provider endpoint cannot
-	// be reached (e.g. Ollama is not running locally).
+	// ErrProviderUnavailable is returned when the provider endpoint
+	// cannot be reached: Ollama is not running, or the CLI subprocess
+	// is missing or exits non-zero. Callers usually treat this as
+	// "skip this turn, retry on next worker tick".
 	ErrProviderUnavailable = errors.New("ai: provider unavailable")
 
-	// ErrUnsupported is returned by Embed on providers that do not offer an
-	// embeddings API.
+	// ErrUnsupported is returned by Embed on providers that do not
+	// offer an embeddings API (which is now everyone except Ollama).
 	ErrUnsupported = errors.New("ai: operation not supported by this provider")
 )
