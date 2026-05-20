@@ -130,6 +130,29 @@ func TestRecordReflection_RejectsEmptyProject(t *testing.T) {
 	}
 }
 
+// Improvement 4: the unverified-artifact-ID guard runs inside
+// RecordReflection. A "PR #57" in insight text that is not backed by any
+// evidence string must never reach body_md (the documented "PR #57"
+// hallucination guard).
+func TestRecordReflection_StripsUnverifiedPRRef(t *testing.T) {
+	db := newRecorderTestDB(t)
+	insights := []Insight{
+		{Text: "Shipped the labstack pipeline via PR #57", Evidence: []string{"entry-1"}},
+	}
+	day := time.Date(2026, 5, 19, 0, 0, 0, 0, time.UTC)
+	refl, err := RecordReflection(context.Background(), db, "/p", day, insights)
+	if err != nil {
+		t.Fatalf("record: %v", err)
+	}
+	if strings.Contains(refl.BodyMD, "PR #57") {
+		t.Errorf("unverified 'PR #57' must be stripped from body_md, got:\n%s", refl.BodyMD)
+	}
+	// The rest of the insight prose must survive — only the bad ref goes.
+	if !strings.Contains(refl.BodyMD, "labstack pipeline") {
+		t.Errorf("guard over-stripped — insight prose lost, got:\n%s", refl.BodyMD)
+	}
+}
+
 func TestRecordReflection_WritesOnePerDay(t *testing.T) {
 	db := newRecorderTestDB(t)
 	days := []time.Time{

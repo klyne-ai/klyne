@@ -171,3 +171,73 @@ func TestCrossProjectThread_NoUmbrellaForSingleRepoTicket(t *testing.T) {
 		}
 	}
 }
+
+// Improvement 4: the unverified-artifact-ID guard. A "PR #<n>" not
+// backed by any branch name or commit message is the documented
+// "PR #57" hallucination — it must be stripped/flagged.
+func TestSanitizeArtifactIDs(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     string
+		evidence []string
+		// wantClean asserts the result no longer contains the unverified
+		// reference verbatim; wantKept asserts a backed reference survives.
+		wantStripped []string
+		wantKept     []string
+		wantFlagged  bool
+	}{
+		{
+			name:         "unverified PR number is stripped",
+			body:         "Shipped the refund pipeline via PR #57.",
+			evidence:     []string{"feat/CLI-1396-pipeline", "wire pipeline entrypoint"},
+			wantStripped: []string{"PR #57"},
+			wantFlagged:  true,
+		},
+		{
+			name:         "PR number present in a commit message is kept",
+			body:         "Merged PR #49 into main.",
+			evidence:     []string{"main", "Merge pull request PR #49 from feat/x"},
+			wantKept:     []string{"PR #49"},
+			wantFlagged:  false,
+		},
+		{
+			name:         "PR number present in a branch name is kept",
+			body:         "Continued work, see PR #88.",
+			evidence:     []string{"feature/pr-88-cleanup", "tidy imports"},
+			wantKept:     []string{"PR #88"},
+			wantFlagged:  false,
+		},
+		{
+			name:         "clean body with no PR refs is untouched",
+			body:         "Refactored the auth layer.",
+			evidence:     []string{"feat/auth", "refactor auth"},
+			wantStripped: nil,
+			wantFlagged:  false,
+		},
+		{
+			name:         "multiple unverified refs all stripped",
+			body:         "Did PR #1 and PR #2 today.",
+			evidence:     []string{"main", "some commit"},
+			wantStripped: []string{"PR #1", "PR #2"},
+			wantFlagged:  true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, flagged := SanitizeArtifactIDs(tt.body, tt.evidence)
+			for _, s := range tt.wantStripped {
+				if strings.Contains(got, s) {
+					t.Errorf("expected %q stripped, still present in: %q", s, got)
+				}
+			}
+			for _, k := range tt.wantKept {
+				if !strings.Contains(got, k) {
+					t.Errorf("expected backed ref %q kept, missing from: %q", k, got)
+				}
+			}
+			if flagged != tt.wantFlagged {
+				t.Errorf("flagged = %v; want %v (body=%q)", flagged, tt.wantFlagged, got)
+			}
+		})
+	}
+}

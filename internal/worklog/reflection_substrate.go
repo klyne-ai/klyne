@@ -22,11 +22,51 @@ package worklog
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/klyne-ai/klyne/internal/productivity"
 )
+
+// prRefRe matches a "PR #<n>" artifact reference (case-insensitive,
+// tolerant of the space). This is the documented "PR #57" hallucination
+// shape — improvement 4 of spec §7.2.
+var prRefRe = regexp.MustCompile(`(?i)\bPR\s*#\s*(\d+)`)
+
+// SanitizeArtifactIDs enforces improvement 4 (spec §7.2 / §7.1 rule 2):
+// the deterministic post-generation guard against unverified specific
+// artifact IDs. It scans body for "PR #<n>" references and STRIPS any
+// whose number does not literally appear in the supplied evidence
+// strings (branch names + commit messages — the §7.1 input allowlist).
+// A backed reference is left intact.
+//
+// Returns the sanitized body and a flag that is true when at least one
+// unverified reference was stripped — callers surface that as a
+// grounding-contract violation. Deterministic, no LLM.
+func SanitizeArtifactIDs(body string, evidence []string) (string, bool) {
+	haystack := strings.ToLower(strings.Join(evidence, "\n"))
+	flagged := false
+	out := prRefRe.ReplaceAllStringFunc(body, func(m string) string {
+		sub := prRefRe.FindStringSubmatch(m)
+		if len(sub) < 2 {
+			return m
+		}
+		num := sub[1]
+		// A backed reference: the number appears verbatim in evidence as
+		// "#<n>", "pr <n>", or "pr-<n>" (covers commit messages and
+		// branch names like feature/pr-88-cleanup).
+		if strings.Contains(haystack, "#"+num) ||
+			strings.Contains(haystack, "pr "+num) ||
+			strings.Contains(haystack, "pr#"+num) ||
+			strings.Contains(haystack, "pr-"+num) {
+			return m
+		}
+		flagged = true
+		return "[unverified PR ref removed]"
+	})
+	return out, flagged
+}
 
 // GitSubstrateSections renders the deterministic git-grounded markdown
 // sections for one project's daily reflection from a productivity.Report

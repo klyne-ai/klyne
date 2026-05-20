@@ -62,7 +62,12 @@ func RecordReflection(ctx context.Context, db *store.DB, projectPath string, day
 			return store.Reflection{}, fmt.Errorf("worklog: insight %d missing evidence (citation invariant)", i)
 		}
 		allEvidence = append(allEvidence, ins.Evidence...)
-		body.WriteString(fmt.Sprintf("- %s (evidence: %s)\n", ins.Text, strings.Join(ins.Evidence, ", ")))
+		// Improvement 4 (spec §7.2 / §7.1 rule 2): the deterministic
+		// unverified-artifact-ID guard. Any "PR #<n>" in the AI-authored
+		// insight text not backed by one of its cited evidence ids is the
+		// documented "PR #57" hallucination — strip it before persistence.
+		text, _ := SanitizeArtifactIDs(ins.Text, ins.Evidence)
+		body.WriteString(fmt.Sprintf("- %s (evidence: %s)\n", text, strings.Join(ins.Evidence, ", ")))
 	}
 	now := time.Now()
 	if day.IsZero() {
