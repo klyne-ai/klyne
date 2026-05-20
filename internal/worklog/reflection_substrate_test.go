@@ -116,3 +116,58 @@ func TestGitSubstrateSections_CommitTimestampDating(t *testing.T) {
 		t.Errorf("substrate must date work by commit committed_at, got:\n%s", md)
 	}
 }
+
+// crossRepoFixture builds a report where the SAME ticket token
+// (CLI-1396) appears on branches in two different repos on the same day
+// — the cross-project initiative thread case (improvement 7).
+func crossRepoFixture() productivity.Report {
+	d := time.Date(2026, 5, 19, 0, 0, 0, 0, time.UTC)
+	mk := func(repo, pp, branch, ticket string) productivity.Service {
+		return productivity.Service{
+			Repo: repo, ProjectPath: pp,
+			Branches: []productivity.Branch{{
+				Name: branch, TicketID: ticket, Ship: productivity.ShipLocal,
+				Commits: []productivity.Commit{
+					{SHA: "sha" + repo[:5], Subject: "work on " + ticket, CommittedAt: d.Add(9 * time.Hour), IsUser: true, Insertions: 50},
+				},
+			}},
+		}
+	}
+	return productivity.Report{
+		Day: "2026-05-19",
+		Services: []productivity.Service{
+			mk("consultation-service", "/repos/consultation-service", "feat/CLI-1396-pipeline", "CLI-1396"),
+			mk("oms-service", "/repos/oms-service", "feat/CLI-1396-refund", "CLI-1396"),
+			mk("klyne", "/repos/klyne", "feat/unrelated", ""),
+		},
+	}
+}
+
+// Improvement 7: when one ticket token spans multiple repos on the same
+// day, CrossProjectThread emits one umbrella entry linking them.
+func TestCrossProjectThread_UmbrellaWhenTicketSpansRepos(t *testing.T) {
+	rep := crossRepoFixture()
+	threads := CrossProjectThread(rep)
+	if len(threads) != 1 {
+		t.Fatalf("expected 1 umbrella thread for CLI-1396, got %d: %v", len(threads), threads)
+	}
+	th := threads[0]
+	if !strings.Contains(th, "CLI-1396") {
+		t.Errorf("umbrella entry must name the shared ticket token, got: %q", th)
+	}
+	if !strings.Contains(th, "consultation-service") || !strings.Contains(th, "oms-service") {
+		t.Errorf("umbrella entry must link both repos, got: %q", th)
+	}
+}
+
+// Improvement 7: a ticket that touches only ONE repo is not an
+// initiative thread — no umbrella entry.
+func TestCrossProjectThread_NoUmbrellaForSingleRepoTicket(t *testing.T) {
+	rep := fixtureReport() // CLI-1396 only in consultation-service
+	threads := CrossProjectThread(rep)
+	for _, th := range threads {
+		if strings.Contains(th, "CLI-1396") {
+			t.Errorf("CLI-1396 touches one repo only — must not get an umbrella entry, got: %q", th)
+		}
+	}
+}

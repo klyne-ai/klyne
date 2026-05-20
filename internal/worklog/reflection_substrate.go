@@ -50,7 +50,65 @@ func GitSubstrateSections(rep productivity.Report, projectPath string) []string 
 	if s := openLoopsBlock(*svc); s != "" {
 		secs = append(secs, s)
 	}
+	// Improvement 7: surface any cross-project initiative thread this
+	// project participates in, so a multi-repo theme reads as one
+	// initiative across each repo's reflection.
+	for _, th := range CrossProjectThread(rep) {
+		if threadMentionsService(th, *svc) {
+			secs = append(secs, th)
+		}
+	}
 	return secs
+}
+
+// threadMentionsService reports whether a cross-project umbrella entry
+// names this service's repo — so the umbrella only attaches to the
+// reflections of the repos it actually links.
+func threadMentionsService(thread string, svc productivity.Service) bool {
+	return strings.Contains(thread, svc.Repo)
+}
+
+// CrossProjectThread renders improvement 7: the cross-project initiative
+// thread. When the same raw ticket-id token appears on branches in more
+// than one repo within the same daily report, one umbrella entry is
+// emitted linking the per-repo work — so a theme that spans repos reads
+// as a single initiative, not N disconnected reflections.
+//
+// The shared signal is the deterministic branch-derived TicketID (D3 —
+// no external lookup). A token touching only one repo is ordinary
+// single-repo work and gets no umbrella. Deterministic, no LLM.
+func CrossProjectThread(rep productivity.Report) []string {
+	// ticket → ordered set of repos that carry a branch with it.
+	byTicket := map[string][]string{}
+	var ticketOrder []string
+	seen := map[string]map[string]bool{}
+	for _, svc := range rep.Services {
+		for _, b := range svc.Branches {
+			t := strings.ToUpper(strings.TrimSpace(b.TicketID))
+			if t == "" {
+				continue
+			}
+			if seen[t] == nil {
+				seen[t] = map[string]bool{}
+				ticketOrder = append(ticketOrder, t)
+			}
+			if !seen[t][svc.Repo] {
+				seen[t][svc.Repo] = true
+				byTicket[t] = append(byTicket[t], svc.Repo)
+			}
+		}
+	}
+	var out []string
+	for _, t := range ticketOrder {
+		repos := byTicket[t]
+		if len(repos) < 2 {
+			continue // single-repo ticket — not an initiative thread.
+		}
+		out = append(out, fmt.Sprintf(
+			"**Cross-project initiative — %s**\n- one theme spanning %d repos on %s: %s",
+			t, len(repos), rep.Day, strings.Join(repos, ", ")))
+	}
+	return out
 }
 
 // findService returns the Service whose ProjectPath matches projectPath.
