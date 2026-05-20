@@ -408,7 +408,7 @@ export async function fetchProductivity(
   until?: number,
   refresh?: boolean
 ): Promise<ProductivityReport> {
-  return get<ProductivityReport>('/productivity', {
+  return get<ProductivityReport>('/api/productivity', {
     since,
     until,
     // `refresh=1` bypasses both the merged-PR cache TTL and the

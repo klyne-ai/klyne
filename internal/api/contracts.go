@@ -71,7 +71,11 @@ const (
 	// Fuses live git activity with klyne session telemetry into a
 	// Service→Branch→Topic record with reflection_status + nudge. Takes
 	// ?since=&until= epoch-ms; no LLM call at render.
-	RouteProductivity        = "/productivity"
+	// /api prefix avoids the path collision with the SvelteKit UI
+	// page at /productivity — without this prefix the API handler
+	// grabs the path first and the dashboard never renders in the
+	// embedded build.
+	RouteProductivity        = "/api/productivity"
 )
 
 // AllRoutes returns the canonical, ordered list of every HTTP path
