@@ -135,6 +135,10 @@ func (h *ProductivityHandler) Get(w http.ResponseWriter, r *http.Request) {
 		Attribution:  attribution,
 		ProjectPaths: projectPaths,
 		DirtyRepos:   dirtyRepos,
+		// Sessions drives the report-level GLOBAL interval union
+		// (TotalActiveMinutes / per-CLI MinutesByCLI — Change 1) and the
+		// per-session SessionStat proof-of-work list (Change 2).
+		Sessions: sessions,
 	}
 
 	rep, err := productivity.BuildReport(ctx, in, &reflectionLookup{db: h.db})
@@ -180,11 +184,16 @@ GROUP BY project_path`
 // sessionActivity loads one SessionActivity per session with at least one
 // message in the window, carrying every in-window message timestamp so
 // the substrate can compute the active-span (§6.4) and the session's CLI
-// ("claude" | "codex") so AI time can be broken down per CLI (Change 2).
-// Repos is left empty: the prototype attributes a session wholly to its
+// ("claude" | "codex") so AI time can be broken down per CLI. Repos is
+// left empty: the prototype attributes a session wholly to its
 // ProjectPath (the multi-repo split is exercised by the substrate's own
 // tests; a cwd-switch heuristic from message events is a documented
 // follow-up).
+//
+// The query selects exactly the columns the §6.4 attribution + the
+// Change 2 SessionStat evidence list need — session id, project_path,
+// cli, and one row per in-window message timestamp. MessageCount is the
+// count of those rows per session (the proof-of-work message count).
 func (h *ProductivityHandler) sessionActivity(
 	ctx context.Context, since, until time.Time,
 ) ([]productivity.SessionActivity, error) {
@@ -216,6 +225,9 @@ ORDER BY s.id, m.ts ASC`
 			order = append(order, id)
 		}
 		sa.MessageTimes = append(sa.MessageTimes, time.UnixMilli(ts))
+		// One row per in-window message → the count is the proof-of-work
+		// message count surfaced in SessionStat (Change 2).
+		sa.MessageCount++
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("productivity: session-activity rows: %w", err)
@@ -262,35 +274,40 @@ WHERE last_msg_at >= ? AND last_msg_at <= ?`
 
 // reflectionLookup adapts *store.DB to productivity.ReflectionLookup. A
 // reflection "exists for the day" when a worklog_reflections row for the
-// project falls on that local calendar date. Per D8 this only toggles
-// the L3 nudge — it never changes the deterministic numbers.
+// project falls on that local calendar date. Per D8 the existence flag
+// only toggles the L3 nudge — it never changes the deterministic
+// numbers; the returned body_md is purely additive narrative enrichment
+// surfaced as Service.ReflectionMarkdown (Change 3).
 type reflectionLookup struct {
 	db *store.DB
 }
 
 func (l *reflectionLookup) HasReflection(
 	ctx context.Context, projectPath string, day time.Time,
-) (bool, error) {
+) (bool, string, error) {
 	// worklog_reflections.ts is epoch-ms (migration 016). Match on the
-	// local calendar date of the reflection's timestamp.
+	// local calendar date of the reflection's timestamp and return the
+	// most recent reflection's markdown body for that project+day so the
+	// dashboard can surface the worklog's own account of the work.
 	dayStr := day.Format("2006-01-02")
 	const q = `
-SELECT 1
+SELECT body_md
 FROM worklog_reflections
 WHERE project_path = ?
   AND date(ts / 1000, 'unixepoch', 'localtime') = ?
+ORDER BY ts DESC
 LIMIT 1`
 
-	var one int
-	err := l.db.Read().QueryRowContext(ctx, q, projectPath, dayStr).Scan(&one)
+	var bodyMD string
+	err := l.db.Read().QueryRowContext(ctx, q, projectPath, dayStr).Scan(&bodyMD)
 	if err != nil {
 		// sql.ErrNoRows ⇒ no reflection ⇒ not an error condition.
 		if errors.Is(err, sql.ErrNoRows) {
-			return false, nil
+			return false, "", nil
 		}
-		return false, fmt.Errorf("productivity: reflection lookup: %w", err)
+		return false, "", fmt.Errorf("productivity: reflection lookup: %w", err)
 	}
-	return true, nil
+	return true, bodyMD, nil
 }
 
 // dirtyFileCount counts porcelain status lines (uncommitted + untracked)
