@@ -416,6 +416,8 @@ export interface ProductivityReport {
   services: ProductivityService[];
   reflection_status: string;
   nudge: string;
+  /** Report-wide per-CLI AI time roll-up (cli -> merged active minutes). */
+  minutes_by_cli: Record<string, number>;
 }
 export interface ProductivityService {
   repo: string;
@@ -423,6 +425,13 @@ export interface ProductivityService {
   branches: ProductivityBranch[];
   risks: ProductivityRisk[];
   manual_only: boolean;
+  /**
+   * Per-CLI AI time for this repo (cli -> merged active minutes).
+   * Per-CLI values are union totals, so claude + codex may sum to
+   * slightly more than the all-CLI attributed total when both ran at
+   * once — expected.
+   */
+  minutes_by_cli: Record<string, number>;
 }
 export interface ProductivityBranch {
   name: string;
@@ -433,6 +442,16 @@ export interface ProductivityBranch {
   commits: ProductivityCommit[];
   attributed_minutes: number;
   narrative: string;
+  /** Earliest commit timestamp on the branch (RFC3339). */
+  first_commit_at: string;
+  /** Latest commit timestamp on the branch (RFC3339). */
+  last_commit_at: string;
+  /**
+   * Minutes between the earliest and latest commit on the branch — the
+   * honest work-span / time-to-ship proxy. 0 when the branch has fewer
+   * than 2 commits.
+   */
+  ship_span_minutes: number;
 }
 export interface ProductivityCommit {
   sha: string;
