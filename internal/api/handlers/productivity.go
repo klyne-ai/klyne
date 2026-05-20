@@ -38,10 +38,11 @@ func NewProductivityHandler(db *store.DB) *ProductivityHandler {
 	return &ProductivityHandler{db: db}
 }
 
-// productivityIdleCapMin is the §6.4 idle-gap cap: an intra-session gap
-// longer than this is excluded from active-time. 30 min matches the
-// substrate's documented attribution contract.
-const productivityIdleCapMin = 30
+// productivityIdleCapMin is the §6.4 idle-gap cap: when the gap between
+// two consecutive messages exceeds this, the whole gap is nullified and
+// counts as zero productive time. 10 min — longer gaps reliably mean
+// the user stepped away; a 30-min cap inflated the day's total.
+const productivityIdleCapMin = 10
 
 // Get handles GET /productivity.
 //

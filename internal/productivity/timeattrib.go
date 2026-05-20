@@ -5,12 +5,14 @@ import (
 	"time"
 )
 
-// idleCapMinutes is the §6.4 idle-gap cap: an intra-session gap longer
-// than this closes the current active interval. 30 min matches the
-// substrate's documented attribution contract; callers pass it through
-// AttributeMinutes so it stays configurable, but this is the canonical
-// default and the single named source of the value.
-const idleCapMinutes = 30
+// idleCapMinutes is the §6.4 idle-gap cap: when the gap between two
+// consecutive messages exceeds this, that whole gap is nullified — it
+// closes the current active interval and contributes zero productive
+// time (a reply 30 min later does not make the prior 30 min count).
+// A gap within the cap counts in full. 10 min: longer gaps reliably
+// mean the user stepped away, and a 30-min cap demonstrably inflated
+// the day's total (e.g. a single project summing to ~30h).
+const idleCapMinutes = 10
 
 // SessionActivity is the time-attribution input for one klyne session:
 // the in-window message timestamps (active-time is computed from these,
