@@ -10,8 +10,12 @@
   async function load(): Promise<void> {
     loading = true;
     try {
-      // No params → server defaults to today local 00:00 → now.
-      rep = await fetchProductivity();
+      // Optional ?since=&until= epoch-ms window; absent → server
+      // defaults to today local 00:00 → now.
+      const q = new URLSearchParams(window.location.search);
+      const since = q.get('since') ? Number(q.get('since')) : undefined;
+      const until = q.get('until') ? Number(q.get('until')) : undefined;
+      rep = await fetchProductivity(since, until);
       error = null;
     } catch (e: unknown) {
       error = e instanceof Error ? e.message : 'failed to load productivity';
@@ -57,7 +61,7 @@
 
       {#if svc.risks.length > 0}
         <ul style="color:red;">
-          {#each svc.risks as risk (risk.kind + risk.detail)}
+          {#each svc.risks as risk, ri (ri)}
             <li>
               <strong>{risk.kind}</strong>: {risk.detail}
               {#if risk.age_minutes > 0}({hm(risk.age_minutes)} ago){/if}
@@ -66,7 +70,7 @@
         </ul>
       {/if}
 
-      {#each svc.branches as br (br.name)}
+      {#each svc.branches as br, bi (br.name + '|' + bi)}
         <div style="margin:8px 0; padding-left:12px; border-left:3px solid #ccc;">
           <div>
             <code>{br.ship}</code>
@@ -77,7 +81,7 @@
           <details>
             <summary>{br.commits.length} commit(s)</summary>
             <ul>
-              {#each br.commits as c (c.sha)}
+              {#each br.commits as c, ci (c.sha + '|' + ci)}
                 <li><code>{c.sha}</code> {c.subject}</li>
               {/each}
             </ul>
