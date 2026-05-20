@@ -389,3 +389,213 @@ export async function fetchProjectInsights(opts: InsightsQuery = {}): Promise<Pr
     top: opts.top
   });
 }
+
+// ---------------------------------------------------------------------------
+// /productivity
+// ---------------------------------------------------------------------------
+
+/**
+ * GET /productivity — the deterministic-first AI productivity dashboard
+ * (spec docs/superpowers/specs/2026-05-19-ai-productivity-dashboard-design.md).
+ *
+ * PROTOTYPE: the response is the Go `productivity.Report` shape. It is
+ * intentionally typed loosely here — the real wire contract + frozen
+ * types are deferred to the separate UI/UX brainstorm (spec scope).
+ * since/until are epoch-ms; both default server-side (today 00:00 -> now).
+ */
+export async function fetchProductivity(
+  since?: number,
+  until?: number,
+  refresh?: boolean
+): Promise<ProductivityReport> {
+  return get<ProductivityReport>('/productivity', {
+    since,
+    until,
+    // `refresh=1` bypasses both the merged-PR cache TTL and the
+    // FETCH_HEAD staleness gate on the backend — the user's explicit
+    // "I want fresh data NOW" path.
+    refresh: refresh ? 1 : undefined
+  });
+}
+
+/** Loose mirror of Go productivity.Report — prototype only. */
+export interface ProductivityReport {
+  day: string;
+  services: ProductivityService[];
+  reflection_status: string;
+  nudge: string;
+  /**
+   * Headline AI time: the GLOBAL union of every session's active
+   * wall-clock intervals across ALL repos in the window — true elapsed
+   * wall-clock, structurally <= 24h/day. NOT the sum of the per-Service
+   * unions (that double-counts parallel cross-repo agents).
+   */
+  total_active_minutes: number;
+  /**
+   * Per-CLI GLOBAL union (cli -> that CLI's all-repo wall-clock union),
+   * NOT the sum of per-Service minutes_by_cli. When both CLIs ran at
+   * once claude + codex may slightly exceed total_active_minutes —
+   * expected.
+   */
+  minutes_by_cli: Record<string, number>;
+  /**
+   * Deterministic per-session proof-of-work breakdown: every
+   * contributing session in the window, sorted by started_at — the
+   * evidence behind total_active_minutes.
+   */
+  sessions: ProductivitySessionStat[];
+  /**
+   * Optional overall worklog reflection narrative (body_md). Empty when
+   * there is no single sensible project-agnostic reflection; per-Service
+   * reflection_markdown carries the per-repo body.
+   */
+  reflection_markdown?: string;
+}
+export interface ProductivityService {
+  repo: string;
+  project_path: string;
+  branches: ProductivityBranch[];
+  risks: ProductivityRisk[];
+  manual_only: boolean;
+  /**
+   * Per-CLI AI time for this repo (cli -> merged active minutes).
+   * Per-CLI values are union totals, so claude + codex may sum to
+   * slightly more than the all-CLI attributed total when both ran at
+   * once — expected.
+   */
+  minutes_by_cli: Record<string, number>;
+  /**
+   * Worklog reflection body (markdown) for this repo on the report's
+   * day — the worklog's own account of what was done. Empty when no
+   * reflection exists for the project+day.
+   */
+  reflection_markdown: string;
+  /**
+   * GitHub pull requests the user merged within the report window — a
+   * Layer-2 `gh`-sourced enrichment, NOT a deterministic git fact.
+   * Empty when gh/auth/network is unavailable.
+   */
+  merged_prs: MergedPR[];
+  /**
+   * When the merged-PR data was fetched (cache timestamp, RFC3339).
+   * The zero value ("0001-01-01T00:00:00Z") means no PR data.
+   */
+  merged_prs_as_of: string;
+  /**
+   * When this repo's local mirror of origin was last refreshed via
+   * `git fetch` (FETCH_HEAD mtime, RFC3339). Zero value means no
+   * fetch has ever run in this clone — ahead/behind data may be
+   * unreliable until then.
+   */
+  git_fetched_at: string;
+}
+/**
+ * One GitHub pull request the user authored and merged within the
+ * window. Mirrors Go productivity.MergedPR. Populated by the API-layer
+ * `gh pr list` enrichment, not by the deterministic core.
+ */
+export interface MergedPR {
+  number: number;
+  title: string;
+  /** PR head branch name. */
+  head_ref: string;
+  /** When the PR merged (RFC3339). */
+  merged_at: string;
+  /** When the PR was opened (RFC3339). */
+  opened_at: string;
+  /**
+   * Minutes from opened_at → merged_at (PR open → merge cycle). 0
+   * when openedAt is unknown.
+   */
+  time_to_ship_minutes: number;
+}
+/**
+ * One gap-capped active wall-clock sub-interval of a session. The union
+ * of every session's active_intervals produces total_active_minutes;
+ * the timeline draws these as solid segments. Mirrors Go
+ * productivity.ActiveInterval.
+ */
+export interface ProductivityActiveInterval {
+  /** Interval start (RFC3339). */
+  start: string;
+  /** Interval end (RFC3339). */
+  end: string;
+}
+/**
+ * One session's proof-of-work contribution to the headline AI time.
+ * Mirrors Go productivity.SessionStat.
+ */
+export interface ProductivitySessionStat {
+  session_id: string;
+  cli: string;
+  /** Repo/Service the session is attributed to (derived from project_path). */
+  repo: string;
+  /** First in-window message timestamp (RFC3339). */
+  started_at: string;
+  /** Last in-window message timestamp (RFC3339). */
+  ended_at: string;
+  /** This session's own gap-capped active total, in minutes. */
+  active_minutes: number;
+  /**
+   * Gap-capped active sub-intervals — the same intervals whose global
+   * union produces total_active_minutes. Lengths sum to active_minutes.
+   * Always present (never null); [] when the session has no span.
+   */
+  active_intervals: ProductivityActiveInterval[];
+  message_count: number;
+}
+export interface ProductivityBranch {
+  name: string;
+  ticket_id: string;
+  ship: string;
+  ahead: number;
+  behind: number;
+  commits: ProductivityCommit[];
+  attributed_minutes: number;
+  narrative: string;
+  /** Earliest commit timestamp on the branch (RFC3339). */
+  first_commit_at: string;
+  /** Latest commit timestamp on the branch (RFC3339). */
+  last_commit_at: string;
+  /**
+   * Minutes between the earliest and latest commit on the branch — the
+   * honest work-span / time-to-ship proxy. 0 when the branch has fewer
+   * than 2 commits.
+   */
+  ship_span_minutes: number;
+}
+export interface ProductivityCommit {
+  sha: string;
+  subject: string;
+  author: string;
+  author_email: string;
+  committed_at: string;
+  files: number;
+  insertions: number;
+  deletions: number;
+  is_user: boolean;
+}
+/** A minimal commit reference attached to an "unpushed" risk. */
+export interface ProductivityRiskCommit {
+  sha: string;
+  subject: string;
+}
+export interface ProductivityRisk {
+  kind: string;
+  detail: string;
+  age_minutes: number;
+  /** Branch the risk is on — disambiguates per-worktree rows. */
+  branch: string;
+  /** Working directory the risk was observed in. */
+  worktree_path: string;
+  /**
+   * For an "unpushed" risk: the commits ahead of origin (SHA + subject)
+   * — the concrete evidence behind the count. Empty for other kinds.
+   */
+  commits: ProductivityRiskCommit[];
+  /**
+   * For a "done-uncommitted" risk: the uncommitted/untracked file
+   * paths. Empty for other kinds.
+   */
+  files: string[];
+}

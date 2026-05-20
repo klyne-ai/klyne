@@ -2,8 +2,12 @@ package mcpserver
 
 import (
 	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/klyne-ai/klyne/internal/store"
 	"github.com/klyne-ai/klyne/internal/worklog"
@@ -96,6 +100,70 @@ func TestHandleRecordReflection_PersistsWithDay(t *testing.T) {
 	}
 	if rows[0].Title != "Daily reflection — 2026-05-15" {
 		t.Errorf("title=%q, want Daily reflection — 2026-05-15", rows[0].Title)
+	}
+}
+
+// TestHandleRecordReflection_EnrichesWithGitSubstrate proves the
+// spec §7.2 Layer-2 wiring end-to-end: record_reflection over a real git
+// repo embeds the deterministic git-grounded sections (Shipped ledger,
+// commit-dated, ticket id) into body_md.
+func TestHandleRecordReflection_EnrichesWithGitSubstrate(t *testing.T) {
+	withFakeHome(t)
+	db := withBootstrapDB(t)
+
+	when := time.Now().Add(-2 * time.Hour)
+	repo := t.TempDir()
+	gitEnv := func(ts time.Time, email string) []string {
+		return append(os.Environ(),
+			"GIT_AUTHOR_NAME=A", "GIT_AUTHOR_EMAIL="+email,
+			"GIT_COMMITTER_NAME=A", "GIT_COMMITTER_EMAIL="+email,
+			"GIT_AUTHOR_DATE="+ts.Format(time.RFC3339),
+			"GIT_COMMITTER_DATE="+ts.Format(time.RFC3339),
+		)
+	}
+	run := func(ts time.Time, email string, args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		cmd.Env = gitEnv(ts, email)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run(when, "u@u", "init", "-q", "-b", "feat/CLI-1396-pipeline")
+	if err := os.WriteFile(filepath.Join(repo, "a.go"), []byte("package a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Identity seed includes coders@clinikk.com (the env identity).
+	run(when, "coders@clinikk.com", "add", "a.go")
+	run(when, "coders@clinikk.com", "commit", "-m", "wire pipeline entrypoint")
+
+	in := RecordReflectionInput{
+		ProjectPath: repo,
+		Day:         when.UTC().Format("2006-01-02"),
+		Insights: []worklog.Insight{
+			{Text: "built the labstack pipeline", Evidence: []string{"s1"}},
+		},
+	}
+	out, err := handleRecordReflection(context.Background(), db, in)
+	if err != nil {
+		t.Fatalf("record: %v", err)
+	}
+	rows, err := store.ListReflectionsForProject(context.Background(), db, repo, 10)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 reflection (id %s), got %d", out.ReflectionID, len(rows))
+	}
+	body := rows[0].BodyMD
+	if !strings.Contains(body, "labstack pipeline") {
+		t.Errorf("AI insight lost from enriched body:\n%s", body)
+	}
+	if !strings.Contains(body, "Shipped") {
+		t.Errorf("git substrate Shipped ledger missing from body:\n%s", body)
+	}
+	if !strings.Contains(body, "CLI-1396") {
+		t.Errorf("ticket id missing from enriched body:\n%s", body)
 	}
 }
 

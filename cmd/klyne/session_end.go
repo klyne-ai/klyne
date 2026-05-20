@@ -15,6 +15,7 @@ import (
 	"github.com/klyne-ai/klyne/internal/config"
 	"github.com/klyne-ai/klyne/internal/connectors"
 	"github.com/klyne-ai/klyne/internal/mcpserver"
+	"github.com/klyne-ai/klyne/internal/productivity"
 	"github.com/klyne-ai/klyne/internal/projectpath"
 	"github.com/klyne-ai/klyne/internal/store"
 	"github.com/klyne-ai/klyne/internal/worklog"
@@ -232,7 +233,47 @@ func computeAndPersistSessionEnd(ctx context.Context, stdin io.Reader) error {
 		// Don't block session-end on a worklog failure; log to stderr.
 		fmt.Fprintf(os.Stderr, "klyne session-end: worklog write failed: %v\n", werr)
 	}
+
+	// Capture a point-in-time git snapshot of the session's repo and its
+	// sibling worktrees (spec D6 — the only way to reconstruct
+	// "AI task done but uncommitted at session end" historically).
+	// BEST-EFFORT and NON-FATAL: any git or DB failure is logged to
+	// stderr and swallowed, exactly like the worklog write above —
+	// session-end must never block on a klyne error.
+	captureGitSnapshots(ctx, db, row.SessionID, cwd, os.Stderr)
 	return nil
+}
+
+// captureGitSnapshots writes one git_session_snapshots row per worktree
+// of the session's repo. It is invoked at the end of session-end and is
+// strictly best-effort: every failure path (no git, capture error, DB
+// insert error) is logged to stderr and swallowed so the Stop hook never
+// blocks Claude Code's exit. dir is the session's cwd (a non-git dir
+// simply yields no snapshots).
+func captureGitSnapshots(ctx context.Context, db *store.DB, sessionID, dir string, stderr io.Writer) {
+	if db == nil {
+		return
+	}
+	snaps := productivity.CaptureSessionSnapshots(dir)
+	now := time.Now()
+	for _, s := range snaps {
+		row := &store.GitSnapshot{
+			SessionID:      sessionID,
+			ProjectPath:    s.ProjectPath,
+			RepoName:       s.RepoName,
+			WorktreePath:   s.WorktreePath,
+			Branch:         s.Branch,
+			HeadSHA:        s.HeadSHA,
+			AheadCount:     s.AheadCount,
+			BehindCount:    s.BehindCount,
+			DirtyFileCount: s.DirtyFileCount,
+			DirtyFiles:     s.DirtyFiles,
+			CapturedAt:     now,
+		}
+		if err := store.InsertGitSnapshot(ctx, db, row); err != nil {
+			fmt.Fprintf(stderr, "klyne session-end: git snapshot write failed: %v\n", err)
+		}
+	}
 }
 
 // sessionFixture is the minimal input shape consumed by

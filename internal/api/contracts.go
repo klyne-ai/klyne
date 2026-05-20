@@ -66,6 +66,12 @@ const (
 	// efficiency, /compact pain signal, top sessions, daily sparkline,
 	// and trend vs the prior-period window of equal duration.
 	RouteInsightsProjects    = "/insights/projects"
+	// Productivity: the deterministic-first AI productivity dashboard
+	// (spec docs/superpowers/specs/2026-05-19-ai-productivity-dashboard-design.md).
+	// Fuses live git activity with klyne session telemetry into a
+	// Service→Branch→Topic record with reflection_status + nudge. Takes
+	// ?since=&until= epoch-ms; no LLM call at render.
+	RouteProductivity        = "/productivity"
 )
 
 // AllRoutes returns the canonical, ordered list of every HTTP path
@@ -96,6 +102,7 @@ func AllRoutes() []string {
 		RouteWorklog,
 		RouteWorklogProject,
 		RouteInsightsProjects,
+		RouteProductivity,
 	}
 }
 
