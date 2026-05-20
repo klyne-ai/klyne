@@ -84,8 +84,8 @@
   }
 
   .prod-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+    display: flex;
+    flex-direction: column;
     gap: var(--ad-s4);
   }
 

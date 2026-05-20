@@ -1,21 +1,26 @@
 <!--
-  ServiceCard — per-repo card for the productivity dashboard.
-  The core repeating unit: one git repo, its branches, and any risks.
-  Branches are keyed by index (detached worktrees all report "HEAD").
+  ServiceCard — per-repo panel for the productivity dashboard.
+
+  Each repo is a full-width dashboard panel: a header (repo name, path,
+  manual tag, risk chips), a row of six derived metric tiles, then an
+  expandable detail block (branches + worklog note) collapsed by default.
+
+  Branches are keyed by index — detached worktrees all report "HEAD",
+  so names are not unique.
 -->
 <script lang="ts">
-  import type {
-    ProductivityService,
-    ProductivityBranch,
-    ProductivityCommit,
-    ProductivityRisk
-  } from '$lib/api';
+  import type { ProductivityService } from '$lib/api';
 
   interface Props {
     service: ProductivityService;
   }
 
   const { service }: Props = $props();
+
+  // ---- expansion state (Svelte 5 runes) -----------------------------------
+
+  // Whole detail block, collapsed by default.
+  let detailOpen = $state(false);
 
   // Which branches have their commit list expanded — keyed by index,
   // since branch names are not unique across detached worktrees.
@@ -28,6 +33,11 @@
     expanded = next;
   }
 
+  // Worklog reflection sub-section — collapsed by default.
+  let worklogOpen = $state(false);
+
+  // ---- formatters ---------------------------------------------------------
+
   // Format a minute count as "~Xh Ym". Returns '' for non-positive input.
   function hm(min: number): string {
     if (!min || min <= 0) return '';
@@ -37,9 +47,10 @@
     return `~${h}h ${m}m`;
   }
 
-  // Format a minute count as "Xh Ym" / "Nm" (no leading "~"). For the
-  // per-CLI split and the per-branch ship span.
+  // Format a minute count as "Xh Ym" / "Nm" (no leading "~"). For tile
+  // values, the per-CLI split, and per-branch ship spans.
   function hmPlain(min: number): string {
+    if (!min || min <= 0) return '0m';
     const h = Math.floor(min / 60);
     const m = min % 60;
     if (h <= 0) return `${m}m`;
@@ -57,15 +68,9 @@
     return cli.length === 0 ? cli : cli[0].toUpperCase() + cli.slice(1);
   }
 
-  // Per-CLI time split for the service header — non-zero entries only.
-  const cliSplit = $derived(
-    Object.entries(service.minutes_by_cli ?? {})
-      .filter(([, min]) => min > 0)
-      .sort((a, b) => b[1] - a[1])
-  );
-
-  // Worklog reflection section — collapsed by default.
-  let worklogOpen = $state(false);
+  function shortSha(sha: string): string {
+    return sha.slice(0, 7);
+  }
 
   // Format an RFC3339 timestamp as a short local time (HH:MM). Returns ''
   // when the input is missing or unparseable.
@@ -74,6 +79,97 @@
     const d = new Date(iso);
     if (Number.isNaN(d.getTime())) return '';
     return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+
+  // Parse an RFC3339 timestamp to epoch-ms, or null when unparseable.
+  function epoch(iso: string): number | null {
+    if (!iso) return null;
+    const t = new Date(iso).getTime();
+    return Number.isNaN(t) ? null : t;
+  }
+
+  // ---- derived metrics (tile values) --------------------------------------
+
+  const branches = $derived(service.branches ?? []);
+
+  // TASKS — distinct non-empty ticket IDs across all branches.
+  const tickets = $derived.by(() => {
+    const seen = new Set<string>();
+    for (const br of branches) {
+      const id = (br.ticket_id ?? '').trim();
+      if (id) seen.add(id);
+    }
+    return [...seen];
+  });
+
+  // SHIPPED — branch counts by ship state.
+  const shipCounts = $derived.by(() => {
+    let merged = 0;
+    let pushed = 0;
+    let local = 0;
+    for (const br of branches) {
+      if (br.ship === 'merged-to-default') merged++;
+      else if (br.ship === 'pushed-to-remote') pushed++;
+      else local++;
+    }
+    return { merged, pushed, local };
+  });
+
+  // SHIPPED headline — the dominant ship state, prominently.
+  const shipHeadline = $derived.by(() => {
+    const { merged, pushed, local } = shipCounts;
+    if (merged > 0) return { value: String(merged), unit: 'merged' };
+    if (pushed > 0) return { value: String(pushed), unit: 'pushed' };
+    if (local > 0) return { value: String(local), unit: 'local' };
+    return { value: '0', unit: 'shipped' };
+  });
+
+  // COMMITS — total UNIQUE user commits across the project, deduped by sha.
+  // Sibling worktrees share commits, so we must not sum branch arrays.
+  const uniqueUserCommits = $derived.by(() => {
+    const shas = new Set<string>();
+    for (const br of branches) {
+      for (const c of br.commits ?? []) {
+        if (c.is_user && c.sha) shas.add(c.sha);
+      }
+    }
+    return shas.size;
+  });
+
+  // PRs MERGED — distinct PR numbers from commit subjects.
+  const mergedPrs = $derived(service.merged_prs ?? []);
+
+  // TIME-TO-SHIP — span from earliest first_commit_at to latest
+  // last_commit_at across all branches.
+  const projectSpanMinutes = $derived.by(() => {
+    let min: number | null = null;
+    let max: number | null = null;
+    for (const br of branches) {
+      const f = epoch(br.first_commit_at);
+      const l = epoch(br.last_commit_at);
+      if (f !== null) min = min === null ? f : Math.min(min, f);
+      if (l !== null) max = max === null ? l : Math.max(max, l);
+    }
+    if (min === null || max === null || max < min) return null;
+    return Math.round((max - min) / 60000);
+  });
+
+  // AI TIME — per-CLI minutes; Claude + Codex always shown (Codex at 0 too).
+  const minutesByCli = $derived(service.minutes_by_cli ?? {});
+  const claudeMinutes = $derived(minutesByCli['claude'] ?? 0);
+  const codexMinutes = $derived(minutesByCli['codex'] ?? 0);
+  // Any non-claude / non-codex CLIs, so nothing is silently dropped.
+  const otherCli = $derived.by(() =>
+    Object.entries(minutesByCli)
+      .filter(([cli, min]) => cli !== 'claude' && cli !== 'codex' && min > 0)
+      .sort((a, b) => b[1] - a[1])
+  );
+
+  // ---- worklog markdown (escape-first, minimal subset) --------------------
+
+  // Inline span: only **bold** is supported. Input is already escaped.
+  function inline(text: string): string {
+    return text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
   }
 
   // Minimal, safe Markdown → HTML. Escapes all HTML entities first, then
@@ -114,10 +210,7 @@
     return out.join('');
   }
 
-  // Inline span: only **bold** is supported. Input is already escaped.
-  function inline(text: string): string {
-    return text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-  }
+  // ---- ship / risk metadata -----------------------------------------------
 
   // Ship-state → badge color class + readable label.
   const shipMeta: Record<string, { cls: string; label: string }> = {
@@ -137,13 +230,10 @@
   function risk(kind: string): { cls: string; label: string } {
     return riskMeta[kind] ?? { cls: 'risk--warn', label: kind };
   }
-
-  function shortSha(sha: string): string {
-    return sha.slice(0, 7);
-  }
 </script>
 
-<article class="svc-card">
+<article class="svc-panel ad-card">
+  <!-- ===== header ===== -->
   <header class="svc-hd">
     <div class="svc-id">
       <div class="svc-id-line">
@@ -157,20 +247,9 @@
       <div class="svc-path ad-mono ad-truncate" title={service.project_path}>
         {service.project_path}
       </div>
-
-      {#if cliSplit.length > 0}
-        <ul class="cli-split" aria-label="AI time by CLI">
-          {#each cliSplit as [cli, min], ci (ci)}
-            <li class="cli-chip">
-              <span class="cli-name">{cliLabel(cli)}</span>
-              <span class="cli-time ad-mono ad-tnum">{hmPlain(min)}</span>
-            </li>
-          {/each}
-        </ul>
-      {/if}
     </div>
 
-    {#if service.risks.length > 0}
+    {#if service.risks && service.risks.length > 0}
       <ul class="risk-list" aria-label="Repository risks">
         {#each service.risks as r, ri (ri)}
           {@const meta = risk(r.kind)}
@@ -178,111 +257,228 @@
           <li class="risk-chip {meta.cls}">
             <span class="risk-kind">{meta.label}</span>
             <span class="risk-detail">{r.detail}</span>
-            {#if age}<span class="risk-age">{age} ago</span>{/if}
+            {#if age}<span class="risk-age ad-tnum">{age} ago</span>{/if}
           </li>
         {/each}
       </ul>
     {/if}
   </header>
 
-  {#if service.branches.length === 0}
-    <p class="svc-empty">No branch activity in this window.</p>
-  {:else}
-    <ul class="branch-list">
-      {#each service.branches as br, bi (bi)}
-        {@const sm = ship(br.ship)}
-        {@const time = hm(br.attributed_minutes)}
-        {@const isOpen = expanded.has(bi)}
-        <li class="branch">
-          <div class="branch-row">
-            <span class="ship-badge {sm.cls}">{sm.label}</span>
+  <!-- ===== metric tile row ===== -->
+  <div class="tile-row" role="list" aria-label="Project metrics">
+    <!-- TASKS -->
+    <div class="tile" role="listitem">
+      {#if tickets.length > 0}
+        <span class="tile-label">Tasks</span>
+        <span class="tile-value ad-tnum">{tickets.length}</span>
+        <ul class="tile-chips">
+          {#each tickets as t, ti (ti)}
+            <li class="mini-chip ad-mono" title={t}>{t}</li>
+          {/each}
+        </ul>
+      {:else}
+        <span class="tile-label">Branches</span>
+        <span class="tile-value ad-tnum">{branches.length}</span>
+        <span class="tile-caption">no tickets</span>
+      {/if}
+    </div>
 
-            <span class="branch-name ad-mono ad-truncate" title={br.name}>
-              {br.name}
-            </span>
+    <!-- SHIPPED -->
+    <div class="tile" role="listitem">
+      <span class="tile-label">Shipped</span>
+      <span class="tile-value">
+        <span class="ad-tnum">{shipHeadline.value}</span>
+        <span class="tile-value-unit">{shipHeadline.unit}</span>
+      </span>
+      <span class="tile-caption ad-tnum">
+        {#if shipCounts.merged > 0}<span class="dot-sep dot-merged">{shipCounts.merged} merged</span>{/if}
+        {#if shipCounts.pushed > 0}<span class="dot-sep">· {shipCounts.pushed} pushed</span>{/if}
+        {#if shipCounts.local > 0}<span class="dot-sep">· {shipCounts.local} local</span>{/if}
+        {#if shipCounts.merged === 0 && shipCounts.pushed === 0 && shipCounts.local === 0}
+          nothing shipped
+        {/if}
+      </span>
+    </div>
 
-            {#if br.ticket_id}
-              <span class="ticket-chip ad-mono">{br.ticket_id}</span>
-            {/if}
+    <!-- COMMITS -->
+    <div class="tile" role="listitem">
+      <span class="tile-label">Commits</span>
+      <span class="tile-value ad-tnum">{uniqueUserCommits}</span>
+      <span class="tile-caption">unique · you</span>
+    </div>
 
-            <span class="branch-meta ad-mono ad-tnum">
-              {#if br.ahead > 0}<span title="commits ahead of remote">↑{br.ahead}</span>{/if}
-              {#if br.behind > 0}<span title="commits behind remote">↓{br.behind}</span>{/if}
-            </span>
+    <!-- PRs MERGED -->
+    <div class="tile" role="listitem">
+      <span class="tile-label">PRs merged</span>
+      {#if mergedPrs.length > 0}
+        <span class="tile-value ad-tnum">{mergedPrs.length}</span>
+        <ul class="tile-chips">
+          {#each mergedPrs as pr, pi (pi)}
+            <li class="mini-chip ad-mono ad-tnum">#{pr}</li>
+          {/each}
+        </ul>
+      {:else}
+        <span class="tile-value tile-value--empty">—</span>
+        <span class="tile-caption">none detected</span>
+      {/if}
+    </div>
 
-            {#if time}
-              <span class="branch-time ad-mono ad-tnum" title="Attributed work time">
-                {time}
-              </span>
-            {/if}
+    <!-- TIME-TO-SHIP -->
+    <div class="tile" role="listitem">
+      <span class="tile-label">Time to ship</span>
+      {#if projectSpanMinutes !== null}
+        <span class="tile-value ad-tnum">{hmPlain(projectSpanMinutes)}</span>
+      {:else}
+        <span class="tile-value tile-value--empty">—</span>
+      {/if}
+      <span class="tile-caption">first → last commit</span>
+    </div>
 
-            <span
-              class="branch-span ad-mono ad-tnum"
-              title="Time to ship — span between first and last commit"
-            >
-              <span class="span-label">ship span</span>
-              {shipSpan(br.ship_span_minutes)}
-            </span>
-          </div>
-
-          {#if br.narrative}
-            <p class="branch-narrative">{br.narrative}</p>
-          {/if}
-
-          {#if br.commits.length > 0}
-            <button
-              type="button"
-              class="commit-toggle"
-              onclick={() => toggle(bi)}
-              aria-expanded={isOpen}
-              aria-controls="commits-{bi}"
-            >
-              <span class="commit-caret" class:open={isOpen} aria-hidden="true">▸</span>
-              {br.commits.length} commit{br.commits.length === 1 ? '' : 's'}
-            </button>
-
-            {#if isOpen}
-              {@const firstAt = shortTime(br.first_commit_at)}
-              {@const lastAt = shortTime(br.last_commit_at)}
-              {#if firstAt && lastAt}
-                <p class="commit-window ad-mono ad-tnum">
-                  {firstAt} → {lastAt}
-                </p>
-              {/if}
-              <ul id="commits-{bi}" class="commit-list">
-                {#each br.commits as c, ci (ci)}
-                  <li class="commit-row" class:commit-row--ai={!c.is_user}>
-                    <code class="commit-sha">{shortSha(c.sha)}</code>
-                    <span class="commit-subject ad-truncate" title={c.subject}>
-                      {c.subject}
-                    </span>
-                  </li>
-                {/each}
-              </ul>
-            {/if}
-          {/if}
+    <!-- AI TIME -->
+    <div class="tile tile--wide" role="listitem">
+      <span class="tile-label">AI time</span>
+      <ul class="ai-split">
+        <li class="ai-row">
+          <span class="ai-name ai-name--claude">Claude</span>
+          <span class="ai-time ad-mono ad-tnum">{hmPlain(claudeMinutes)}</span>
         </li>
-      {/each}
-    </ul>
-  {/if}
+        <li class="ai-row">
+          <span class="ai-name ai-name--codex">Codex</span>
+          <span class="ai-time ad-mono ad-tnum">{hmPlain(codexMinutes)}</span>
+        </li>
+        {#each otherCli as [cli, min], oi (oi)}
+          <li class="ai-row">
+            <span class="ai-name">{cliLabel(cli)}</span>
+            <span class="ai-time ad-mono ad-tnum">{hmPlain(min)}</span>
+          </li>
+        {/each}
+      </ul>
+    </div>
+  </div>
 
-  {#if service.reflection_markdown}
-    <details class="worklog" bind:open={worklogOpen}>
-      <summary class="worklog-summary">
-        <span class="worklog-caret" class:open={worklogOpen} aria-hidden="true">▸</span>
-        Worklog note
-      </summary>
-      <!-- renderWorklog() escapes all HTML entities before applying a
-           minimal Markdown subset, so this @html input is safe. -->
-      <div class="worklog-body">
-        {@html renderWorklog(service.reflection_markdown)}
+  <!-- ===== expandable detail ===== -->
+  <div class="detail">
+    <button
+      type="button"
+      class="detail-toggle"
+      onclick={() => (detailOpen = !detailOpen)}
+      aria-expanded={detailOpen}
+      aria-controls="svc-detail"
+    >
+      <span class="caret" class:open={detailOpen} aria-hidden="true">▸</span>
+      {detailOpen ? 'Hide detail' : 'Show detail'}
+      <span class="detail-meta ad-mono">
+        {branches.length} branch{branches.length === 1 ? '' : 'es'}
+        {#if service.reflection_markdown} · worklog note{/if}
+      </span>
+    </button>
+
+    {#if detailOpen}
+      <div id="svc-detail" class="detail-body">
+        <!-- ---- branches ---- -->
+        {#if branches.length === 0}
+          <p class="svc-empty">No branch activity in this window.</p>
+        {:else}
+          <ul class="branch-list">
+            {#each branches as br, bi (bi)}
+              {@const sm = ship(br.ship)}
+              {@const time = hm(br.attributed_minutes)}
+              {@const isOpen = expanded.has(bi)}
+              {@const commitCount = br.commits ? br.commits.length : 0}
+              <li class="branch">
+                <div class="branch-row">
+                  <span class="ship-badge ad-badge {sm.cls}">{sm.label}</span>
+
+                  <span class="branch-name ad-mono ad-truncate" title={br.name}>
+                    {br.name}
+                  </span>
+
+                  {#if br.ticket_id}
+                    <span class="ticket-chip ad-mono">{br.ticket_id}</span>
+                  {/if}
+
+                  <span class="branch-meta ad-mono ad-tnum">
+                    {#if br.ahead > 0}<span title="commits ahead of remote">↑{br.ahead}</span>{/if}
+                    {#if br.behind > 0}<span title="commits behind remote">↓{br.behind}</span>{/if}
+                  </span>
+
+                  {#if time}
+                    <span class="branch-time ad-mono ad-tnum" title="Attributed work time">
+                      {time}
+                    </span>
+                  {/if}
+
+                  <span
+                    class="branch-span ad-mono ad-tnum"
+                    title="Time to ship — span between first and last commit"
+                  >
+                    <span class="span-label">ship span</span>
+                    {shipSpan(br.ship_span_minutes)}
+                  </span>
+                </div>
+
+                {#if br.narrative}
+                  <p class="branch-narrative">{br.narrative}</p>
+                {/if}
+
+                {#if commitCount > 0}
+                  <button
+                    type="button"
+                    class="commit-toggle"
+                    onclick={() => toggle(bi)}
+                    aria-expanded={isOpen}
+                    aria-controls="commits-{bi}"
+                  >
+                    <span class="caret" class:open={isOpen} aria-hidden="true">▸</span>
+                    {commitCount} commit{commitCount === 1 ? '' : 's'}
+                  </button>
+
+                  {#if isOpen}
+                    {@const firstAt = shortTime(br.first_commit_at)}
+                    {@const lastAt = shortTime(br.last_commit_at)}
+                    {#if firstAt && lastAt}
+                      <p class="commit-window ad-mono ad-tnum">
+                        {firstAt} → {lastAt}
+                      </p>
+                    {/if}
+                    <ul id="commits-{bi}" class="commit-list">
+                      {#each br.commits as c, ci (ci)}
+                        <li class="commit-row" class:commit-row--ai={!c.is_user}>
+                          <code class="commit-sha ad-mono">{shortSha(c.sha)}</code>
+                          <span class="commit-subject ad-truncate" title={c.subject}>
+                            {c.subject}
+                          </span>
+                        </li>
+                      {/each}
+                    </ul>
+                  {/if}
+                {/if}
+              </li>
+            {/each}
+          </ul>
+        {/if}
+
+        <!-- ---- worklog note ---- -->
+        {#if service.reflection_markdown}
+          <details class="worklog" bind:open={worklogOpen}>
+            <summary class="worklog-summary">
+              <span class="caret" class:open={worklogOpen} aria-hidden="true">▸</span>
+              Worklog note
+            </summary>
+            <!-- renderWorklog() escapes all HTML entities before applying a
+                 minimal Markdown subset, so this @html input is safe. -->
+            <div class="worklog-body">
+              {@html renderWorklog(service.reflection_markdown)}
+            </div>
+          </details>
+        {/if}
       </div>
-    </details>
-  {/if}
+    {/if}
+  </div>
 </article>
 
 <style>
-  .svc-card {
+  .svc-panel {
     background: var(--ad-panel);
     border: 1px solid var(--ad-border-soft);
     border-radius: 10px;
@@ -291,7 +487,7 @@
 
   /* ---- header ---- */
   .svc-hd {
-    padding: 13px 15px;
+    padding: 14px 16px 12px;
     border-bottom: 1px solid var(--ad-border-soft);
     background: linear-gradient(
       180deg,
@@ -333,38 +529,6 @@
     max-width: 100%;
   }
 
-  /* ---- per-CLI time split ---- */
-  .cli-split {
-    list-style: none;
-    margin: 8px 0 0;
-    padding: 0;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-  }
-
-  .cli-chip {
-    display: inline-flex;
-    align-items: baseline;
-    gap: 5px;
-    font-size: 11px;
-    padding: 2px 8px;
-    border-radius: 999px;
-    color: var(--ad-fg-2);
-    background: var(--ad-bg-2);
-    border: 1px solid var(--ad-border-soft);
-    white-space: nowrap;
-  }
-
-  .cli-name {
-    font-weight: 600;
-    letter-spacing: 0.01em;
-  }
-
-  .cli-time {
-    color: var(--ad-muted);
-  }
-
   /* ---- risk chips ---- */
   .risk-list {
     list-style: none;
@@ -400,7 +564,6 @@
 
   .risk-age {
     color: var(--ad-faint);
-    font-variant-numeric: tabular-nums;
     white-space: nowrap;
   }
 
@@ -416,10 +579,192 @@
     border-color: color-mix(in oklch, var(--ad-danger) 38%, var(--ad-border));
   }
 
+  /* ---- metric tile row ---- */
+  .tile-row {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 10px;
+    padding: 14px 16px;
+  }
+
+  @media (max-width: 1080px) {
+    .tile-row {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+  }
+  @media (max-width: 560px) {
+    .tile-row {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  .tile {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    min-width: 0;
+    padding: 11px 12px;
+    background: var(--ad-bg-2);
+    border: 1px solid var(--ad-border-soft);
+    border-radius: 9px;
+  }
+
+  /* AI-time tile carries two rows — let it span wider when room allows. */
+  .tile--wide {
+    grid-column: span 1;
+  }
+
+  .tile-label {
+    font-size: 9.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--ad-faint);
+  }
+
+  .tile-value {
+    display: flex;
+    align-items: baseline;
+    gap: 5px;
+    font-size: 26px;
+    font-weight: 650;
+    line-height: 1.05;
+    letter-spacing: -0.02em;
+    color: var(--ad-fg);
+  }
+
+  .tile-value--empty {
+    color: var(--ad-faint);
+    font-weight: 500;
+  }
+
+  .tile-value-unit {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ad-muted);
+    letter-spacing: 0;
+  }
+
+  .tile-caption {
+    font-size: 10px;
+    color: var(--ad-faint);
+    line-height: 1.4;
+  }
+
+  .dot-sep {
+    white-space: nowrap;
+  }
+  .dot-merged {
+    color: var(--ad-live);
+    font-weight: 600;
+  }
+
+  /* chips inside tiles (ticket IDs, PR numbers) */
+  .tile-chips {
+    list-style: none;
+    margin: 1px 0 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    overflow: hidden;
+  }
+
+  .mini-chip {
+    font-size: 10px;
+    font-weight: 500;
+    padding: 1.5px 6px;
+    border-radius: 5px;
+    color: var(--ad-fg-2);
+    background: var(--ad-panel);
+    border: 1px solid var(--ad-border-soft);
+    white-space: nowrap;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* AI-time split rows */
+  .ai-split {
+    list-style: none;
+    margin: 2px 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .ai-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .ai-name {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--ad-fg-2);
+  }
+  .ai-name--claude {
+    color: var(--ad-claude);
+  }
+  .ai-name--codex {
+    color: var(--ad-codex);
+  }
+
+  .ai-time {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ad-fg);
+  }
+
+  /* ---- detail block ---- */
+  .detail {
+    border-top: 1px solid var(--ad-border-soft);
+  }
+
+  .detail-toggle {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 9px 16px;
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+    font-family: var(--ad-font-mono);
+    font-size: 11px;
+    color: var(--ad-faint);
+    transition: color 120ms ease;
+  }
+  .detail-toggle:hover {
+    color: var(--ad-fg-2);
+  }
+
+  .detail-meta {
+    margin-left: auto;
+    font-size: 10.5px;
+    color: var(--ad-faint);
+  }
+
+  .caret {
+    display: inline-block;
+    font-size: 9px;
+    transition: transform 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  .caret.open {
+    transform: rotate(90deg);
+  }
+
+  .detail-body {
+    border-top: 1px solid var(--ad-border-soft);
+  }
+
   /* ---- branches ---- */
   .svc-empty {
     margin: 0;
-    padding: 18px 15px;
+    padding: 18px 16px;
     font-size: var(--ad-fs-sm);
     color: var(--ad-faint);
     text-align: center;
@@ -432,7 +777,7 @@
   }
 
   .branch {
-    padding: 12px 15px;
+    padding: 12px 16px;
     border-bottom: 1px solid var(--ad-border-soft);
   }
   .branch:last-child {
@@ -533,7 +878,7 @@
     font-size: var(--ad-fs-sm);
     line-height: 1.55;
     color: var(--ad-muted);
-    /* Clamp long narratives to ~3 lines; full text via title attr-free wrap. */
+    /* Clamp long narratives to ~3 lines. */
     display: -webkit-box;
     -webkit-line-clamp: 3;
     line-clamp: 3;
@@ -558,15 +903,6 @@
   }
   .commit-toggle:hover {
     color: var(--ad-fg-2);
-  }
-
-  .commit-caret {
-    display: inline-block;
-    font-size: 9px;
-    transition: transform 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
-  }
-  .commit-caret.open {
-    transform: rotate(90deg);
   }
 
   .commit-window {
@@ -596,7 +932,6 @@
   }
 
   .commit-sha {
-    font-family: var(--ad-font-mono);
     font-size: 11px;
     color: var(--ad-fg-2);
     background: var(--ad-panel);
@@ -631,7 +966,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 9px 15px;
+    padding: 9px 16px;
     cursor: pointer;
     font-family: var(--ad-font-mono);
     font-size: 11px;
@@ -646,17 +981,8 @@
     color: var(--ad-fg-2);
   }
 
-  .worklog-caret {
-    display: inline-block;
-    font-size: 9px;
-    transition: transform 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
-  }
-  .worklog-caret.open {
-    transform: rotate(90deg);
-  }
-
   .worklog-body {
-    padding: 0 15px 13px;
+    padding: 0 16px 13px;
     font-size: var(--ad-fs-sm);
     line-height: 1.55;
     color: var(--ad-muted);
