@@ -111,6 +111,12 @@ type App struct {
 	// AI runner (summaries / titles)
 	runner *tasks.Runner
 
+	// aiProvider is the shared AI provider buildRunner selected — kept
+	// here so background workers (rich-entry worker) can reuse the
+	// same provider without re-running detection. noopProvider{} when
+	// no real provider is available.
+	aiProvider ai.Provider
+
 	// Connectors selected by config (Claude, Codex, …)
 	connectors []connectors.Connector
 
@@ -221,7 +227,7 @@ func BuildOnly(cfg *config.Config) (*App, error) {
 	// providers. If no provider is available the runner is still constructed
 	// (with a no-op provider) so Start cannot panic; summaries simply error
 	// out and log. The detection happens once at build time.
-	runner, err := buildRunner(cfg, db, hub, logger)
+	runner, aiProv, err := buildRunner(cfg, db, hub, logger)
 	if err != nil {
 		_ = db.Close()
 		hub.Close()
@@ -254,6 +260,7 @@ func BuildOnly(cfg *config.Config) (*App, error) {
 		cost:                   costEngine,
 		hub:                    hub,
 		runner:                 runner,
+		aiProvider:             aiProv,
 		connectors:             conns,
 		mounters:               mounters,
 		OpenBrowserFunc:        DefaultOpenBrowser,
@@ -431,6 +438,13 @@ func (a *App) Start(ctx context.Context) error {
 			}
 		}()
 	}
+
+	// Migration-019 rich worklog-entry worker (Phase 5 of the rich-
+	// entry plan). Gated on cfg.Worklog.RichEntryWorkerEnabled —
+	// the call is a no-op + info-log when the flag is off so opting
+	// in is explicit (same convention as CodexDetectorEnabled).
+	// Implementation lives in richentry_worker.go.
+	a.startRichEntryWorker(ctx)
 
 	// Reflection synthesis used to run here on a 5-minute ticker against
 	// the Anthropic Messages API. It now happens inside the user's own
@@ -874,10 +888,13 @@ func buildConnectors(cfg *config.Config) []connectors.Connector {
 }
 
 // buildRunner builds the AI runner, picking provider+model via the
-// selector against detected providers. Returns a runner whose Start can
-// be called even when no provider is available; in that case summaries
-// will fail with ai.ErrNoCredential and the runner logs the error.
-func buildRunner(cfg *config.Config, db *store.DB, hub *api.Hub, logger *slog.Logger) (*tasks.Runner, error) {
+// selector against detected providers. Returns the runner AND the
+// chosen provider (so callers like the rich-entry worker can reuse
+// the same provider without re-running detection). The returned
+// provider is non-nil even when no real provider is available — it
+// is noopProvider{} in that case, so callers can use it unconditionally;
+// calls will fail with ai.ErrNoCredential and the runner logs the error.
+func buildRunner(cfg *config.Config, db *store.DB, hub *api.Hub, logger *slog.Logger) (*tasks.Runner, ai.Provider, error) {
 	detectCtx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
 	defer cancel()
 
@@ -894,13 +911,14 @@ func buildRunner(cfg *config.Config, db *store.DB, hub *api.Hub, logger *slog.Lo
 		// so Start is non-fatal. Summaries will log and skip.
 		logger.Warn("ai: no provider available; summaries will be skipped",
 			slog.Any("error", err))
+		noop := noopProvider{}
 		return tasks.NewRunner(tasks.RunnerDeps{
 			DB:       db,
 			Hub:      hub,
-			Provider: noopProvider{},
+			Provider: noop,
 			Model:    "",
 			Logger:   logger,
-		}), nil
+		}), noop, nil
 	}
 
 	prov := buildProvider(choice.Provider)
@@ -916,7 +934,7 @@ func buildRunner(cfg *config.Config, db *store.DB, hub *api.Hub, logger *slog.Lo
 		Provider: prov,
 		Model:    choice.Model,
 		Logger:   logger,
-	}), nil
+	}), prov, nil
 }
 
 // buildBreakAdviceFactory returns a handlers.AIProviderFactory used by
