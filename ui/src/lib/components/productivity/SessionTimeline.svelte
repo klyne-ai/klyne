@@ -1,20 +1,25 @@
 <!--
   SessionTimeline — makes the PARALLELISM behind the headline AI time
-  visible. The headline number is a global interval-union of every
-  session's active wall-clock; this component shows the structure that
-  union collapses:
+  visible, and does so with the SAME measure as the headline. The
+  headline number is a global interval-union of every session's
+  gap-capped ACTIVE intervals; this component is built from those exact
+  active intervals so its concurrency breakdown sums to it:
 
-    1. A lane-packed Gantt chart. Sessions are sorted by start and
-       greedily assigned to the first lane whose last session already
-       ended — classic interval-partitioning. Lane count = PEAK
-       concurrency (the most sessions that ever ran at once).
+    1. A lane-packed Gantt chart. Each session is one lane row. Its
+       presence span (started_at→ended_at) is a faint hairline track;
+       its active_intervals are drawn as solid segments on top, so idle
+       gaps are visible. Lane packing still uses the presence span so a
+       session stays in one lane (classic interval-partitioning).
 
-    2. A concurrency breakdown computed by a sweep-line over every
-       [started_at, ended_at] interval: for each level k it reports the
-       total wall-clock during which exactly k sessions overlapped.
+    2. A concurrency breakdown computed by a sweep-line over the flat
+       list of every session's ACTIVE INTERVALS: for each level k it
+       reports the total wall-clock during which exactly k intervals
+       overlapped. Those level totals sum to total_active_minutes — the
+       headline elapsed wall-clock — by construction.
 
   Nothing here is "removed" — the overlap is the story. The union is the
-  honest elapsed wall-clock; the timeline shows why raw-sum ≠ elapsed.
+  honest elapsed wall-clock; the timeline shows the active segments and
+  why raw-sum ≠ elapsed.
 
   House style: --ad-* design tokens, .ad-mono / .ad-tnum utilities,
   scoped <style>, theme-aware, CSS/SVG only.
@@ -57,14 +62,22 @@
   // --- normalized, time-valid sessions -------------------------------------
 
   /**
-   * Every session with parseable timestamps and start <= end. Each gets a
-   * numeric [start, end] (epoch-ms) so the layout / sweep-line don't keep
-   * re-parsing. Sorted by start ascending — required by lane packing.
+   * Every session with a parseable presence span (started_at <= ended_at).
+   * `start`/`end` are the PRESENCE span (epoch-ms) — used for lane packing
+   * and the faint track. `active` is the session's gap-capped active
+   * sub-intervals (epoch-ms), parsed from active_intervals — the SAME
+   * intervals whose union is report.total_active_minutes. Sorted by start
+   * ascending, as lane packing requires.
    */
+  interface MsInterval {
+    start: number;
+    end: number;
+  }
   interface TimedSession {
     s: ProductivitySessionStat;
     start: number;
     end: number;
+    active: MsInterval[];
     idx: number;
   }
 
@@ -77,7 +90,19 @@
       let end = Date.parse(s.ended_at);
       if (Number.isNaN(start)) continue;
       if (Number.isNaN(end) || end < start) end = start;
-      list.push({ s, start, end, idx: i });
+      // Parse the session's gap-capped active sub-intervals; clamp each
+      // to the presence span so a malformed interval can't escape it.
+      const active: MsInterval[] = [];
+      for (const iv of s.active_intervals ?? []) {
+        const a = Date.parse(iv.start);
+        const b = Date.parse(iv.end);
+        if (Number.isNaN(a) || Number.isNaN(b) || b <= a) continue;
+        active.push({
+          start: Math.max(start, a),
+          end: Math.min(end, b)
+        });
+      }
+      list.push({ s, start, end, active, idx: i });
     }
     list.sort((a, b) => a.start - b.start || a.end - b.end);
     return list;
@@ -100,10 +125,12 @@
   // --- lane packing (interval partitioning) --------------------------------
 
   /**
-   * Greedy interval partitioning. Walking sessions in start order, each is
-   * placed in the first lane whose previous session has already ended
-   * (laneEnd <= this.start); otherwise a new lane opens. The number of
-   * lanes equals PEAK concurrency — the most sessions ever running at once.
+   * Greedy interval partitioning over the PRESENCE spans. Walking
+   * sessions in start order, each is placed in the first lane whose
+   * previous session has already ended (laneEnd <= this.start); otherwise
+   * a new lane opens. Packing uses started_at→ended_at (presence) so a
+   * session never spills across lanes even though its drawn segments are
+   * the gap-capped active intervals.
    */
   interface LaidOut extends TimedSession {
     lane: number;
@@ -131,33 +158,47 @@
     return { rows, lanes: Math.max(1, laneEnds.length) };
   });
 
-  /** Peak concurrency — directly the lane count from interval partitioning. */
-  const peakConcurrency = $derived(layout.lanes);
+  /**
+   * Peak parallelism — the maximum number of ACTIVE intervals overlapping
+   * at any instant. This is the max k over the active-interval sweep, not
+   * the lane count (lanes can over-count because they pack by presence
+   * span, which includes idle gaps).
+   */
+  const peakConcurrency = $derived(
+    concurrencyRaw.reduce((m, l) => Math.max(m, l.k), 0)
+  );
 
   // --- concurrency sweep-line ----------------------------------------------
 
   /**
-   * Sweep-line over all intervals. Each session emits a +1 event at its
-   * start and a −1 event at its end. Sorting the events and walking them
-   * left-to-right, the running counter is the number of sessions live in
-   * the slice up to the next event. We accumulate that slice's duration
-   * into the bucket for the current concurrency level.
+   * Sweep-line over the flat list of every session's ACTIVE INTERVALS
+   * (not presence spans). Each active interval emits a +1 event at its
+   * start and a −1 event at its end. Walking the sorted events
+   * left-to-right, the running counter is the number of active intervals
+   * live in the slice up to the next event. We accumulate that slice's
+   * duration into the bucket for the current concurrency level.
    *
    * Result: levels[k] = total wall-clock minutes during which EXACTLY k
-   * sessions overlapped. Sum of all levels == the union span.
+   * active intervals overlapped. Because every active interval here is a
+   * sub-interval of the SAME set whose union is report.total_active_minutes,
+   * the sum of all levels equals total_active_minutes (the headline) — see
+   * the runtime check in `concurrencyConsistent` below.
    */
   interface ConcLevel {
     k: number;
     minutes: number;
   }
 
-  const concurrency = $derived.by<ConcLevel[]>(() => {
+  /** Raw (unfiltered) per-level sweep result over all active intervals. */
+  const concurrencyRaw = $derived.by<ConcLevel[]>(() => {
     if (!hasData) return [];
     type Ev = { t: number; delta: number };
     const events: Ev[] = [];
     for (const t of timed) {
-      events.push({ t: t.start, delta: 1 });
-      events.push({ t: t.end, delta: -1 });
+      for (const iv of t.active) {
+        events.push({ t: iv.start, delta: 1 });
+        events.push({ t: iv.end, delta: -1 });
+      }
     }
     // Process ends before starts at the same instant so a back-to-back
     // handoff doesn't register a phantom +1 of concurrency.
@@ -175,13 +216,43 @@
     }
     return [...byLevel.entries()]
       .map(([k, ms]) => ({ k, minutes: ms / 60_000 }))
-      .filter((l) => l.minutes >= 0.5)
       .sort((a, b) => a.k - b.k);
   });
 
-  /** Total wall-clock covered by at least one session (the union span). */
+  /**
+   * Total wall-clock covered by at least one ACTIVE interval — the union
+   * of all active intervals. This is the same quantity the backend
+   * reports as total_active_minutes; we use the raw (unfiltered) sweep so
+   * the equality holds exactly.
+   */
   const unionMinutes = $derived(
-    concurrency.reduce((acc, l) => acc + l.minutes, 0)
+    concurrencyRaw.reduce((acc, l) => acc + l.minutes, 0)
+  );
+
+  /**
+   * Consistency assertion: the active-interval sweep must reconstruct the
+   * headline. Allow 1 minute of slack for whole-minute rounding on the
+   * backend. A mismatch means the timeline and headline diverged — the
+   * exact bug this component was reworked to prevent — so we surface it.
+   */
+  const concurrencyConsistent = $derived(
+    Math.abs(unionMinutes - (report.total_active_minutes || 0)) <= 1
+  );
+
+  $effect(() => {
+    if (hasData && !concurrencyConsistent) {
+      console.warn(
+        '[SessionTimeline] concurrency sweep',
+        Math.round(unionMinutes),
+        'min != report.total_active_minutes',
+        report.total_active_minutes
+      );
+    }
+  });
+
+  /** Display levels — tiny slivers folded out of the legend/list. */
+  const concurrency = $derived(
+    concurrencyRaw.filter((l) => l.minutes >= 0.5)
   );
 
   // --- hour-tick axis ------------------------------------------------------
@@ -210,10 +281,24 @@
     return ticks;
   });
 
-  /** Left/width percentages for one session's bar within the window. */
-  function barGeom(t: TimedSession): { leftPct: number; widthPct: number } {
+  /**
+   * Left/width percentages for the faint PRESENCE track of a session
+   * (started_at→ended_at, idle gaps included) — the hairline behind the
+   * solid active segments.
+   */
+  function trackGeom(t: TimedSession): { leftPct: number; widthPct: number } {
     const leftPct = ((t.start - windowStart) / spanMs) * 100;
     const widthPct = ((t.end - t.start) / spanMs) * 100;
+    return { leftPct, widthPct };
+  }
+
+  /**
+   * Left/width percentages for one ACTIVE sub-interval of a session,
+   * positioned within the same window — the solid drawn segments.
+   */
+  function segGeom(iv: MsInterval): { leftPct: number; widthPct: number } {
+    const leftPct = ((iv.start - windowStart) / spanMs) * 100;
+    const widthPct = ((iv.end - iv.start) / spanMs) * 100;
     return { leftPct, widthPct };
   }
 
@@ -229,14 +314,26 @@
     concurrency.map((l) => `${l.k}× ${formatHM(l.minutes)}`).join(' · ')
   );
 
-  /** Per-bar accessible label. */
+  /** Per-row accessible label — covers the whole session lane row. */
   function barLabel(t: TimedSession): string {
     const s = t.s;
+    const segs = t.active.length;
+    const segNote =
+      segs > 1 ? ` across ${segs} active segments` : segs === 1 ? '' : ' (no active span)';
     return `${s.cli || 'session'} · ${s.repo || 'unknown repo'} · ${formatClock(
       s.started_at
-    )}–${formatClock(s.ended_at)} · ${formatHM(s.active_minutes)} active · ${
-      s.message_count
-    } message${s.message_count === 1 ? '' : 's'}`;
+    )}–${formatClock(s.ended_at)} presence · ${formatHM(
+      s.active_minutes
+    )} active${segNote} · ${s.message_count} message${
+      s.message_count === 1 ? '' : 's'
+    }`;
+  }
+
+  /** Accessible label for a single active segment within a session row. */
+  function segLabel(t: TimedSession, iv: MsInterval): string {
+    return `${t.s.cli || 'session'} active ${formatClock(
+      new Date(iv.start).toISOString()
+    )}–${formatClock(new Date(iv.end).toISOString())}`;
   }
 
   /** Row height in px for each Gantt lane. */
@@ -247,9 +344,11 @@
   <header class="st-hd">
     <h3 class="st-title">Parallel session timeline</h3>
     <p class="st-sub">
-      Each bar is one AI session. When bars stack, agents ran in parallel —
-      that overlap is exactly why the raw per-session sum runs longer than the
-      true elapsed wall-clock.
+      Each row is one AI session. Solid segments are gap-capped active
+      wall-clock; the faint track behind them is the session's full
+      presence span, so idle gaps show as breaks. When segments stack,
+      agents ran in parallel — and the concurrency breakdown below sums to
+      exactly the elapsed AI wall-clock.
     </p>
   </header>
 
@@ -268,19 +367,25 @@
         </dd>
       </div>
       <div class="st-stat">
-        <dt>Total span</dt>
+        <dt>Window span</dt>
         <dd class="ad-mono ad-tnum st-stat-v">{totalSpan}</dd>
-        <div class="st-stat-sub">earliest start → latest end</div>
+        <div class="st-stat-sub">
+          earliest start → latest end (includes idle time)
+        </div>
       </div>
       <div class="st-stat">
         <dt>Elapsed AI wall-clock</dt>
         <dd class="ad-mono ad-tnum st-stat-v">{unionHeadline}</dd>
-        <div class="st-stat-sub">union of all session intervals</div>
+        <div class="st-stat-sub">union of all active intervals</div>
       </div>
     </dl>
 
-    <!-- Lane-packed Gantt -->
-    <div class="st-gantt" role="img" aria-label="Gantt chart of {timed.length} sessions across {peakConcurrency} parallel lanes">
+    <!-- Lane-packed Gantt — faint presence track + solid active segments -->
+    <div
+      class="st-gantt"
+      role="img"
+      aria-label="Gantt chart of {timed.length} sessions; bars show gap-capped active segments over faint presence tracks"
+    >
       <!-- hour-tick axis -->
       <div class="st-axis" aria-hidden="true">
         {#each hourTicks as tick, i (i)}
@@ -306,31 +411,68 @@
         {/each}
 
         {#each layout.rows as row, i (row.s.session_id || i)}
-          {@const geom = barGeom(row)}
+          {@const track = trackGeom(row)}
           {@const key = cliKey(row.s.cli)}
+          {@const top = row.lane * LANE_H + 3}
+          <!-- faint hairline presence track (started_at → ended_at) -->
           <div
-            class="st-bar st-bar--{key}"
-            style:left="{geom.leftPct}%"
-            style:width="max(3px, {geom.widthPct}%)"
-            style:top="{row.lane * LANE_H + 3}px"
+            class="st-track st-track--{key}"
+            style:left="{track.leftPct}%"
+            style:width="max(3px, {track.widthPct}%)"
+            style:top="{top + 8}px"
             title={barLabel(row)}
             aria-label={barLabel(row)}
-          >
-            <span class="st-bar-label">{row.s.repo || row.s.cli || '—'}</span>
-          </div>
+          ></div>
+
+          {#if row.active.length === 0}
+            <!-- no measurable active span — a presence-only marker -->
+            <div
+              class="st-bar st-bar--idle st-bar--{key}"
+              style:left="{track.leftPct}%"
+              style:width="max(3px, {track.widthPct}%)"
+              style:top="{top}px"
+              aria-hidden="true"
+            >
+              <span class="st-bar-label">{row.s.repo || row.s.cli || '—'}</span>
+            </div>
+          {:else}
+            {#each row.active as iv, j (j)}
+              {@const seg = segGeom(iv)}
+              <div
+                class="st-bar st-bar--{key}"
+                style:left="{seg.leftPct}%"
+                style:width="max(3px, {seg.widthPct}%)"
+                style:top="{top}px"
+                title={segLabel(row, iv)}
+                aria-label={segLabel(row, iv)}
+              >
+                {#if j === 0}
+                  <span class="st-bar-label"
+                    >{row.s.repo || row.s.cli || '—'}</span
+                  >
+                {/if}
+              </div>
+            {/each}
+          {/if}
         {/each}
       </div>
     </div>
 
-    <!-- Concurrency breakdown — the "break up" of overlap -->
+    <!-- Concurrency breakdown — built from the SAME active intervals -->
     {#if concurrency.length > 0}
       <div class="st-conc">
         <div class="st-conc-hd">
           <span class="st-conc-title ad-mono">Concurrency breakdown</span>
           <span class="st-conc-note"
-            >wall-clock at each parallelism level — sums to {formatHM(
-              unionMinutes
-            )} elapsed</span
+            >wall-clock at each parallelism level — sums to the {unionHeadline}
+            elapsed AI wall-clock
+            {#if !concurrencyConsistent}
+              <span class="st-conc-warn" title="sweep total {formatHM(
+                unionMinutes
+              )} does not match the headline"
+                >(≠ headline — check data)</span
+              >
+            {/if}</span
           >
         </div>
 
@@ -372,6 +514,14 @@
               >
             </li>
           {/each}
+          <!-- explicit total — must equal the elapsed AI wall-clock -->
+          <li class="st-conc-item st-conc-item--total">
+            <span class="st-conc-k ad-mono">=</span>
+            <span class="st-conc-v ad-mono ad-tnum"
+              >{formatHM(unionMinutes)}</span
+            >
+            <span class="st-conc-desc">elapsed AI wall-clock</span>
+          </li>
         </ul>
       </div>
     {/if}
@@ -513,7 +663,25 @@
     opacity: 0.6;
   }
 
-  /* one session bar */
+  /* faint hairline presence track (started_at → ended_at) behind the
+     solid active segments — shows idle gaps as the bare track */
+  .st-track {
+    position: absolute;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--ad-border-soft);
+    opacity: 0.7;
+    cursor: default;
+    z-index: 0;
+  }
+  .st-track--claude {
+    background: color-mix(in oklch, var(--ad-claude) 22%, var(--ad-border-soft));
+  }
+  .st-track--codex {
+    background: color-mix(in oklch, var(--ad-codex) 22%, var(--ad-border-soft));
+  }
+
+  /* one active-interval segment */
   .st-bar {
     position: absolute;
     height: 20px;
@@ -526,6 +694,13 @@
     border: 1px solid transparent;
     cursor: default;
     transition: filter 120ms ease;
+    z-index: 1;
+  }
+  /* presence-only marker: a session with no measurable active span */
+  .st-bar--idle {
+    background: transparent !important;
+    border-style: dashed;
+    opacity: 0.55;
   }
   .st-bar:hover {
     filter: brightness(1.12);
@@ -586,6 +761,10 @@
     font-size: 10.5px;
     color: var(--ad-muted);
   }
+  .st-conc-warn {
+    color: var(--ad-danger);
+    font-weight: 600;
+  }
 
   /* stacked proportional bar */
   .st-conc-bar {
@@ -632,6 +811,17 @@
     display: flex;
     align-items: center;
     gap: 6px;
+  }
+  /* the explicit "= Xh Ym" total row */
+  .st-conc-item--total {
+    padding-left: var(--ad-s2);
+    border-left: 1px solid var(--ad-border-soft);
+  }
+  .st-conc-item--total .st-conc-k {
+    color: var(--ad-faint);
+  }
+  .st-conc-item--total .st-conc-v {
+    color: var(--ad-fg);
   }
   .st-conc-swatch {
     width: 10px;

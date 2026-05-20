@@ -464,6 +464,18 @@ export interface ProductivityService {
   reflection_markdown: string;
 }
 /**
+ * One gap-capped active wall-clock sub-interval of a session. The union
+ * of every session's active_intervals produces total_active_minutes;
+ * the timeline draws these as solid segments. Mirrors Go
+ * productivity.ActiveInterval.
+ */
+export interface ProductivityActiveInterval {
+  /** Interval start (RFC3339). */
+  start: string;
+  /** Interval end (RFC3339). */
+  end: string;
+}
+/**
  * One session's proof-of-work contribution to the headline AI time.
  * Mirrors Go productivity.SessionStat.
  */
@@ -478,6 +490,12 @@ export interface ProductivitySessionStat {
   ended_at: string;
   /** This session's own gap-capped active total, in minutes. */
   active_minutes: number;
+  /**
+   * Gap-capped active sub-intervals — the same intervals whose global
+   * union produces total_active_minutes. Lengths sum to active_minutes.
+   * Always present (never null); [] when the session has no span.
+   */
+  active_intervals: ProductivityActiveInterval[];
   message_count: number;
 }
 export interface ProductivityBranch {
