@@ -33,6 +33,18 @@
     expanded = next;
   }
 
+  // Header risk-chip expansion state (per service.risks index) — opens
+  // the same kind of inline evidence list the bottom Open Loops shows,
+  // so the chips are self-contained.
+  let riskExpanded = $state<Set<number>>(new Set());
+
+  function toggleRisk(i: number): void {
+    const next = new Set(riskExpanded);
+    if (next.has(i)) next.delete(i);
+    else next.add(i);
+    riskExpanded = next;
+  }
+
   // Worklog reflection sub-section — collapsed by default.
   let worklogOpen = $state(false);
 
@@ -119,12 +131,31 @@
 
   const branches = $derived(service.branches ?? []);
 
-  // TASKS — distinct non-empty ticket IDs across all branches.
+  // TASKS — distinct non-empty ticket IDs across all in-window branches.
   const tickets = $derived.by(() => {
     const seen = new Set<string>();
     for (const br of branches) {
       const id = (br.ticket_id ?? '').trim();
       if (id) seen.add(id);
+    }
+    return [...seen];
+  });
+
+  // Other ticket IDs found ONLY on risk branches (worktrees that are
+  // open — uncommitted or unpushed — but had no commits in the window
+  // and so don't appear under `branches`). These would otherwise be
+  // invisible on the panel even though the user clearly has them in
+  // flight; surface them as secondary chips on the Tasks tile.
+  const ticketPattern = /\b([a-zA-Z]{2,}-\d+)\b/;
+  const otherTickets = $derived.by(() => {
+    const inWindow = new Set(tickets);
+    const seen = new Set<string>();
+    for (const r of service.risks ?? []) {
+      const m = (r.branch ?? '').match(ticketPattern);
+      if (m) {
+        const id = m[1].toUpperCase();
+        if (!inWindow.has(id)) seen.add(id);
+      }
     }
     return [...seen];
   });
@@ -171,6 +202,11 @@
   );
   // Freshness of the gh-sourced PR data — '' when there is none.
   const prsAsOf = $derived(relTime(service.merged_prs_as_of));
+
+  // Freshness of the local origin/* mirror — '' when this clone has
+  // never been fetched. The dashboard auto-refreshes stale remotes on
+  // the same 2h cycle as the PR cache.
+  const gitAsOf = $derived(relTime(service.git_fetched_at));
 
   // Project-level work span: earliest first_commit_at → latest
   // last_commit_at across all branches (local-git only).
@@ -292,6 +328,22 @@
             manual — no AI session
           </span>
         {/if}
+        {#if gitAsOf}
+          <span
+            class="svc-freshness ad-mono"
+            title="origin/* refs last refreshed via `git fetch`"
+          >
+            git · {gitAsOf}
+          </span>
+        {/if}
+        {#if prsAsOf}
+          <span
+            class="svc-freshness ad-mono"
+            title="GitHub PR data last fetched (cached up to 2h)"
+          >
+            gh · {prsAsOf}
+          </span>
+        {/if}
       </div>
       <div class="svc-path ad-mono ad-truncate" title={service.project_path}>
         {service.project_path}
@@ -304,13 +356,68 @@
           {@const meta = risk(r.kind)}
           {@const age = hm(r.age_minutes)}
           {@const brLabel = r.branch && r.branch !== 'HEAD' ? r.branch : ''}
-          <li class="risk-chip {meta.cls}">
-            <span class="risk-kind">{meta.label}</span>
-            {#if brLabel}
-              <span class="risk-branch ad-mono" title={r.worktree_path}>{brLabel}</span>
+          {@const rCommits = r.commits ?? []}
+          {@const rFiles = r.files ?? []}
+          {@const hasEv =
+            (r.kind === 'unpushed' && rCommits.length > 0) ||
+            (r.kind === 'done-uncommitted' && rFiles.length > 0)}
+          {@const isOpen = riskExpanded.has(ri)}
+          <li class="risk-chip-wrap">
+            <button
+              type="button"
+              class="risk-chip {meta.cls}"
+              class:risk-chip--open={isOpen}
+              onclick={() => toggleRisk(ri)}
+              aria-expanded={isOpen}
+              aria-controls="rk-ev-{ri}"
+              disabled={!hasEv}
+              title={hasEv
+                ? isOpen
+                  ? 'Hide evidence'
+                  : 'Show which commits / files'
+                : 'No evidence list available'}
+            >
+              <span class="risk-kind">{meta.label}</span>
+              {#if brLabel}
+                <span class="risk-branch ad-mono" title={r.worktree_path}>{brLabel}</span>
+              {/if}
+              <span class="risk-detail">{r.detail}</span>
+              {#if age}<span class="risk-age ad-tnum">{age} ago</span>{/if}
+              {#if hasEv}
+                <span
+                  class="risk-caret"
+                  class:risk-caret--open={isOpen}
+                  aria-hidden="true">▸</span>
+              {/if}
+            </button>
+            {#if isOpen}
+              <div id="rk-ev-{ri}" class="risk-ev">
+                {#if r.kind === 'unpushed'}
+                  <ul class="risk-ev-list">
+                    {#each rCommits.slice(0, 10) as c, ci (ci)}
+                      <li class="risk-ev-row">
+                        <code class="risk-ev-sha ad-mono">{c.sha}</code>
+                        <span class="risk-ev-subject" title={c.subject}>{c.subject}</span>
+                      </li>
+                    {/each}
+                    {#if rCommits.length > 10}
+                      <li class="risk-ev-more">
+                        + {rCommits.length - 10} more shown of {rCommits.length} listed
+                      </li>
+                    {/if}
+                  </ul>
+                {:else if r.kind === 'done-uncommitted'}
+                  <ul class="risk-ev-list">
+                    {#each rFiles.slice(0, 12) as f, fi (fi)}
+                      <li class="risk-ev-file ad-mono" title={f}>{f}</li>
+                    {/each}
+                    {#if rFiles.length > 12}
+                      <li class="risk-ev-more">+ {rFiles.length - 12} more</li>
+                    {/if}
+                  </ul>
+                {/if}
+              </div>
             {/if}
-            <span class="risk-detail">{r.detail}</span>
-            {#if age}<span class="risk-age ad-tnum">{age} ago</span>{/if}
           </li>
         {/each}
       </ul>
@@ -321,14 +428,28 @@
   <div class="tile-row" role="list" aria-label="Project metrics">
     <!-- TASKS -->
     <div class="tile" role="listitem">
-      {#if tickets.length > 0}
+      {#if tickets.length > 0 || otherTickets.length > 0}
         <span class="tile-label">Tasks</span>
-        <span class="tile-value ad-tnum">{tickets.length}</span>
+        <span class="tile-value ad-tnum">{tickets.length + otherTickets.length}</span>
         <ul class="tile-chips">
           {#each tickets as t, ti (ti)}
-            <li class="mini-chip ad-mono" title={t}>{t}</li>
+            <li class="mini-chip ad-mono" title="{t} · committed in window">{t}</li>
+          {/each}
+          {#each otherTickets as t, oi (oi)}
+            <li
+              class="mini-chip mini-chip--secondary ad-mono"
+              title="{t} · open in another worktree (no commits in window)"
+            >{t}</li>
           {/each}
         </ul>
+        {#if otherTickets.length > 0}
+          <span class="tile-caption">
+            {tickets.length} in window
+            {#if otherTickets.length > 0}
+              · {otherTickets.length} other worktree{otherTickets.length === 1 ? '' : 's'}
+            {/if}
+          </span>
+        {/if}
       {:else}
         <span class="tile-label">Branches</span>
         <span class="tile-value ad-tnum">{branches.length}</span>
@@ -609,6 +730,18 @@
     white-space: nowrap;
   }
 
+  .svc-freshness {
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--ad-faint);
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: color-mix(in oklch, var(--ad-bg-2) 50%, transparent);
+    border: 1px solid var(--ad-border-soft);
+    white-space: nowrap;
+    letter-spacing: 0.02em;
+  }
+
   .svc-path {
     margin-top: 3px;
     font-size: var(--ad-fs-xs);
@@ -626,15 +759,94 @@
     gap: 6px;
   }
 
+  .risk-chip-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+    max-width: 100%;
+  }
+
   .risk-chip {
     display: inline-flex;
     align-items: baseline;
     gap: 6px;
+    font: inherit;
     font-size: 11px;
     line-height: 1.4;
     padding: 3px 9px;
     border-radius: 7px;
     border: 1px solid transparent;
+    text-align: left;
+    cursor: pointer;
+    transition: background 100ms ease;
+  }
+  .risk-chip:disabled {
+    cursor: default;
+  }
+  .risk-chip:hover:not(:disabled) {
+    filter: brightness(1.08);
+  }
+
+  .risk-caret {
+    margin-left: 2px;
+    font-size: 9px;
+    color: currentColor;
+    opacity: 0.7;
+    transition: transform 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  .risk-caret--open {
+    transform: rotate(90deg);
+  }
+
+  .risk-ev {
+    padding: 6px 9px 7px;
+    border-radius: 7px;
+    background: color-mix(in oklch, var(--ad-bg-2) 60%, transparent);
+    border: 1px solid var(--ad-border-soft);
+  }
+  .risk-ev-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .risk-ev-row {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    min-width: 0;
+    font-size: 11px;
+  }
+  .risk-ev-sha {
+    color: var(--ad-fg-2);
+    background: var(--ad-panel);
+    border: 1px solid var(--ad-border-soft);
+    border-radius: 4px;
+    padding: 1px 5px;
+    flex: none;
+  }
+  .risk-ev-subject {
+    color: var(--ad-muted);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1 1 auto;
+  }
+  .risk-ev-file {
+    font-size: 11px;
+    color: var(--ad-fg-2);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .risk-ev-more {
+    font-size: 10.5px;
+    color: var(--ad-faint);
+    font-style: italic;
   }
 
   .risk-kind {
@@ -782,6 +994,14 @@
     max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  /* Secondary chip: tickets active in OTHER worktrees with no
+     in-window commits. Dimmer so they read as "open elsewhere". */
+  .mini-chip--secondary {
+    color: var(--ad-faint);
+    background: transparent;
+    border-style: dashed;
   }
 
   /* AI-time split rows */

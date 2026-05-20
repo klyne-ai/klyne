@@ -473,6 +473,13 @@ export interface ProductivityService {
    * The zero value ("0001-01-01T00:00:00Z") means no PR data.
    */
   merged_prs_as_of: string;
+  /**
+   * When this repo's local mirror of origin was last refreshed via
+   * `git fetch` (FETCH_HEAD mtime, RFC3339). Zero value means no
+   * fetch has ever run in this clone — ahead/behind data may be
+   * unreliable until then.
+   */
+  git_fetched_at: string;
 }
 /**
  * One GitHub pull request the user authored and merged within the
