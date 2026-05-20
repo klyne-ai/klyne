@@ -109,8 +109,10 @@ func (h *ProductivityHandler) Get(w http.ResponseWriter, r *http.Request) {
 		// PROTOTYPE STUB (spec §11): current dirty state only, no
 		// historical snapshot. The D6 session-end snapshot capture is a
 		// documented follow-up; here we read the live working tree.
+		dirtyCount, dirtyFiles := dirtyStatus(t.Dir)
 		dirtyRepos[sc.Dir] = productivity.DirtyState{
-			DirtyFileCount: dirtyFileCount(t.Dir),
+			DirtyFileCount: dirtyCount,
+			DirtyFiles:     dirtyFiles,
 			SessionEnd:     sessionEnds[t.ProjectPath],
 		}
 	}
@@ -147,6 +149,11 @@ func (h *ProductivityHandler) Get(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+
+	// Layer-2 GitHub enrichment: attach merged PRs per Service via the
+	// TTL-cached `gh pr list` (productivity_github.go). Best-effort —
+	// never fails the request; the deterministic report stands alone.
+	h.enrichMergedPRs(ctx, &rep, since, until)
 
 	writeJSON(w, http.StatusOK, rep)
 }
@@ -311,21 +318,43 @@ LIMIT 1`
 	return true, bodyMD, nil
 }
 
-// dirtyFileCount counts porcelain status lines (uncommitted + untracked)
-// for the working tree at dir. Errors map to 0 — a repo we can't stat is
-// treated as clean rather than failing the whole dashboard.
+// dirtyFileCap bounds how many uncommitted file paths a done-uncommitted
+// risk carries — the count is always exact; only the displayed list is
+// capped.
+const dirtyFileCap = 25
+
+// dirtyStatus returns the count AND the (capped) list of uncommitted /
+// untracked paths for the working tree at dir — porcelain short status,
+// so the done-uncommitted risk can show WHICH files are dirty. Errors
+// map to (0, nil): a repo we can't stat is treated as clean rather than
+// failing the whole dashboard.
 //
 // PROTOTYPE STUB (spec §11): current dirty state only, no historical
 // snapshot (the D6 session-end snapshot half is a documented follow-up).
-func dirtyFileCount(dir string) int {
+func dirtyStatus(dir string) (int, []string) {
 	cmd := exec.Command("git", "-C", dir, "status", "--porcelain")
 	out, err := cmd.Output()
 	if err != nil {
-		return 0
+		return 0, nil
 	}
-	s := strings.TrimSpace(string(out))
+	// Trim only TRAILING newlines — leading whitespace must be preserved
+	// because porcelain v1 starts modified-not-staged lines with " M ..."
+	// (X=' ', Y='M'), and stripping it shifts every path by one char.
+	s := strings.TrimRight(string(out), "\r\n")
 	if s == "" {
-		return 0
+		return 0, nil
 	}
-	return len(strings.Split(s, "\n"))
+	lines := strings.Split(s, "\n")
+	files := make([]string, 0, len(lines))
+	for i, ln := range lines {
+		if i >= dirtyFileCap {
+			break
+		}
+		// Porcelain v1 lines are "XY <path>" — XY at 0..1, space at 2,
+		// path from index 3 onward. Skip lines too short to carry a path.
+		if len(ln) > 3 {
+			files = append(files, ln[3:])
+		}
+	}
+	return len(lines), files
 }

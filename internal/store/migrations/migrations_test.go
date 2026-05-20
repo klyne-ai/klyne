@@ -49,6 +49,7 @@ func TestMigrationsApply(t *testing.T) {
 		"015_worklog_columns.sql",       // worklog memory-layer columns on stop_summaries
 		"016_worklog_reflections.sql",   // reflection layer (Generative Agents pattern) w/ citation invariant
 		"017_git_dashboard.sql",         // AI productivity dashboard tables (git_session_snapshots, dashboard_cache)
+		"018_github_pr_cache.sql",       // merged-PR `gh` enrichment cache (TTL-refreshed)
 	}
 	if len(sqlFiles) != len(expected) {
 		t.Fatalf("expected %d migrations, found %d: %v", len(expected), len(sqlFiles), sqlFiles)

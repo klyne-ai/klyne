@@ -82,13 +82,33 @@ type Branch struct {
 	ShipSpanMinutes   int       `json:"ship_span_minutes"`
 }
 
+// RiskCommit is a minimal commit reference (short SHA + subject)
+// attached to an "unpushed" RiskSignal so the dashboard can show WHICH
+// commits are not on the remote, not merely how many.
+type RiskCommit struct {
+	SHA     string `json:"sha"`
+	Subject string `json:"subject"`
+}
+
 // RiskSignal is a current-state risk (§6.5). Kind is "unpushed" or
 // "done-uncommitted". AgeMinutes is elapsed since the relevant anchor
 // (oldest unpushed commit, or session end for done-uncommitted).
+//
+// Branch + WorktreePath identify exactly where the risk is — they
+// disambiguate the otherwise-identical rows a repo with several
+// worktrees produces. Commits is the concrete evidence for an
+// "unpushed" risk (the commits ahead of origin, SHA + subject); Files
+// is the concrete evidence for a "done-uncommitted" risk (the
+// uncommitted/untracked paths). Both are always emitted as [] not null
+// and are empty for the other kind.
 type RiskSignal struct {
-	Kind       string `json:"kind"`
-	Detail     string `json:"detail"`
-	AgeMinutes int    `json:"age_minutes"`
+	Kind         string       `json:"kind"`
+	Detail       string       `json:"detail"`
+	AgeMinutes   int          `json:"age_minutes"`
+	Branch       string       `json:"branch"`
+	WorktreePath string       `json:"worktree_path"`
+	Commits      []RiskCommit `json:"commits"`
+	Files        []string     `json:"files"`
 }
 
 // Service is one repo (canonical root) with its branches and risks.
@@ -113,10 +133,38 @@ type Service struct {
 	ManualOnly         bool           `json:"manual_only"`
 	MinutesByCLI       map[string]int `json:"minutes_by_cli"`
 	ReflectionMarkdown string         `json:"reflection_markdown"`
-	// MergedPRs is the distinct PR numbers referenced in the repo's
-	// commit subjects (the "(#124)" squash/merge titles) — a
-	// deterministic merged-PR signal, no GitHub API.
-	MergedPRs []int `json:"merged_prs"`
+	// MergedPRs is the GitHub pull requests the user merged within the
+	// report window — a Layer-2 `gh`-sourced enrichment (see MergedPR),
+	// NOT a deterministic local-git fact. MergedPRsAsOf is when that
+	// GitHub data was fetched (the cache timestamp); zero when no PR
+	// data is available. MergedPRs is always emitted as [] not null.
+	MergedPRs     []MergedPR `json:"merged_prs"`
+	MergedPRsAsOf time.Time  `json:"merged_prs_as_of"`
+}
+
+// MergedPR is one GitHub pull request the user authored and merged
+// within the report window.
+//
+// Unlike everything else in this package, MergedPR is NOT derived from
+// local git: it is a Layer-2 enrichment populated by the API handler
+// (internal/api/handlers/productivity_github.go) via `gh pr list`,
+// cached with a TTL so GitHub is not hit on every dashboard load. When
+// gh / auth / network is unavailable Service.MergedPRs is simply empty
+// and the deterministic branch ship-state still carries the merged
+// signal — the enrichment never gates the deterministic report (D8).
+//
+// OpenedAt is when the PR was created; TimeToShipMinutes is the
+// minutes from OpenedAt to MergedAt — the honest "open → merge" cycle
+// time. (Per-commit dates are not fetched because requesting them
+// through GitHub's GraphQL inflates the `authors` node traversal past
+// the 500K limit on repos with many PRs.)
+type MergedPR struct {
+	Number            int       `json:"number"`
+	Title             string    `json:"title"`
+	HeadRef           string    `json:"head_ref"`
+	MergedAt          time.Time `json:"merged_at"`
+	OpenedAt          time.Time `json:"opened_at"`
+	TimeToShipMinutes int       `json:"time_to_ship_minutes"`
 }
 
 // SessionStat is the per-session proof-of-work breakdown (Change 2): the

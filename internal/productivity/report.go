@@ -3,29 +3,10 @@ package productivity
 import (
 	"context"
 	"fmt"
-	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 )
-
-// prRefRe matches a PR reference in a commit subject — the "(#124)"
-// that squash/merge commits carry. Used to derive the merged-PR list
-// per repo deterministically from commit messages (no GitHub API).
-var prRefRe = regexp.MustCompile(`#(\d+)`)
-
-// extractPRRefs returns the distinct PR numbers referenced in a commit
-// subject (typically one, from a squash-merge title).
-func extractPRRefs(subject string) []int {
-	var out []int
-	for _, m := range prRefRe.FindAllStringSubmatch(subject, -1) {
-		if n, err := strconv.Atoi(m[1]); err == nil {
-			out = append(out, n)
-		}
-	}
-	return out
-}
 
 // ReflectionLookup is the §7 L2/L3 dependency: "is there a klyne worklog
 // reflection for this project on this day, and what does it say?".
@@ -47,7 +28,12 @@ type ReflectionLookup interface {
 // done-uncommitted risk (D4/§6.5).
 type DirtyState struct {
 	DirtyFileCount int
-	SessionEnd     time.Time // zero ⇒ no recent session ⇒ no done-uncommitted signal
+	// DirtyFiles is the uncommitted/untracked paths (porcelain
+	// short-status) so the "done-uncommitted" risk can show WHICH files
+	// are dirty, not just a count. May be empty even when
+	// DirtyFileCount > 0 if the list could not be read.
+	DirtyFiles []string
+	SessionEnd time.Time // zero ⇒ no recent session ⇒ no done-uncommitted signal
 }
 
 // ReportInput is the fully-deterministic, pre-computed substrate fed to
@@ -114,8 +100,6 @@ func BuildReport(ctx context.Context, in ReportInput, refl ReflectionLookup) (Re
 		// Per-CLI minutes for the Service: aggregated across every
 		// worktree/scan of the canonical repo (time is repo-scoped).
 		minutesByCLI := map[string]int{}
-		// Distinct merged-PR numbers found in the repo's commit subjects.
-		prSet := map[int]bool{}
 		for _, sc := range g.scans {
 			// §6.3 identity filter: only the user's commits count toward
 			// the productivity figures. Co-actors/bots (Jenkins,
@@ -124,9 +108,6 @@ func BuildReport(ctx context.Context, in ReportInput, refl ReflectionLookup) (Re
 			for _, c := range sc.Commits {
 				if c.IsUser {
 					userCommits = append(userCommits, c)
-					for _, pr := range extractPRRefs(c.Subject) {
-						prSet[pr] = true
-					}
 				}
 			}
 
@@ -150,15 +131,11 @@ func BuildReport(ctx context.Context, in ReportInput, refl ReflectionLookup) (Re
 		svc.ManualOnly = manualOnly && anyUserCommits
 		svc.MinutesByCLI = minutesByCLI
 
-		svc.MergedPRs = make([]int, 0, len(prSet))
-		for pr := range prSet {
-			svc.MergedPRs = append(svc.MergedPRs, pr)
-		}
-		sort.Ints(svc.MergedPRs)
-
 		// Always emit JSON objects/arrays, never null, so UI consumers
 		// can rely on the {}/[] contract (a service with no
 		// branches/risks/CLI time would otherwise marshal nil to null).
+		// MergedPRs starts empty here; the API-layer GitHub enrichment
+		// (productivity_github.go) fills it after BuildReport.
 		if svc.Branches == nil {
 			svc.Branches = []Branch{}
 		}
@@ -168,6 +145,7 @@ func BuildReport(ctx context.Context, in ReportInput, refl ReflectionLookup) (Re
 		if svc.MinutesByCLI == nil {
 			svc.MinutesByCLI = map[string]int{}
 		}
+		svc.MergedPRs = []MergedPR{}
 
 		// Salience ordering (§7.1 rule 5) applied across the merged
 		// branch set so the highest-impact worktree leads.
@@ -375,10 +353,18 @@ func riskSignals(sc ScanResult, userCommits []Commit, dirty DirtyState, now time
 		if !oldest.IsZero() {
 			age = minutesBetween(oldest, now)
 		}
+		commits := sc.AheadCommits
+		if commits == nil {
+			commits = []RiskCommit{}
+		}
 		risks = append(risks, RiskSignal{
-			Kind:       "unpushed",
-			Detail:     fmt.Sprintf("%d commit(s) ahead, not on origin", sc.Ahead),
-			AgeMinutes: age,
+			Kind:         "unpushed",
+			Detail:       fmt.Sprintf("%d commit(s) ahead, not on origin", sc.Ahead),
+			AgeMinutes:   age,
+			Branch:       sc.Branch,
+			WorktreePath: sc.Dir,
+			Commits:      commits,
+			Files:        []string{},
 		})
 	}
 
@@ -391,10 +377,18 @@ func riskSignals(sc ScanResult, userCommits []Commit, dirty DirtyState, now time
 			}
 		}
 		if !committedAfter {
+			files := dirty.DirtyFiles
+			if files == nil {
+				files = []string{}
+			}
 			risks = append(risks, RiskSignal{
-				Kind:       "done-uncommitted",
-				Detail:     fmt.Sprintf("%d uncommitted file(s) since last session ended", dirty.DirtyFileCount),
-				AgeMinutes: minutesBetween(dirty.SessionEnd, now),
+				Kind:         "done-uncommitted",
+				Detail:       fmt.Sprintf("%d uncommitted file(s) since last session ended", dirty.DirtyFileCount),
+				AgeMinutes:   minutesBetween(dirty.SessionEnd, now),
+				Branch:       sc.Branch,
+				WorktreePath: sc.Dir,
+				Commits:      []RiskCommit{},
+				Files:        files,
 			})
 		}
 	}

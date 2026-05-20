@@ -30,6 +30,12 @@ type ScanResult struct {
 	Ahead    int
 	Behind   int
 	Commits  []Commit
+	// AheadCommits is the actual commit list ahead of the effective
+	// remote ref (short SHA + subject) — the evidence behind the Ahead
+	// count, so the "unpushed" risk can show WHICH commits are not on
+	// origin. Capped to aheadCommitCap, newest first. Populated by
+	// ScanRepo; always non-nil.
+	AheadCommits []RiskCommit
 }
 
 // ticketRe parses a raw ticket token from a branch name (D3: raw
@@ -76,8 +82,57 @@ func ScanRepo(dir string, since, until time.Time, userEmails map[string]bool) (S
 	res.Commits = commits
 
 	res.Ahead, res.Behind = aheadBehind(dir)
+	res.AheadCommits = aheadCommits(dir)
 	res.Ship = shipState(dir, res.Ahead, res.Behind)
 	return res, nil
+}
+
+// aheadCommitCap bounds how many ahead-commit references a scan carries
+// — enough to make the "unpushed" risk concrete without unbounded
+// payloads on a long-diverged branch.
+const aheadCommitCap = 40
+
+// aheadRef resolves the ref HEAD's "ahead" commits are measured
+// against — the same precedence aheadBehind uses: the configured
+// upstream (@{u}), else origin/<branch>, else the remote default
+// branch. Returns "" when the repo has no usable remote ref (a
+// genuinely local repo — every commit is then "ahead").
+func aheadRef(dir string) string {
+	if _, err := gitOut(dir, "rev-parse", "--verify", "--quiet", "@{u}"); err == nil {
+		return "@{u}"
+	}
+	if br, err := gitOut(dir, "rev-parse", "--abbrev-ref", "HEAD"); err == nil && br != "HEAD" {
+		if _, err := gitOut(dir, "rev-parse", "--verify", "--quiet", "origin/"+br); err == nil {
+			return "origin/" + br
+		}
+	}
+	return remoteDefaultRef(dir)
+}
+
+// aheadCommits lists the commits on HEAD not on its effective remote
+// ref — the evidence behind ScanResult.Ahead. Merges are included so
+// the list stays consistent with the Ahead count. Capped to
+// aheadCommitCap (newest first); always returns a non-nil slice.
+func aheadCommits(dir string) []RiskCommit {
+	spec := "HEAD"
+	if ref := aheadRef(dir); ref != "" {
+		spec = ref + "..HEAD"
+	}
+	out, err := gitOut(dir, "log", spec,
+		"--max-count="+strconv.Itoa(aheadCommitCap),
+		"--pretty=format:%H"+fieldSep+"%s")
+	if err != nil || strings.TrimSpace(out) == "" {
+		return []RiskCommit{}
+	}
+	commits := []RiskCommit{}
+	for _, ln := range strings.Split(out, "\n") {
+		f := strings.SplitN(ln, fieldSep, 2)
+		if len(f) != 2 {
+			continue
+		}
+		commits = append(commits, RiskCommit{SHA: shortSHA(f[0]), Subject: f[1]})
+	}
+	return commits
 }
 
 // commitSep / fieldSep are ASCII control chars unlikely to appear in a
