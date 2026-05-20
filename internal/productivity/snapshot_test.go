@@ -131,3 +131,39 @@ func TestCaptureSnapshot_NotAGitRepo(t *testing.T) {
 		t.Fatal("expected an error for a non-git directory")
 	}
 }
+
+func TestCaptureSessionSnapshots_CoversMainAndWorktrees(t *testing.T) {
+	main := t.TempDir()
+	gitCmd(t, main, "init", "-q", "-b", "main")
+	commitFile(t, main, "a.go", "package a\n", "first", "mohitpatel9753@gmail.com", time.Now().Add(-time.Hour))
+
+	wt := filepath.Join(t.TempDir(), "wt-CLI-1396")
+	gitCmd(t, main, "worktree", "add", "-q", "-b", "feat/CLI-1396", wt)
+
+	// CaptureSessionSnapshots called on EITHER the main tree or a sibling
+	// worktree must return one SnapshotData per worktree of the repo (D5).
+	snaps := CaptureSessionSnapshots(wt)
+	if len(snaps) < 2 {
+		t.Fatalf("want >= 2 snapshots (main + worktree); got %d: %+v", len(snaps), snaps)
+	}
+	branches := map[string]bool{}
+	for _, s := range snaps {
+		branches[s.Branch] = true
+	}
+	if !branches["main"] {
+		t.Errorf("missing main-tree snapshot; got branches %v", branches)
+	}
+	if !branches["feat/CLI-1396"] {
+		t.Errorf("missing worktree snapshot; got branches %v", branches)
+	}
+}
+
+func TestCaptureSessionSnapshots_NonGitDirIsEmpty(t *testing.T) {
+	// Best-effort: a non-git dir yields no snapshots and never panics.
+	if snaps := CaptureSessionSnapshots(t.TempDir()); len(snaps) != 0 {
+		t.Errorf("want 0 snapshots for a non-git dir; got %d", len(snaps))
+	}
+	if snaps := CaptureSessionSnapshots(""); len(snaps) != 0 {
+		t.Errorf("want 0 snapshots for an empty dir; got %d", len(snaps))
+	}
+}

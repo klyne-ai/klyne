@@ -70,6 +70,47 @@ func CaptureSnapshot(dir string) (SnapshotData, error) {
 	return d, nil
 }
 
+// CaptureSessionSnapshots captures a SnapshotData for the repo containing
+// dir AND every sibling worktree of that repo (spec D5/§6.1 — per-ticket
+// worktrees must be covered). It is the session-end-hook entry point: the
+// hook passes the ending session's project_path and gets back one
+// snapshot per worktree to persist.
+//
+// It is wholly best-effort: an empty/non-git dir yields an empty slice,
+// and a worktree that fails to capture is skipped — it never panics and
+// never returns an error, so the session-end hook can call it inside a
+// non-fatal path.
+func CaptureSessionSnapshots(dir string) []SnapshotData {
+	if strings.TrimSpace(dir) == "" || !insideGitWorkTree(dir) {
+		return nil
+	}
+	// Enumerate every worktree of the repo (the main checkout plus any
+	// sibling per-ticket worktrees). worktreePaths already dedups via
+	// git's own porcelain output.
+	targets := worktreePaths(dir)
+	if len(targets) == 0 {
+		// No worktree list (older git, detached state) — fall back to the
+		// directory itself so a snapshot is still recorded.
+		targets = []string{dir}
+	}
+	seen := map[string]bool{}
+	var out []SnapshotData
+	for _, wt := range targets {
+		if wt == "" || seen[wt] {
+			continue
+		}
+		seen[wt] = true
+		snap, err := CaptureSnapshot(wt)
+		if err != nil {
+			// Skip a worktree that vanished or is unreadable; the rest
+			// still produce rows (best-effort).
+			continue
+		}
+		out = append(out, snap)
+	}
+	return out
+}
+
 // dirtyFiles parses `git status --porcelain` and returns the exact count
 // of dirty (modified, staged, deleted, renamed, untracked) paths plus a
 // list of those paths bounded to snapshotMaxDirtyFiles. A git failure

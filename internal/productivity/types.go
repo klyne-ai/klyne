@@ -1,10 +1,12 @@
 // Package productivity computes the deterministic-first AI productivity
 // dashboard substrate (spec
 // docs/superpowers/specs/2026-05-19-ai-productivity-dashboard-design.md):
-// repo discovery (D5), live git scan (D6 live half), identity filter
-// (§6.3), the ship-state machine (D2/§6.5), session-anchored time
-// attribution (D1/§6.4), grouping (§6.6), the Layer-1 deterministic
-// templated narrative (§7 L1), and current-state risk signals (§6.5).
+// repo discovery (D5), live git scan (D6 live half), the session-end git
+// snapshot builder (D6 snapshot half — CaptureSnapshot /
+// CaptureSessionSnapshots), identity filter (§6.3), the ship-state
+// machine (D2/§6.5), session-anchored time attribution (D1/§6.4),
+// grouping (§6.6), the Layer-1 deterministic templated narrative (§7 L1),
+// and current-state risk signals (§6.5).
 //
 // Hard determinism boundary (spec §7.1): NOTHING in this package calls an
 // LLM. Every number, fact, ship state, and the Layer-1 narrative is
@@ -12,10 +14,9 @@
 // with `fmt` only and is structurally prevented from emitting invented
 // PR/ticket IDs (the "PR #57" regression guard).
 //
-// Prototype boundary (spec §11): this package is the substrate. The
-// session-end snapshot CAPTURE, Layer-2 reflection enrichment + the 7
-// worklog improvements, and dashboard_cache memoization are documented
-// follow-ups, NOT built here.
+// Prototype boundary (spec §11): this package is the substrate. Layer-2
+// reflection enrichment + the 7 worklog improvements, and dashboard_cache
+// memoization are documented follow-ups, NOT built here.
 package productivity
 
 import "time"

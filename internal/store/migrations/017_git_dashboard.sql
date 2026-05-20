@@ -4,17 +4,13 @@
 -- persisted as raw facts; live commit/branch/ship-state is computed at
 -- render from git (the source of truth) and is NOT normalized here.
 --
--- PROTOTYPE STUB (spec §11): the session-end SNAPSHOT CAPTURE that writes
--- git_session_snapshots rows is OUT of scope for the prototype. This
--- migration ships the TABLE only; the capture hook is a documented
--- production follow-up (spec §11, D6 snapshot half). Likewise
 -- dashboard_cache is created here but memoization is a perf follow-up —
 -- the prototype computes the report live each request.
 
 -- git_session_snapshots — point-in-time branch/HEAD/ahead-behind/dirty at
 -- session end. Essential and unreconstructable (the only way to ever know
 -- "AI task done but uncommitted at 11:30"). Written by the session-end
--- hook (PROTOTYPE STUB, spec §11).
+-- hook (internal/hooks/sessionend.go, cmd/klyne/session_end.go).
 CREATE TABLE IF NOT EXISTS git_session_snapshots (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id       TEXT,
