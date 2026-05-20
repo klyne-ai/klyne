@@ -45,7 +45,7 @@ func TestPick_FullMatrix(t *testing.T) {
 			task:         ai.TaskSummarize,
 			available:    allProviders(true, true, true),
 			wantProvider: "claude-cli",
-			wantModel:    "claude-haiku-4",
+			wantModel:    "claude-haiku-4-5",
 		},
 		{
 			name:         "Summarize/no-claude → codex-cli wins",
@@ -74,7 +74,7 @@ func TestPick_FullMatrix(t *testing.T) {
 			task:         ai.TaskTitle,
 			available:    allProviders(true, true, true),
 			wantProvider: "claude-cli",
-			wantModel:    "claude-haiku-4",
+			wantModel:    "claude-haiku-4-5",
 		},
 		{
 			name:         "Title/no-claude → codex-cli (nano) wins",

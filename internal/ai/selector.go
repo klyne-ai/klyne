@@ -54,8 +54,8 @@ var preferenceTable = map[TaskKind][]preferenceEntry{
 	TaskSummarize: {
 		{
 			provider: "claude-cli",
-			model:    "claude-haiku-4",
-			reason:   "Claude CLI (haiku-4) picked: your Claude Code subscription, no API key",
+			model:    "claude-haiku-4-5",
+			reason:   "Claude CLI (haiku-4-5) picked: your Claude Code subscription, no API key",
 		},
 		{
 			provider: "codex-cli",
@@ -71,8 +71,8 @@ var preferenceTable = map[TaskKind][]preferenceEntry{
 	TaskTitle: {
 		{
 			provider: "claude-cli",
-			model:    "claude-haiku-4",
-			reason:   "Claude CLI (haiku-4) picked: lightweight, your Claude Code subscription",
+			model:    "claude-haiku-4-5",
+			reason:   "Claude CLI (haiku-4-5) picked: lightweight, your Claude Code subscription",
 		},
 		{
 			provider: "codex-cli",

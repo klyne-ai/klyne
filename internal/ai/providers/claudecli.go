@@ -22,14 +22,23 @@ import (
 
 const claudeCLIBinary = "claude"
 
-// defaultClaudeCLIModels is the curated list shown in the wizard UI.
-// These pass through to `claude --model <id>` and match the CLI's
-// accepted aliases.
+// defaultClaudeCLIModels lists model identifiers the `claude` CLI
+// accepts via --model. These are the canonical names (point-release
+// suffix included) that the CLI's model registry actually resolves —
+// shorter aliases like "haiku" also work but the explicit form is
+// portable across releases.
 var defaultClaudeCLIModels = []string{
 	"claude-opus-4-5",
 	"claude-sonnet-4-6",
-	"claude-haiku-4",
+	"claude-haiku-4-5",
 }
+
+// defaultNeutralSystemPrompt replaces the CLI's default agentic
+// system prompt for our non-interactive Chat calls. Without this,
+// `claude --print` thinks it's helping a developer in their CWD and
+// answers conversationally ("What would you like to work on?")
+// instead of obeying the structured prompt the caller sent.
+const defaultNeutralSystemPrompt = "You are a model-as-a-service backend. Follow the user's prompt exactly. Reply with only the requested output (JSON / text / code) — no preamble, no explanation, no follow-up questions."
 
 // ClaudeCLIOpts configures a ClaudeCLI provider instance.
 type ClaudeCLIOpts struct {
@@ -79,12 +88,17 @@ func (c *ClaudeCLI) Chat(ctx context.Context, req ai.ChatRequest) (*ai.ChatRespo
 		return nil, errors.New("claude-cli: empty prompt")
 	}
 
-	args := []string{"--print"}
+	// --system-prompt (not --append-system-prompt) replaces the CLI's
+	// default agentic system prompt so the model treats this call as a
+	// raw inference request instead of an interactive coding session.
+	sys := req.SystemPrompt
+	if sys == "" {
+		sys = defaultNeutralSystemPrompt
+	}
+
+	args := []string{"--print", "--system-prompt", sys}
 	if req.Model != "" {
 		args = append(args, "--model", req.Model)
-	}
-	if req.SystemPrompt != "" {
-		args = append(args, "--append-system-prompt", req.SystemPrompt)
 	}
 	args = append(args, "--", prompt)
 

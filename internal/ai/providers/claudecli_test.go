@@ -29,7 +29,7 @@ func TestClaudeCLI_Chat_HappyPath(t *testing.T) {
 	p := providers.NewClaudeCLI(providers.ClaudeCLIOpts{Binary: stub})
 
 	resp, err := p.Chat(context.Background(), ai.ChatRequest{
-		Model: "claude-haiku-4",
+		Model: "claude-haiku-4-5",
 		Messages: []ai.Message{
 			{Role: "user", Content: "say hi"},
 		},
@@ -40,7 +40,7 @@ func TestClaudeCLI_Chat_HappyPath(t *testing.T) {
 	if resp.Text != "hello from the stub" {
 		t.Errorf("Text = %q, want %q", resp.Text, "hello from the stub")
 	}
-	if resp.Model != "claude-haiku-4" {
+	if resp.Model != "claude-haiku-4-5" {
 		t.Errorf("Model echoed: %q", resp.Model)
 	}
 }
@@ -68,7 +68,7 @@ for a in "$@"; do echo "ARG:$a"; done
 		"ARG:--print",
 		"ARG:--model",
 		"ARG:claude-sonnet-4-6",
-		"ARG:--append-system-prompt",
+		"ARG:--system-prompt",
 		"ARG:you are terse",
 		"ARG:--",
 		"ARG:the prompt body",
@@ -76,6 +76,26 @@ for a in "$@"; do echo "ARG:$a"; done
 		if !contains(out, want) {
 			t.Errorf("stub argv missing %q in:\n%s", want, out)
 		}
+	}
+}
+
+func TestClaudeCLI_Chat_DefaultSystemPromptWhenEmpty(t *testing.T) {
+	// When the caller doesn't set SystemPrompt, the CLI provider must
+	// still pass a neutral one so `claude --print` doesn't fall into
+	// its default agentic-coding-assistant mode.
+	stub := writeStubCLI(t, `#!/bin/sh
+for a in "$@"; do echo "ARG:$a"; done
+`)
+	p := providers.NewClaudeCLI(providers.ClaudeCLIOpts{Binary: stub})
+
+	resp, err := p.Chat(context.Background(), ai.ChatRequest{
+		Messages: []ai.Message{{Role: "user", Content: "x"}},
+	})
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	if !contains(resp.Text, "ARG:--system-prompt") {
+		t.Errorf("expected --system-prompt in argv even when empty:\n%s", resp.Text)
 	}
 }
 

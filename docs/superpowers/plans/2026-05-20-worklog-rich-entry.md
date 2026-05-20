@@ -888,6 +888,67 @@ Sketched so reviewers can pressure-test the overall architecture, but not yet sl
 - Continue dual-writing during transition for read-side safety
 - Migration 020 (much later, separate decision) drops `ai_drafted_summary` after grep confirms zero readers
 
+### Phase 9 — CLI subprocess providers (no separate API key)
+
+**Why:** Klyne's product promise is "no separate API key — use your
+existing Claude Code / Codex subscription". The rich-entry writer
+landing in Phases 4–5 would have broken that promise: it called the
+shared AI runner, which dispatched to the Anthropic / OpenAI / Gemini
+providers, which required `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` /
+`GEMINI_API_KEY` env vars. With the worker enabled, a fresh klyne
+install would have silently failed every rich-entry call because no
+key was set. We had to rip the env-var path before merging the
+worker to `init`.
+
+**What changed:**
+- New `providers.ClaudeCLI` — wraps `claude --print --system-prompt
+  <neutral> --model <id> -- <prompt>`. `--system-prompt` (not
+  `--append-system-prompt`) is critical: it replaces the CLI's default
+  agentic-coding-assistant system prompt with a neutral
+  "model-as-a-service" one, so the model treats the call as raw
+  inference instead of replying conversationally ("what would you
+  like to work on?"). Auth flows through the user's existing Claude
+  Code OAuth/keychain session — we never touch `~/.claude` directly
+  (spec §8 enforcement is preserved; the subprocess handles auth on
+  our behalf).
+- New `providers.CodexCLI` — same shape, wrapping `codex exec`.
+  Written without a local install; gated by `which codex` in detect.
+- `detect.go` rewritten: env-var checks gone, replaced by
+  `exec.LookPath` probes for `claude` and `codex`. Gemini dropped
+  entirely (no first-party CLI exists).
+- Selector preference table flattened to 3 providers:
+  - Summarize/Title: claude-cli (haiku-4-5) → codex-cli → ollama
+  - Embed: ollama only (no CLI provider supports embeddings; Embed
+    isn't called in production today anyway)
+- `app.buildProvider` switched to wire the new names; legacy
+  `"anthropic"`/`"openai"`/`"gemini"` no longer resolve.
+- `breakAdviceCallTimeout` bumped 8s → 30s to absorb the CLI cold-
+  start latency (Node.js startup + auth resolution = ~5–10s on this
+  machine).
+- Legacy `anthropic.go` / `openai.go` / `gemini.go` and their tests
+  deleted — there is no second path; the CLI subprocess IS the
+  Anthropic/OpenAI path now.
+
+**End-to-end validation:**
+- The throwaway `/tmp/klyne-proto-home/.klyne/klyne.db` carried 255
+  rows at `verdict='pending', attempts=3` from prior failed attempts
+  under the broken env-var providers — they had hit the retry cap
+  because no API key was set. Reset a 5-row subset to `attempts=0`,
+  restarted protoserve, watched the worker drain them via the new
+  ClaudeCLI provider, confirmed the rendered "What was done" section
+  on the dashboard.
+
+**Tradeoffs / known limits:**
+- Per-call latency is dominated by CLI startup (~5–10s) instead of
+  HTTP round-trip (~500ms). For the rich-entry writer this is fine —
+  it's a background worker on a 30s tick. For interactive endpoints
+  (break-advice) it forces the timeout bump.
+- Embedding tasks lose the cloud path. Production didn't have any
+  embedding callsites, so the impact is zero today.
+- If the user uninstalls `claude` / `codex`, every cloud task falls
+  through to Ollama (when running) or to noopProvider (when not).
+  The detect-result reasons surface this clearly in the wizard UI.
+
 ---
 
 ## Self-review
