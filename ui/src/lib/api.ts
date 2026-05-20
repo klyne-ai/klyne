@@ -416,8 +416,32 @@ export interface ProductivityReport {
   services: ProductivityService[];
   reflection_status: string;
   nudge: string;
-  /** Report-wide per-CLI AI time roll-up (cli -> merged active minutes). */
+  /**
+   * Headline AI time: the GLOBAL union of every session's active
+   * wall-clock intervals across ALL repos in the window — true elapsed
+   * wall-clock, structurally <= 24h/day. NOT the sum of the per-Service
+   * unions (that double-counts parallel cross-repo agents).
+   */
+  total_active_minutes: number;
+  /**
+   * Per-CLI GLOBAL union (cli -> that CLI's all-repo wall-clock union),
+   * NOT the sum of per-Service minutes_by_cli. When both CLIs ran at
+   * once claude + codex may slightly exceed total_active_minutes —
+   * expected.
+   */
   minutes_by_cli: Record<string, number>;
+  /**
+   * Deterministic per-session proof-of-work breakdown: every
+   * contributing session in the window, sorted by started_at — the
+   * evidence behind total_active_minutes.
+   */
+  sessions: ProductivitySessionStat[];
+  /**
+   * Optional overall worklog reflection narrative (body_md). Empty when
+   * there is no single sensible project-agnostic reflection; per-Service
+   * reflection_markdown carries the per-repo body.
+   */
+  reflection_markdown?: string;
 }
 export interface ProductivityService {
   repo: string;
@@ -432,6 +456,29 @@ export interface ProductivityService {
    * once — expected.
    */
   minutes_by_cli: Record<string, number>;
+  /**
+   * Worklog reflection body (markdown) for this repo on the report's
+   * day — the worklog's own account of what was done. Empty when no
+   * reflection exists for the project+day.
+   */
+  reflection_markdown: string;
+}
+/**
+ * One session's proof-of-work contribution to the headline AI time.
+ * Mirrors Go productivity.SessionStat.
+ */
+export interface ProductivitySessionStat {
+  session_id: string;
+  cli: string;
+  /** Repo/Service the session is attributed to (derived from project_path). */
+  repo: string;
+  /** First in-window message timestamp (RFC3339). */
+  started_at: string;
+  /** Last in-window message timestamp (RFC3339). */
+  ended_at: string;
+  /** This session's own gap-capped active total, in minutes. */
+  active_minutes: number;
+  message_count: number;
 }
 export interface ProductivityBranch {
   name: string;
