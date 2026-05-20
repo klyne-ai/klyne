@@ -55,6 +55,20 @@ func (a *App) startRichEntryWorker(ctx context.Context) {
 		return
 	}
 
+	// 30-day backfill: rows that hit the retry cap under an earlier
+	// provider configuration (e.g. the broken env-var path before the
+	// CLI-subprocess providers landed) sit at `verdict='pending',
+	// attempts >= cap` forever — invisible to the worker queue. On
+	// each daemon start, reset attempts to 0 for any such row within
+	// the last 30 days so the worker re-tries them once. Bounded one-
+	// shot: rows that fail again three times return to the same
+	// terminal state until the next restart.
+	if reset, err := resetStaleAttempts(ctx, a.db, 30*24*time.Hour); err == nil && reset > 0 {
+		a.logger.Info("rich-entry backfill: reset attempts on stale-cap rows",
+			slog.Int("rows", reset),
+			slog.Duration("window", 30*24*time.Hour))
+	}
+
 	// Surface the pending queue depth at startup so the operator can
 	// see "the worker has N rows to process" without poking at the DB.
 	// Cheap one-row aggregate; per-row processing logs are tick-scoped.
@@ -78,6 +92,38 @@ func (a *App) startRichEntryWorker(ctx context.Context) {
 			a.logger.Warn("rich-entry worker exited", slog.Any("error", err))
 		}
 	}()
+}
+
+// resetStaleAttempts is the daemon's one-shot 30-day backfill hook.
+//
+// Why: a row at `verdict='pending', attempts >= MaxWorklogAttempts`
+// will never be re-tried by the worker queue (its predicate is
+// `attempts < cap`). Rows can land in that state under benign
+// conditions — e.g. the user reconfigured the AI provider after the
+// worker burned three failed retries, or a transient outage exhausted
+// the budget. On each daemon start, walk the last `window` of rows
+// and reset `attempts=0` for the stuck ones so the new provider gets
+// a fresh chance.
+//
+// Bounded one-shot per restart: rows that fail again three times
+// return to the terminal state until the operator restarts again
+// (idempotent on the second start if nothing has changed).
+//
+// Returns the count of rows reset.
+func resetStaleAttempts(ctx context.Context, db *store.DB, window time.Duration) (int, error) {
+	cutoff := time.Now().Add(-window).UnixMilli()
+	const q = `
+UPDATE stop_summaries
+   SET worklog_attempts = 0
+ WHERE worklog_gate_verdict = 'pending'
+   AND worklog_attempts >= 3
+   AND ts >= ?`
+	res, err := db.Write().ExecContext(ctx, q, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
 }
 
 // pendingQueueCount returns how many stop_summaries rows are still

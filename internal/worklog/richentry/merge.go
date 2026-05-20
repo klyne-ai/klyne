@@ -55,6 +55,22 @@ func MergeDay(ctx context.Context, db *store.DB, projectPath string, day time.Ti
 	return MergeMarkdown(rows), nil
 }
 
+// MergeDayAll renders the report-level "What was done" — every
+// admitted rich entry across all projects on `day` merged into one
+// block. Each bullet's renderItem includes the source repo prefix
+// (see renderItem) so a multi-service day reads cleanly as one
+// timeline. Returns ("", nil) on a day with no admitted entries.
+func MergeDayAll(ctx context.Context, db *store.DB, day time.Time) (string, error) {
+	rows, err := store.ListWorklogEntriesForDayAll(ctx, db, day)
+	if err != nil {
+		return "", err
+	}
+	if len(rows) == 0 {
+		return "", nil
+	}
+	return MergeMarkdown(rows), nil
+}
+
 // MergeMarkdown is the pure renderer — takes the day's loaded entries
 // and emits the section/bullet markdown. Exported so tests can drive
 // it without a real DB.
@@ -97,11 +113,18 @@ func MergeMarkdown(rows []store.DayEntry) string {
 }
 
 // renderItem turns one WorklogItem into a markdown bullet.
-// Shape: "- {summary} [{ticket}] (`{refs}`)" — pieces that are empty
-// are omitted. Refs are joined by ", " inside one inline-code span.
+// Shape: "- **{repo}** — {summary} [{ticket}] (`{refs}`)" — pieces
+// that are empty are omitted. The repo prefix is the writer's
+// `repo` field on the item; when entries from multiple services
+// merge into one day's "What was done" the prefix is what tells
+// the reader which codebase a bullet belongs to. Refs are joined
+// by ", " inside one inline-code span.
 func renderItem(it store.WorklogItem) string {
 	var sb strings.Builder
 	sb.WriteString("- ")
+	if r := strings.TrimSpace(it.Repo); r != "" {
+		fmt.Fprintf(&sb, "**%s** — ", r)
+	}
 	sb.WriteString(strings.TrimSpace(it.Summary))
 	if t := strings.TrimSpace(it.Ticket); t != "" {
 		fmt.Fprintf(&sb, " [%s]", t)

@@ -358,6 +358,39 @@ SELECT session_id, ts, worklog_entry_json
 	return out, rows.Err()
 }
 
+// ListWorklogEntriesForDayAll is the cross-project variant of
+// ListWorklogEntriesForDay: returns every admitted rich entry across
+// all projects on `day`, in chronological order. The Phase 7
+// dashboard's REPORT-level "What was done" is built from this — a
+// single day-wide merge that names each bullet's source repo so the
+// reader can follow which codebase a line came from.
+func ListWorklogEntriesForDayAll(ctx context.Context, db *DB, day time.Time) ([]DayEntry, error) {
+	const q = `
+SELECT session_id, ts, worklog_entry_json
+  FROM stop_summaries
+ WHERE date(ts / 1000, 'unixepoch', 'localtime') = ?
+   AND worklog_gate_verdict LIKE 'admitted-%'
+ ORDER BY ts ASC`
+	dayStr := day.Format("2006-01-02")
+	rows, err := db.Read().QueryContext(ctx, q, dayStr)
+	if err != nil {
+		return nil, fmt.Errorf("store: list day worklog entries (all): %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+
+	var out []DayEntry
+	for rows.Next() {
+		var d DayEntry
+		var raw string
+		if err := rows.Scan(&d.SessionID, &d.Ts, &raw); err != nil {
+			return nil, fmt.Errorf("store: scan day entry (all): %w", err)
+		}
+		_ = json.Unmarshal([]byte(raw), &d.Entry)
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
 // IncrementWorklogAttempts bumps worklog_attempts by 1 and sets the
 // verdict, leaving everything else (the deterministic body, the 015
 // worklog metadata, the rich entry_json) untouched. Used by the
