@@ -69,6 +69,31 @@
     onChange(r.since, r.until);
   }
 
+  // Detect which preset the CURRENT range matches so we can visually
+  // highlight the corresponding button. Date-based (not exact-epoch)
+  // so a "Today" pick stays highlighted as `until=now` drifts during
+  // the day.
+  const activePreset = $derived.by(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const sevenAgo = new Date(today);
+    sevenAgo.setDate(sevenAgo.getDate() - 6);
+
+    const sd = new Date(since);
+    const ud = new Date(until);
+    const sameDate = (a: Date, b: Date) =>
+      a.getFullYear() === b.getFullYear() &&
+      a.getMonth() === b.getMonth() &&
+      a.getDate() === b.getDate();
+
+    if (sameDate(sd, today) && sameDate(ud, today)) return 'today';
+    if (sameDate(sd, yesterday) && sameDate(ud, yesterday)) return 'yesterday';
+    if (sameDate(sd, sevenAgo) && sameDate(ud, today)) return 'last7';
+    return null;
+  });
+
   // ---- date input change --------------------------------------------------
 
   function onFromChange(e: Event): void {
@@ -145,13 +170,31 @@
   </div>
 
   <div class="rb-presets" role="group" aria-label="Quick range presets">
-    <button type="button" class="rb-preset" onclick={() => applyPreset(todayRange())}>
+    <button
+      type="button"
+      class="rb-preset"
+      class:rb-preset--active={activePreset === 'today'}
+      aria-pressed={activePreset === 'today'}
+      onclick={() => applyPreset(todayRange())}
+    >
       Today
     </button>
-    <button type="button" class="rb-preset" onclick={() => applyPreset(yesterdayRange())}>
+    <button
+      type="button"
+      class="rb-preset"
+      class:rb-preset--active={activePreset === 'yesterday'}
+      aria-pressed={activePreset === 'yesterday'}
+      onclick={() => applyPreset(yesterdayRange())}
+    >
       Yesterday
     </button>
-    <button type="button" class="rb-preset" onclick={() => applyPreset(lastNDaysRange(7))}>
+    <button
+      type="button"
+      class="rb-preset"
+      class:rb-preset--active={activePreset === 'last7'}
+      aria-pressed={activePreset === 'last7'}
+      onclick={() => applyPreset(lastNDaysRange(7))}
+    >
       Last 7 days
     </button>
   </div>
@@ -247,11 +290,21 @@
     border-radius: 6px;
     padding: 4px 9px;
     cursor: pointer;
-    transition: background 100ms ease, color 100ms ease;
+    transition: background 100ms ease, color 100ms ease, border-color 100ms ease;
   }
   .rb-preset:hover {
     background: var(--ad-bg-2);
     color: var(--ad-fg);
+  }
+  /* Active preset: the current range matches this preset's window. */
+  .rb-preset--active {
+    color: var(--ad-fg);
+    font-weight: 600;
+    background: color-mix(in oklch, var(--ad-codex) 16%, transparent);
+    border-color: color-mix(in oklch, var(--ad-codex) 40%, var(--ad-border));
+  }
+  .rb-preset--active:hover {
+    background: color-mix(in oklch, var(--ad-codex) 22%, transparent);
   }
 
   .rb-loaded {
