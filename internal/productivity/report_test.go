@@ -7,10 +7,13 @@ import (
 	"time"
 )
 
-type fakeReflections struct{ has bool }
+type fakeReflections struct {
+	has  bool
+	body string
+}
 
-func (f fakeReflections) HasReflection(_ context.Context, _ string, _ time.Time) (bool, error) {
-	return f.has, nil
+func (f fakeReflections) HasReflection(_ context.Context, _ string, _ time.Time) (bool, string, error) {
+	return f.has, f.body, nil
 }
 
 func TestBuildReport_RisksNarrativeAndReflectionStatus(t *testing.T) {
@@ -266,9 +269,28 @@ func TestBuildBranches_ShipSpanSingleCommitIsZero(t *testing.T) {
 
 // TestBuildReport_MinutesByCLI checks Change 2 surfacing: RepoTime.ByCLI
 // must reach the API as Service.MinutesByCLI (Service-level: time is
-// repo-scoped, not branch-scoped) and roll up into Report.MinutesByCLI.
+// repo-scoped, not branch-scoped). Per-Service MinutesByCLI stays the
+// per-repo union; Report.MinutesByCLI is the per-CLI GLOBAL union
+// (Change 1) computed from ReportInput.Sessions, NOT the sum of
+// per-Service values.
 func TestBuildReport_MinutesByCLI(t *testing.T) {
-	now := time.Date(2026, 5, 19, 16, 0, 0, 0, time.UTC)
+	day := time.Date(2026, 5, 19, 0, 0, 0, 0, time.UTC)
+	now := day.Add(16 * time.Hour)
+	mk := func(startH, spanMin int) []time.Time {
+		var out []time.Time
+		for m := 0; m <= spanMin; m += 10 {
+			out = append(out, day.Add(time.Duration(startH)*time.Hour+time.Duration(m)*time.Minute))
+		}
+		return out
+	}
+	// /r/a: claude session 09:00-10:00 (60m), codex session 09:00-09:30
+	// (30m). /r/b: claude session 14:00-14:30 (30m).
+	sessions := []SessionActivity{
+		{SessionID: "a-claude", ProjectPath: "/r/a", CLI: "claude", MessageTimes: mk(9, 60)},
+		{SessionID: "a-codex", ProjectPath: "/r/a", CLI: "codex", MessageTimes: mk(9, 30)},
+		{SessionID: "b-claude", ProjectPath: "/r/b", CLI: "claude", MessageTimes: mk(14, 30)},
+	}
+	attrib := AttributeMinutes(sessions, map[string]int{"/r/a": 1, "/r/b": 1}, 30)
 	in := ReportInput{
 		Day: "2026-05-19",
 		Now: now,
@@ -282,11 +304,9 @@ func TestBuildReport_MinutesByCLI(t *testing.T) {
 				Commits: []Commit{{SHA: "bbbbbbbb", Subject: "b work", CommittedAt: now, IsUser: true}},
 			},
 		},
-		Attribution: map[string]RepoTime{
-			"/r/a": {AIMinutes: 100, ByCLI: map[string]int{"claude": 80, "codex": 40}},
-			"/r/b": {AIMinutes: 30, ByCLI: map[string]int{"claude": 30}},
-		},
+		Attribution:  attrib,
 		ProjectPaths: map[string]string{"/r/a": "/r/a", "/r/b": "/r/b"},
+		Sessions:     sessions,
 	}
 	rep, err := BuildReport(context.Background(), in, fakeReflections{has: false})
 	if err != nil {
@@ -296,20 +316,238 @@ func TestBuildReport_MinutesByCLI(t *testing.T) {
 	for _, s := range rep.Services {
 		byPath[s.ProjectPath] = s
 	}
+	// /r/a per-repo union: claude 60m, codex 30m (each its own lane).
 	a := byPath["/r/a"]
-	if a.MinutesByCLI["claude"] != 80 || a.MinutesByCLI["codex"] != 40 {
-		t.Errorf("/r/a MinutesByCLI = %v; want claude:80 codex:40", a.MinutesByCLI)
+	if a.MinutesByCLI["claude"] != 60 || a.MinutesByCLI["codex"] != 30 {
+		t.Errorf("/r/a MinutesByCLI = %v; want claude:60 codex:30", a.MinutesByCLI)
 	}
 	b := byPath["/r/b"]
 	if b.MinutesByCLI["claude"] != 30 {
 		t.Errorf("/r/b MinutesByCLI = %v; want claude:30", b.MinutesByCLI)
 	}
-	// Report-level rollup: claude 80+30=110, codex 40.
-	if rep.MinutesByCLI["claude"] != 110 {
-		t.Errorf("Report.MinutesByCLI[claude] = %d; want 110", rep.MinutesByCLI["claude"])
+	// Report-level per-CLI GLOBAL union: claude ran /r/a 09:00-10:00 +
+	// /r/b 14:00-14:30 (disjoint) = 90m. codex ran /r/a 09:00-09:30 = 30m.
+	if rep.MinutesByCLI["claude"] != 90 {
+		t.Errorf("Report.MinutesByCLI[claude] = %d; want 90 (global union)", rep.MinutesByCLI["claude"])
 	}
-	if rep.MinutesByCLI["codex"] != 40 {
-		t.Errorf("Report.MinutesByCLI[codex] = %d; want 40", rep.MinutesByCLI["codex"])
+	if rep.MinutesByCLI["codex"] != 30 {
+		t.Errorf("Report.MinutesByCLI[codex] = %d; want 30 (global union)", rep.MinutesByCLI["codex"])
+	}
+}
+
+// TestBuildReport_TotalActiveMinutesGlobalUnion is the Change 1
+// report-level regression guard: 3 sessions across 2 different repos
+// with overlapping wall-clock must yield a report TotalActiveMinutes
+// equal to the global union span, STRICTLY LESS than the sum of the
+// per-repo (per-Service) unions. Report.MinutesByCLI must also be the
+// per-CLI GLOBAL union, not the sum of per-Service MinutesByCLI.
+func TestBuildReport_TotalActiveMinutesGlobalUnion(t *testing.T) {
+	day := time.Date(2026, 5, 19, 0, 0, 0, 0, time.UTC)
+	now := day.Add(13 * time.Hour)
+	mk := func(startH, startMin, spanMin int) []time.Time {
+		var out []time.Time
+		base := day.Add(time.Duration(startH)*time.Hour + time.Duration(startMin)*time.Minute)
+		for m := 0; m <= spanMin; m += 10 {
+			out = append(out, base.Add(time.Duration(m)*time.Minute))
+		}
+		return out
+	}
+	// repo /a: one session 09:00-11:00 (120m, claude).
+	// repo /b: two sessions, 10:00-12:00 (120m, codex) + 11:30-12:30 (60m, claude).
+	// Per-repo unions: /a = 120, /b = 150 → sum-of-services = 270.
+	// Global union = 09:00..12:30 = 210m, strictly < 270.
+	sessions := []SessionActivity{
+		{SessionID: "a1", ProjectPath: "/a", CLI: "claude", MessageTimes: mk(9, 0, 120)},
+		{SessionID: "b1", ProjectPath: "/b", CLI: "codex", MessageTimes: mk(10, 0, 120)},
+		{SessionID: "b2", ProjectPath: "/b", CLI: "claude", MessageTimes: mk(11, 30, 60)},
+	}
+	commitCounts := map[string]int{"/a": 1, "/b": 1}
+	attrib := AttributeMinutes(sessions, commitCounts, 30)
+
+	in := ReportInput{
+		Day: "2026-05-19",
+		Now: now,
+		Scans: []ScanResult{
+			{Repo: "a", Dir: "/a", Branch: "main", Ship: ShipLocal, Ahead: 1,
+				Commits: []Commit{{SHA: "aaaaaaaa", Subject: "a work", CommittedAt: now, IsUser: true}}},
+			{Repo: "b", Dir: "/b", Branch: "main", Ship: ShipLocal, Ahead: 1,
+				Commits: []Commit{{SHA: "bbbbbbbb", Subject: "b work", CommittedAt: now, IsUser: true}}},
+		},
+		Attribution:  attrib,
+		ProjectPaths: map[string]string{"/a": "/a", "/b": "/b"},
+		Sessions:     sessions,
+	}
+	rep, err := BuildReport(context.Background(), in, fakeReflections{has: false})
+	if err != nil {
+		t.Fatalf("BuildReport: %v", err)
+	}
+
+	if rep.TotalActiveMinutes != 210 {
+		t.Errorf("Report.TotalActiveMinutes = %d; want 210 (global union 09:00..12:30)", rep.TotalActiveMinutes)
+	}
+
+	// Sum of per-Service unions must be STRICTLY GREATER than the headline.
+	sumServices := 0
+	for _, svc := range rep.Services {
+		for _, b := range svc.Branches {
+			sumServices += b.AttributedMinutes
+		}
+	}
+	if sumServices <= rep.TotalActiveMinutes {
+		t.Errorf("sum of per-Service AttributedMinutes = %d; want STRICTLY > headline %d",
+			sumServices, rep.TotalActiveMinutes)
+	}
+	if sumServices != 270 {
+		t.Errorf("sum of per-Service AttributedMinutes = %d; want 270 (/a 120 + /b 150)", sumServices)
+	}
+
+	// Report.MinutesByCLI is the per-CLI GLOBAL union, not the sum of
+	// per-Service MinutesByCLI. claude ran a1 (09:00-11:00) + b2
+	// (11:30-12:30) disjoint = 180m. codex ran b1 (10:00-12:00) = 120m.
+	if rep.MinutesByCLI["claude"] != 180 {
+		t.Errorf("Report.MinutesByCLI[claude] = %d; want 180 (global union)", rep.MinutesByCLI["claude"])
+	}
+	if rep.MinutesByCLI["codex"] != 120 {
+		t.Errorf("Report.MinutesByCLI[codex] = %d; want 120 (global union)", rep.MinutesByCLI["codex"])
+	}
+
+	// Per-Service MinutesByCLI keeps the per-repo union (lanes that may
+	// overlap) — /b's claude session b2 is its own 60m union.
+	byPath := map[string]Service{}
+	for _, s := range rep.Services {
+		byPath[s.ProjectPath] = s
+	}
+	if byPath["/b"].MinutesByCLI["claude"] != 60 {
+		t.Errorf("/b Service.MinutesByCLI[claude] = %d; want 60 (per-repo union preserved)",
+			byPath["/b"].MinutesByCLI["claude"])
+	}
+}
+
+// TestBuildReport_SessionsProofOfWork checks Change 2: every
+// contributing session appears in Report.Sessions, sorted by StartedAt,
+// each with its own gap-capped ActiveMinutes, message count, repo, and
+// start/end anchors — the deterministic evidence behind the headline.
+func TestBuildReport_SessionsProofOfWork(t *testing.T) {
+	day := time.Date(2026, 5, 19, 0, 0, 0, 0, time.UTC)
+	now := day.Add(15 * time.Hour)
+	mk := func(startH, spanMin int) []time.Time {
+		var out []time.Time
+		for m := 0; m <= spanMin; m += 10 {
+			out = append(out, day.Add(time.Duration(startH)*time.Hour+time.Duration(m)*time.Minute))
+		}
+		return out
+	}
+	// Deliberately out of start order so the sort is exercised.
+	sessions := []SessionActivity{
+		{SessionID: "later", ProjectPath: "/r/a", CLI: "codex", MessageTimes: mk(14, 30), MessageCount: 9},
+		{SessionID: "earlier", ProjectPath: "/r/a", CLI: "claude", MessageTimes: mk(9, 60), MessageCount: 7},
+	}
+	in := ReportInput{
+		Day: "2026-05-19",
+		Now: now,
+		Scans: []ScanResult{{
+			Repo: "svc-a", Dir: "/r/a", Branch: "main", Ship: ShipLocal, Ahead: 1,
+			Commits: []Commit{{SHA: "aaaaaaaa", Subject: "a work", CommittedAt: now, IsUser: true}},
+		}},
+		Attribution:  AttributeMinutes(sessions, map[string]int{"/r/a": 1}, 30),
+		ProjectPaths: map[string]string{"/r/a": "/r/a"},
+		Sessions:     sessions,
+	}
+	rep, err := BuildReport(context.Background(), in, fakeReflections{has: false})
+	if err != nil {
+		t.Fatalf("BuildReport: %v", err)
+	}
+	if len(rep.Sessions) != 2 {
+		t.Fatalf("len(Sessions) = %d; want 2", len(rep.Sessions))
+	}
+	// Sorted by StartedAt: "earlier" (09:00) first.
+	if rep.Sessions[0].SessionID != "earlier" {
+		t.Errorf("Sessions[0] = %q; want earlier (sorted by started_at)", rep.Sessions[0].SessionID)
+	}
+	e := rep.Sessions[0]
+	if e.ActiveMinutes != 60 {
+		t.Errorf("earlier ActiveMinutes = %d; want 60", e.ActiveMinutes)
+	}
+	if e.MessageCount != 7 {
+		t.Errorf("earlier MessageCount = %d; want 7", e.MessageCount)
+	}
+	if e.CLI != "claude" {
+		t.Errorf("earlier CLI = %q; want claude", e.CLI)
+	}
+	if e.Repo == "" {
+		t.Errorf("earlier Repo is empty; want a repo name derived from project_path")
+	}
+	if !e.StartedAt.Equal(day.Add(9*time.Hour)) {
+		t.Errorf("earlier StartedAt = %v; want 09:00", e.StartedAt)
+	}
+	if !e.EndedAt.Equal(day.Add(10*time.Hour)) {
+		t.Errorf("earlier EndedAt = %v; want 10:00", e.EndedAt)
+	}
+	l := rep.Sessions[1]
+	if l.SessionID != "later" || l.ActiveMinutes != 30 {
+		t.Errorf("later = %+v; want id=later ActiveMinutes=30", l)
+	}
+	// Headline TotalActiveMinutes = global union 09:00-10:00 + 14:00-14:30
+	// (disjoint) = 90m, and the SessionStat active totals corroborate it.
+	if rep.TotalActiveMinutes != 90 {
+		t.Errorf("TotalActiveMinutes = %d; want 90", rep.TotalActiveMinutes)
+	}
+}
+
+// TestBuildReport_ReflectionMarkdownSurfaced checks Change 3: when a
+// reflection exists, its body_md narrative is surfaced on the matching
+// Service.ReflectionMarkdown and on Report.ReflectionMarkdown.
+func TestBuildReport_ReflectionMarkdownSurfaced(t *testing.T) {
+	now := time.Date(2026, 5, 19, 12, 0, 0, 0, time.UTC)
+	body := "## What I did\n- shipped the lab pipeline\n"
+	in := ReportInput{
+		Day: "2026-05-19",
+		Now: now,
+		Scans: []ScanResult{{
+			Repo: "oms-service", Dir: "/r/oms", Branch: "main", Ship: ShipMerged,
+			Commits: []Commit{{SHA: "12345678", Subject: "merge work", CommittedAt: now, IsUser: true}},
+		}},
+		Attribution:  map[string]RepoTime{"/r/oms": {AIMinutes: 30}},
+		ProjectPaths: map[string]string{"/r/oms": "/r/oms"},
+	}
+	rep, err := BuildReport(context.Background(), in, fakeReflections{has: true, body: body})
+	if err != nil {
+		t.Fatalf("BuildReport: %v", err)
+	}
+	if rep.Services[0].ReflectionMarkdown != body {
+		t.Errorf("Service.ReflectionMarkdown = %q; want %q", rep.Services[0].ReflectionMarkdown, body)
+	}
+	if rep.ReflectionMarkdown != body {
+		t.Errorf("Report.ReflectionMarkdown = %q; want %q", rep.ReflectionMarkdown, body)
+	}
+	if rep.ReflectionStatus != "current" {
+		t.Errorf("ReflectionStatus = %q; want current", rep.ReflectionStatus)
+	}
+}
+
+// TestBuildReport_NoReflectionEmptyMarkdown checks Change 3 edge: with
+// no reflection, ReflectionMarkdown is empty on both Service and Report.
+func TestBuildReport_NoReflectionEmptyMarkdown(t *testing.T) {
+	now := time.Date(2026, 5, 19, 12, 0, 0, 0, time.UTC)
+	in := ReportInput{
+		Day: "2026-05-19",
+		Now: now,
+		Scans: []ScanResult{{
+			Repo: "oms-service", Dir: "/r/oms", Branch: "main", Ship: ShipMerged,
+			Commits: []Commit{{SHA: "12345678", Subject: "merge work", CommittedAt: now, IsUser: true}},
+		}},
+		Attribution:  map[string]RepoTime{"/r/oms": {AIMinutes: 30}},
+		ProjectPaths: map[string]string{"/r/oms": "/r/oms"},
+	}
+	rep, err := BuildReport(context.Background(), in, fakeReflections{has: false})
+	if err != nil {
+		t.Fatalf("BuildReport: %v", err)
+	}
+	if rep.Services[0].ReflectionMarkdown != "" {
+		t.Errorf("Service.ReflectionMarkdown = %q; want empty", rep.Services[0].ReflectionMarkdown)
+	}
+	if rep.ReflectionMarkdown != "" {
+		t.Errorf("Report.ReflectionMarkdown = %q; want empty", rep.ReflectionMarkdown)
 	}
 }
 

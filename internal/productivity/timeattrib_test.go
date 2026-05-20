@@ -199,6 +199,73 @@ func TestAttributeMinutes_ByCLISplit(t *testing.T) {
 	}
 }
 
+// TestGlobalActiveMinutes_UnionAcrossRepos is the core regression guard
+// for Change 1: three sessions across TWO different repos whose
+// wall-clock active intervals overlap must yield a global union span
+// STRICTLY LESS than the sum of the per-repo unions. The user ran
+// parallel AI agents across repos, so the repo lanes legitimately
+// overlap — the headline number must be the all-repo wall-clock union.
+func TestGlobalActiveMinutes_UnionAcrossRepos(t *testing.T) {
+	day := time.Date(2026, 5, 19, 0, 0, 0, 0, time.UTC)
+	mk := func(startH, startMin, spanMin int) []time.Time {
+		var out []time.Time
+		base := day.Add(time.Duration(startH)*time.Hour + time.Duration(startMin)*time.Minute)
+		for m := 0; m <= spanMin; m += 10 {
+			out = append(out, base.Add(time.Duration(m)*time.Minute))
+		}
+		return out
+	}
+	// repo /a: session worked 09:00-11:00 (120m).
+	// repo /b: two sessions, 10:00-12:00 (120m) and 11:30-12:30 (60m).
+	// Per-repo unions: /a = 120m, /b = union(10:00-12:00, 11:30-12:30) = 150m.
+	// Sum of per-repo unions = 270m.
+	// Global union = 09:00 .. 12:30 = 210m, strictly < 270m.
+	sessions := []SessionActivity{
+		{SessionID: "a1", ProjectPath: "/a", CLI: "claude", MessageTimes: mk(9, 0, 120)},
+		{SessionID: "b1", ProjectPath: "/b", CLI: "codex", MessageTimes: mk(10, 0, 120)},
+		{SessionID: "b2", ProjectPath: "/b", CLI: "claude", MessageTimes: mk(11, 30, 60)},
+	}
+
+	total, byCLI := GlobalActiveMinutes(sessions, 30)
+	if total != 210 {
+		t.Errorf("GlobalActiveMinutes total = %d; want 210 (09:00..12:30 union)", total)
+	}
+
+	// Sum of per-repo unions must be strictly greater than the global union.
+	repo := AttributeMinutes(sessions, map[string]int{"/a": 1, "/b": 2}, 30)
+	sumOfRepos := repo["/a"].AIMinutes + repo["/b"].AIMinutes
+	if sumOfRepos <= total {
+		t.Errorf("sum-of-per-repo-unions = %d; want STRICTLY > global union %d", sumOfRepos, total)
+	}
+	if sumOfRepos != 270 {
+		t.Errorf("sum-of-per-repo-unions = %d; want 270 (/a 120 + /b 150)", sumOfRepos)
+	}
+
+	// Per-CLI global union: claude ran a1 (09:00-11:00) and b2
+	// (11:30-12:30) → union = 120 + 60 = 180m (disjoint). codex ran b1
+	// (10:00-12:00) → 120m.
+	if byCLI["claude"] != 180 {
+		t.Errorf("GlobalActiveMinutes byCLI[claude] = %d; want 180", byCLI["claude"])
+	}
+	if byCLI["codex"] != 120 {
+		t.Errorf("GlobalActiveMinutes byCLI[codex] = %d; want 120", byCLI["codex"])
+	}
+}
+
+// TestSessionActiveMinutes checks the per-session gap-capped active total
+// used for the SessionStat proof-of-work breakdown (Change 2).
+func TestSessionActiveMinutes(t *testing.T) {
+	base := time.Date(2026, 5, 19, 9, 0, 0, 0, time.UTC)
+	// 0,5,10 then 90-min gap then 100,105 → active = 10 + 5 = 15m.
+	got := SessionActiveMinutes(ts(base, 0, 5, 10, 100, 105), 30)
+	if got != 15 {
+		t.Errorf("SessionActiveMinutes = %d; want 15 (gap > cap excluded)", got)
+	}
+	if SessionActiveMinutes(ts(base, 0), 30) != 0 {
+		t.Errorf("SessionActiveMinutes single message; want 0")
+	}
+}
+
 // TestAttributeMinutes_DisjointSessionsSumNormally confirms the union
 // fix does not under-count: two non-overlapping sessions still total the
 // sum of their individual spans (60m + 60m = 120m).

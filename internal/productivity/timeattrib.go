@@ -25,6 +25,12 @@ type SessionActivity struct {
 	CLI          string
 	MessageTimes []time.Time
 	Repos        []string // empty → attributed wholly to ProjectPath
+	// MessageCount is the session's in-window message count, surfaced in
+	// the SessionStat proof-of-work breakdown (Change 2). When zero it
+	// defaults to len(MessageTimes) — the handler loads one timestamp per
+	// in-window message so the two agree, but an explicit count keeps the
+	// evidence honest if a caller ever de-duplicates timestamps.
+	MessageCount int
 }
 
 // RepoTime is the deterministic per-repo time verdict (D1/D4).
@@ -238,6 +244,57 @@ func AttributeMinutes(sessions []SessionActivity, commitCounts map[string]int, i
 		}
 	}
 	return out
+}
+
+// GlobalActiveMinutes computes the report-level headline AI time
+// (Change 1): the union of every session's active sub-intervals across
+// the WHOLE window, regardless of repo. The user runs parallel AI agents
+// across repos, so per-repo unions overlap each other in wall-clock —
+// summing them double-counts. Collecting every session's active
+// sub-intervals into ONE set, merging, and summing yields the true
+// elapsed wall-clock, structurally ≤ 24h/day.
+//
+// It returns (total, byCLI):
+//   - total is the all-CLI global union (every session, every repo).
+//   - byCLI is the same union computed per CLI group ("claude" / "codex"
+//     → that CLI's own global union). Because two CLIs can run at once,
+//     claude+codex may slightly exceed total — that is correct.
+//
+// Empty input yields 0 and an empty (non-nil) map so the caller's JSON
+// marshals as {} not null.
+func GlobalActiveMinutes(sessions []SessionActivity, idleCapMin int) (int, map[string]int) {
+	cap := time.Duration(idleCapMin) * time.Minute
+
+	var all []interval
+	byCLIIntervals := map[string][]interval{}
+	for _, s := range sessions {
+		ivs := activeIntervals(s.MessageTimes, cap)
+		if len(ivs) == 0 {
+			continue
+		}
+		all = append(all, ivs...)
+		cli := s.CLI
+		if cli == "" {
+			cli = "unknown"
+		}
+		byCLIIntervals[cli] = append(byCLIIntervals[cli], ivs...)
+	}
+
+	total := totalMinutes(mergeIntervals(all))
+	byCLI := map[string]int{}
+	for cli, ivs := range byCLIIntervals {
+		byCLI[cli] = totalMinutes(mergeIntervals(ivs))
+	}
+	return total, byCLI
+}
+
+// SessionActiveMinutes is one session's own gap-capped active total
+// (Change 2): the sum of its active sub-intervals' lengths. This is the
+// deterministic per-session evidence figure behind the headline number.
+// Sessions with fewer than two timestamps have no measurable span → 0.
+func SessionActiveMinutes(times []time.Time, idleCapMin int) int {
+	cap := time.Duration(idleCapMin) * time.Minute
+	return totalMinutes(mergeIntervals(activeIntervals(times, cap)))
 }
 
 // activeIntervals walks consecutive (sorted) message timestamps and

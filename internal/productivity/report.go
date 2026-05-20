@@ -9,12 +9,18 @@ import (
 )
 
 // ReflectionLookup is the §7 L2/L3 dependency: "is there a klyne worklog
-// reflection for this project on this day?". Defined as an interface so
-// this package stays free of a direct *store.DB dependency and testable
-// with a stub (the API handler — Task 6, not built here — adapts the
-// real worklog_reflections store).
+// reflection for this project on this day, and what does it say?".
+// Defined as an interface so this package stays free of a direct
+// *store.DB dependency and testable with a stub (the API handler adapts
+// the real worklog_reflections store).
+//
+// HasReflection returns (found, bodyMD, err): found drives the L3
+// status/nudge; bodyMD is the reflection's markdown narrative surfaced
+// as Service.ReflectionMarkdown (Change 3) — it is "" when found is
+// false. bodyMD is purely additive enrichment and never gates the
+// deterministic numbers (D8).
 type ReflectionLookup interface {
-	HasReflection(ctx context.Context, projectPath string, day time.Time) (bool, error)
+	HasReflection(ctx context.Context, projectPath string, day time.Time) (found bool, bodyMD string, err error)
 }
 
 // DirtyState is the current working-tree state for a repo plus the end
@@ -36,6 +42,12 @@ type ReportInput struct {
 	Attribution  map[string]RepoTime   // keyed by repo Dir
 	ProjectPaths map[string]string     // repo Dir → canonical project_path
 	DirtyRepos   map[string]DirtyState // repo Dir → current dirty/session state
+	// Sessions is the raw per-session activity in the window. BuildReport
+	// uses it to compute the report-level GLOBAL interval union
+	// (TotalActiveMinutes / per-CLI MinutesByCLI — Change 1) and the
+	// per-session SessionStat evidence list (Change 2). Empty is valid:
+	// the report's headline figures are then 0 and Sessions is [].
+	Sessions []SessionActivity
 }
 
 // BuildReport assembles the deterministic Service→Branch→Topic Report
@@ -43,7 +55,9 @@ type ReportInput struct {
 // signals (§6.5), the Layer-1 templated narrative (§7 L1), and the
 // reflection status/nudge (§7 L3). NO LLM is invoked anywhere.
 func BuildReport(ctx context.Context, in ReportInput, refl ReflectionLookup) (Report, error) {
-	rep := Report{Day: in.Day}
+	// Services starts as a non-nil empty slice so an empty-window report
+	// marshals "services":[] not null — the {}/[] wire contract.
+	rep := Report{Day: in.Day, Services: []Service{}}
 
 	day := dayTime(in.Day, in.Now)
 	anyReflection := false
@@ -129,27 +143,43 @@ func BuildReport(ctx context.Context, in ReportInput, refl ReflectionLookup) (Re
 		// branch set so the highest-impact worktree leads.
 		sortBranches(svc.Branches)
 
-		// Reflection status (§7 L3): per canonical project/day.
+		// Reflection status (§7 L3) + narrative body (Change 3): per
+		// canonical project/day. The body_md is purely additive
+		// enrichment — it never gates the deterministic numbers (D8).
 		if refl != nil {
-			has, err := refl.HasReflection(ctx, svc.ProjectPath, day)
+			has, body, err := refl.HasReflection(ctx, svc.ProjectPath, day)
 			if err != nil {
 				return Report{}, fmt.Errorf("productivity: reflection lookup for %s: %w", svc.ProjectPath, err)
 			}
 			if has {
 				anyReflection = true
+				svc.ReflectionMarkdown = body
+				// Surface the most recent per-project reflection body as the
+				// report-wide overall narrative when none is set yet. With a
+				// single active project this is the natural overall summary;
+				// with several it is the first project's — honest, not
+				// fabricated (per-Service bodies carry the rest).
+				if rep.ReflectionMarkdown == "" {
+					rep.ReflectionMarkdown = body
+				}
 			}
 		}
 
 		rep.Services = append(rep.Services, svc)
 	}
 
-	// Report-wide per-CLI roll-up across every Service (Change 2).
-	rep.MinutesByCLI = map[string]int{}
-	for _, svc := range rep.Services {
-		for cli, mins := range svc.MinutesByCLI {
-			rep.MinutesByCLI[cli] += mins
-		}
+	// Report-level GLOBAL interval union (Change 1): the headline AI time
+	// is the union of every session's active wall-clock intervals across
+	// ALL repos — true elapsed wall-clock, not the sum of per-Service
+	// unions (which double-counts parallel cross-repo agents). Per-CLI
+	// MinutesByCLI is likewise the per-CLI global union.
+	rep.TotalActiveMinutes, rep.MinutesByCLI = GlobalActiveMinutes(in.Sessions, idleCapMinutes)
+	if rep.MinutesByCLI == nil {
+		rep.MinutesByCLI = map[string]int{}
 	}
+
+	// Per-session proof-of-work evidence list (Change 2), sorted by start.
+	rep.Sessions = buildSessionStats(in.Sessions, in.ProjectPaths)
 
 	if anyReflection {
 		rep.ReflectionStatus = "current"
@@ -162,6 +192,60 @@ func BuildReport(ctx context.Context, in ReportInput, refl ReflectionLookup) (Re
 		rep.Nudge = "No reflection yet for this window — run a klyne worklog reflection to enrich these entries. Showing the deterministic factual summary."
 	}
 	return rep, nil
+}
+
+// buildSessionStats builds the per-session proof-of-work evidence list
+// (Change 2): one SessionStat per contributing session, sorted by
+// StartedAt. Each carries its own gap-capped active total — the
+// deterministic minutes that, unioned, produce the headline number.
+//
+// Sessions with no measurable activity (fewer than two in-window
+// timestamps → no span) are still listed: they are honest evidence that
+// a session ran even if it contributes 0 active minutes. The repo is the
+// canonical repo name the session is attributed to, derived from its
+// project_path via the same canonicalization the Services use.
+func buildSessionStats(sessions []SessionActivity, projectPaths map[string]string) []SessionStat {
+	out := make([]SessionStat, 0, len(sessions))
+	for _, s := range sessions {
+		started, ended := messageSpan(s.MessageTimes)
+		count := s.MessageCount
+		if count == 0 {
+			count = len(s.MessageTimes)
+		}
+		// Canonicalize the session's project_path to the repo it rolls
+		// into, matching Service.Repo (worktrees collapse to one repo).
+		pp := s.ProjectPath
+		if canon, ok := projectPaths[pp]; ok && canon != "" {
+			pp = canon
+		}
+		out = append(out, SessionStat{
+			SessionID:     s.SessionID,
+			CLI:           s.CLI,
+			Repo:          RepoName(pp),
+			StartedAt:     started,
+			EndedAt:       ended,
+			ActiveMinutes: SessionActiveMinutes(s.MessageTimes, idleCapMinutes),
+			MessageCount:  count,
+		})
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		return out[i].StartedAt.Before(out[j].StartedAt)
+	})
+	return out
+}
+
+// messageSpan returns the earliest and latest timestamp in times. Both
+// are zero when times is empty.
+func messageSpan(times []time.Time) (first, last time.Time) {
+	for _, t := range times {
+		if first.IsZero() || t.Before(first) {
+			first = t
+		}
+		if last.IsZero() || t.After(last) {
+			last = t
+		}
+	}
+	return first, last
 }
 
 // buildBranches groups the user's commits by branch (§6.6). When commits

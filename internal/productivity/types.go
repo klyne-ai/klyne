@@ -101,25 +101,66 @@ type RiskSignal struct {
 // Service. Per-CLI values are themselves union totals (§6.4), so when
 // the user ran both CLIs at once they may sum to slightly more than the
 // all-CLI attributed total — that is correct and expected.
+//
+// ReflectionMarkdown is the worklog reflection body (body_md) for this
+// repo on the report's day (Change 3) — the worklog's own account of
+// what was done. Empty when no reflection exists for the project+day.
 type Service struct {
-	Repo         string         `json:"repo"`
-	ProjectPath  string         `json:"project_path"`
-	Branches     []Branch       `json:"branches"`
-	Risks        []RiskSignal   `json:"risks"`
-	ManualOnly   bool           `json:"manual_only"`
-	MinutesByCLI map[string]int `json:"minutes_by_cli"`
+	Repo               string         `json:"repo"`
+	ProjectPath        string         `json:"project_path"`
+	Branches           []Branch       `json:"branches"`
+	Risks              []RiskSignal   `json:"risks"`
+	ManualOnly         bool           `json:"manual_only"`
+	MinutesByCLI       map[string]int `json:"minutes_by_cli"`
+	ReflectionMarkdown string         `json:"reflection_markdown"`
+}
+
+// SessionStat is the per-session proof-of-work breakdown (Change 2): the
+// deterministic evidence the user can SEE behind the headline AI-time
+// number. One per contributing session in the window.
+//
+// ActiveMinutes is the session's OWN gap-capped active total (its active
+// sub-intervals' lengths summed). Repo is the repo/Service the session
+// is attributed to (derived from its project_path). StartedAt/EndedAt
+// are the first and last in-window message timestamps.
+type SessionStat struct {
+	SessionID     string    `json:"session_id"`
+	CLI           string    `json:"cli"`
+	Repo          string    `json:"repo"`
+	StartedAt     time.Time `json:"started_at"`
+	EndedAt       time.Time `json:"ended_at"`
+	ActiveMinutes int       `json:"active_minutes"`
+	MessageCount  int       `json:"message_count"`
 }
 
 // Report is the top-level fused record served to the API/UI.
 // ReflectionStatus is "missing" | "stale" | "current" (§7 L3); Nudge is
 // the human prompt shown when no/stale reflection exists.
 //
-// MinutesByCLI is the report-wide roll-up of every Service's
-// MinutesByCLI (per-CLI merged active minutes across all repos).
+// TotalActiveMinutes is the headline AI time (Change 1): the GLOBAL
+// union of every session's active wall-clock intervals across ALL
+// repos in the window — true elapsed wall-clock, structurally ≤ 24h/day.
+// It is NOT the sum of per-Service unions (that double-counts parallel
+// cross-repo agents).
+//
+// MinutesByCLI is the per-CLI GLOBAL union (cli → that CLI's own
+// all-repo wall-clock union), NOT the sum of per-Service MinutesByCLI.
+// When the user ran both CLIs at once claude+codex may slightly exceed
+// TotalActiveMinutes — that is correct.
+//
+// Sessions is the deterministic per-session evidence list (Change 2):
+// every contributing session in the window, sorted by StartedAt.
+//
+// ReflectionMarkdown is an optional overall worklog reflection body
+// (Change 3); empty when there is no single sensible project-agnostic
+// reflection — per-Service ReflectionMarkdown carries the per-repo body.
 type Report struct {
-	Day              string         `json:"day"`
-	Services         []Service      `json:"services"`
-	ReflectionStatus string         `json:"reflection_status"`
-	Nudge            string         `json:"nudge"`
-	MinutesByCLI     map[string]int `json:"minutes_by_cli"`
+	Day                string         `json:"day"`
+	Services           []Service      `json:"services"`
+	ReflectionStatus   string         `json:"reflection_status"`
+	Nudge              string         `json:"nudge"`
+	TotalActiveMinutes int            `json:"total_active_minutes"`
+	MinutesByCLI       map[string]int `json:"minutes_by_cli"`
+	Sessions           []SessionStat  `json:"sessions"`
+	ReflectionMarkdown string         `json:"reflection_markdown,omitempty"`
 }
