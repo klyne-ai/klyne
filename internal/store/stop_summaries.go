@@ -306,6 +306,58 @@ SELECT session_id, ts, project_path, cli, summary, last_user, last_bash, files_j
 	return out, rows.Err()
 }
 
+// DayEntry pairs one stop_summaries row's rich worklog entry with
+// its session+timestamp so the reflection consumer can stitch
+// chronologically across a day's turns.
+type DayEntry struct {
+	SessionID string
+	Ts        int64
+	Entry     WorklogEntryJSON
+}
+
+// ListWorklogEntriesForDay returns the day's admitted rich entries
+// for one project in chronological order. Only rows the worker
+// terminally admitted are returned (verdict LIKE 'admitted-%') —
+// skipped-* / failed-permanent / pending rows are excluded because
+// their entries are empty or unsynthesized.
+//
+// day is interpreted in local time so the IST-day boundary lines up
+// with the user's intuition; the SQL uses sqlite's 'localtime'
+// modifier on the epoch-ms ts column.
+//
+// Returns (nil, nil) when no admitted entries exist — the caller
+// (Phase 6 consumer / Phase 7 dashboard) falls back to the legacy
+// LLM reflection path on that signal.
+func ListWorklogEntriesForDay(ctx context.Context, db *DB, projectPath string, day time.Time) ([]DayEntry, error) {
+	const q = `
+SELECT session_id, ts, worklog_entry_json
+  FROM stop_summaries
+ WHERE project_path = ?
+   AND date(ts / 1000, 'unixepoch', 'localtime') = ?
+   AND worklog_gate_verdict LIKE 'admitted-%'
+ ORDER BY ts ASC`
+	dayStr := day.Format("2006-01-02")
+	rows, err := db.Read().QueryContext(ctx, q, projectPath, dayStr)
+	if err != nil {
+		return nil, fmt.Errorf("store: list day worklog entries: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+
+	var out []DayEntry
+	for rows.Next() {
+		var d DayEntry
+		var raw string
+		if err := rows.Scan(&d.SessionID, &d.Ts, &raw); err != nil {
+			return nil, fmt.Errorf("store: scan day entry: %w", err)
+		}
+		// Best-effort unmarshal — a malformed row shouldn't drop the
+		// whole day; consumer will see zero categories.
+		_ = json.Unmarshal([]byte(raw), &d.Entry)
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
 // IncrementWorklogAttempts bumps worklog_attempts by 1 and sets the
 // verdict, leaving everything else (the deterministic body, the 015
 // worklog metadata, the rich entry_json) untouched. Used by the
