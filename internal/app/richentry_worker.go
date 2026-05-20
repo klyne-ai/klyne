@@ -55,6 +55,15 @@ func (a *App) startRichEntryWorker(ctx context.Context) {
 		return
 	}
 
+	// Surface the pending queue depth at startup so the operator can
+	// see "the worker has N rows to process" without poking at the DB.
+	// Cheap one-row aggregate; per-row processing logs are tick-scoped.
+	if pending, err := pendingQueueCount(ctx, a.db); err == nil {
+		a.logger.Info("rich-entry queue at startup",
+			slog.Int("pending_rows", pending),
+			slog.Duration("tick", richEntryWorkerTick))
+	}
+
 	worker := richentry.NewWorker(richentry.WorkerDeps{
 		DB:     a.db,
 		LLM:    a.aiProvider,
@@ -69,6 +78,23 @@ func (a *App) startRichEntryWorker(ctx context.Context) {
 			a.logger.Warn("rich-entry worker exited", slog.Any("error", err))
 		}
 	}()
+}
+
+// pendingQueueCount returns how many stop_summaries rows are still
+// eligible for the worker queue (verdict empty or 'pending',
+// attempts under the cap). Used at startup so operators can see what
+// volume the worker will chew through.
+func pendingQueueCount(ctx context.Context, db *store.DB) (int, error) {
+	const q = `
+SELECT COUNT(*)
+  FROM stop_summaries
+ WHERE worklog_gate_verdict IN ('', 'pending')
+   AND worklog_attempts < 3`
+	var n int
+	if err := db.Read().QueryRowContext(ctx, q).Scan(&n); err != nil {
+		return 0, err
+	}
+	return n, nil
 }
 
 // productionInputBuilder is the daemon-side InputBuilder. It reads
@@ -158,6 +184,13 @@ func (b *productionInputBuilder) Build(
 		activeDur = intervals[0].End.Sub(intervals[0].Start)
 	}
 
+	// gh PR cache lookup (migration-018 table). Returns nil when this
+	// repo isn't on github / has no remote / the cache has no row for
+	// this slug+window → PRCacheLive=false → validator skips PR-number
+	// checks honestly. Non-nil (even []) means "we checked, here's the
+	// answer" → unknown PRs are rejected.
+	mergedPRs := b.loadMergedPRsForDay(ctx, row.ProjectPath, turnTs)
+
 	bundle := richentry.BundleInputs{
 		SessionID:       row.SessionID,
 		Ts:              turnTs,
@@ -168,11 +201,7 @@ func (b *productionInputBuilder) Build(
 		StopSummaryBody: row.Summary,
 		UserMessages:    userMsgs,
 		Commits:         commits,
-		// TODO Phase 5.3 follow-up: read gh PR cache for the day and
-		// pass non-nil MergedPRs. v1 leaves nil → PRCacheLive=false →
-		// validator skips PR-number checks (which is honest — we
-		// can't validate what we don't know).
-		MergedPRs:       nil,
+		MergedPRs:       mergedPRs,
 		ActiveIntervals: intervals,
 		SessionFiles:    row.Files,
 		PriorSessionIDs: nil,
@@ -374,6 +403,103 @@ func containsAnyKeyword(messages, keywords []string) bool {
 		}
 	}
 	return false
+}
+
+// loadMergedPRsForDay reads the migration-018 github_pr_cache table
+// for the repo at projectPath, scoped to the day containing turnTs.
+// Returns nil when:
+//   - dir has no resolvable github "owner/name" slug (no remote,
+//     non-github remote, or unparseable URL)
+//   - the cache has no row for (slug, window) — no lookup happened
+//     for this day yet
+//   - the cached payload is unparseable
+//
+// All three cases signal "we don't know what PRs exist for this day"
+// → richentry's validator switches PR-number checks OFF (the honest
+// behavior — better than rejecting an unknown #N that might be real).
+// Returns a non-nil []MergedPRRef{} (possibly empty) when the cache
+// row exists and parses — that signals "we DO know, and here's the
+// list" → unknown PR refs from the writer get rejected.
+//
+// Window-key format matches productivity_github.go's cache writer
+// (day padded ±1) so the same rows the dashboard wrote get reused.
+func (b *productionInputBuilder) loadMergedPRsForDay(
+	ctx context.Context, projectPath string, turnTs time.Time,
+) []richentry.MergedPRRef {
+	slug := githubSlugForDir(projectPath)
+	if slug == "" {
+		return nil
+	}
+	day := turnTs.Local()
+	lo := day.AddDate(0, 0, -1).Format("2006-01-02")
+	hi := day.AddDate(0, 0, 1).Format("2006-01-02")
+	windowKey := lo + ".." + hi
+
+	const q = `SELECT payload_json FROM github_pr_cache WHERE slug = ? AND window_key = ?`
+	var payload string
+	if err := b.db.Read().QueryRowContext(ctx, q, slug, windowKey).Scan(&payload); err != nil {
+		return nil
+	}
+	// Cached payload mirrors productivity.MergedPR's JSON shape —
+	// number / title / head_ref / merged_at / opened_at / time_to_ship_minutes.
+	// MergeSHA is NOT in the cache (productivity_github.go drops it to
+	// avoid GraphQL node-cap blowup); MergeSHA stays empty in the
+	// MergedPRRef, so the writer can cite #N but not the merge sha.
+	// The gold pattern of "#400 + e9a1b2a" then degrades to just "#400" —
+	// honest cost of avoiding the GraphQL hit.
+	var raw []struct {
+		Number   int       `json:"number"`
+		Title    string    `json:"title"`
+		HeadRef  string    `json:"head_ref"`
+		MergedAt time.Time `json:"merged_at"`
+	}
+	if err := json.Unmarshal([]byte(payload), &raw); err != nil {
+		return nil
+	}
+	out := make([]richentry.MergedPRRef, 0, len(raw))
+	for _, p := range raw {
+		out = append(out, richentry.MergedPRRef{
+			Number:   p.Number,
+			Title:    p.Title,
+			MergedAt: p.MergedAt,
+			// MergeSHA intentionally empty — not in the cache schema.
+		})
+	}
+	return out
+}
+
+// githubSlugForDir returns "owner/name" for the github repo at dir,
+// or "" when dir has no resolvable origin remote / the remote isn't
+// shaped like a github URL we can parse. Mirrors
+// internal/api/handlers/productivity_github.go parseRepoSlug — kept
+// inline here so this package doesn't import handlers.
+func githubSlugForDir(dir string) string {
+	out, err := exec.Command("git", "-C", dir, "remote", "get-url", "origin").Output()
+	if err != nil {
+		return ""
+	}
+	return parseGitHubSlug(strings.TrimSpace(string(out)))
+}
+
+func parseGitHubSlug(raw string) string {
+	raw = strings.TrimSuffix(strings.TrimSpace(raw), ".git")
+	if raw == "" {
+		return ""
+	}
+	if i := strings.Index(raw, "://"); i >= 0 {
+		raw = raw[i+3:] // strip scheme
+	} else if i := strings.Index(raw, ":"); i >= 0 {
+		raw = raw[:i] + "/" + raw[i+1:] // scp-like → path
+	}
+	parts := strings.Split(strings.Trim(raw, "/"), "/")
+	if len(parts) < 2 {
+		return ""
+	}
+	owner, name := parts[len(parts)-2], parts[len(parts)-1]
+	if owner == "" || name == "" || strings.ContainsAny(owner, "@ ") {
+		return ""
+	}
+	return owner + "/" + name
 }
 
 // Keyword sets — lower-case, substring-matched. Kept small and
