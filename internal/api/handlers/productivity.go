@@ -12,6 +12,7 @@ import (
 
 	"github.com/klyne-ai/klyne/internal/productivity"
 	"github.com/klyne-ai/klyne/internal/store"
+	"github.com/klyne-ai/klyne/internal/worklog/richentry"
 )
 
 // ProductivityHandler serves GET /productivity — the deterministic-first
@@ -303,12 +304,21 @@ WHERE last_msg_at >= ? AND last_msg_at <= ?`
 	return out, rows.Err()
 }
 
-// reflectionLookup adapts *store.DB to productivity.ReflectionLookup. A
-// reflection "exists for the day" when a worklog_reflections row for the
-// project falls on that local calendar date. Per D8 the existence flag
-// only toggles the L3 nudge — it never changes the deterministic
-// numbers; the returned body_md is purely additive narrative enrichment
-// surfaced as Service.ReflectionMarkdown (Change 3).
+// reflectionLookup adapts *store.DB to productivity.ReflectionLookup
+// with a TWO-TIER read (Phase 7 of the rich-entry plan):
+//
+//  1. PREFERRED: mechanical merge over the day's admitted rich entries
+//     (richentry.MergeDay). Produces a deterministic per-category
+//     timeline from migration-019 entries — no LLM in the join, so
+//     no opportunity for re-hallucination.
+//  2. FALLBACK: legacy LLM-authored worklog_reflections row for the
+//     same (project, day). Used when (a) no rich entries exist yet
+//     (historical sessions before migration 019) or (b) every
+//     contributing turn was suppressed / failed validation.
+//
+// The L3 existence flag fires for EITHER source — the dashboard nudge
+// still tells the user "we have something for this day", just from
+// whichever surface produced it.
 type reflectionLookup struct {
 	db *store.DB
 }
@@ -316,6 +326,12 @@ type reflectionLookup struct {
 func (l *reflectionLookup) HasReflection(
 	ctx context.Context, projectPath string, day time.Time,
 ) (bool, string, error) {
+	// Tier 1 — mechanical merge over admitted rich entries.
+	if merged, err := richentry.MergeDay(ctx, l.db, projectPath, day); err == nil && merged != "" {
+		return true, merged, nil
+	}
+
+	// Tier 2 — legacy worklog_reflections row.
 	// worklog_reflections.ts is epoch-ms (migration 016). Match on the
 	// local calendar date of the reflection's timestamp and return the
 	// most recent reflection's markdown body for that project+day so the
@@ -332,7 +348,7 @@ LIMIT 1`
 	var bodyMD string
 	err := l.db.Read().QueryRowContext(ctx, q, projectPath, dayStr).Scan(&bodyMD)
 	if err != nil {
-		// sql.ErrNoRows ⇒ no reflection ⇒ not an error condition.
+		// sql.ErrNoRows ⇒ no reflection in either tier ⇒ not an error.
 		if errors.Is(err, sql.ErrNoRows) {
 			return false, "", nil
 		}
