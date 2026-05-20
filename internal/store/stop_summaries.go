@@ -138,6 +138,94 @@ ON CONFLICT(session_id, ts) DO UPDATE SET
 	return nil
 }
 
+// WorklogItem is one entry inside a WorklogEntryJSON category. Uniform
+// shape across all 15 categories so the reflection consumer can iterate
+// without special-casing. Every Refs[] element MUST survive the
+// internal/worklog/richentry allowlist validator (short SHA from this
+// turn's commits, PR # from the gh cache, ticket id from the branch,
+// file path from this turn's touched-files, canonical duration / clock,
+// or a UUID that's in the session-id allowlist AND unique across bullets).
+type WorklogItem struct {
+	Summary string   `json:"summary"`
+	Repo    string   `json:"repo,omitempty"`
+	Refs    []string `json:"refs,omitempty"`
+	Ticket  string   `json:"ticket,omitempty"`
+}
+
+// WorklogEntryJSON is the 15-category structured worklog entry the
+// session-end pipeline (gate + writer + validator) attaches to a
+// stop_summaries row via UpsertStopSummaryWithEntry. Empty categories
+// are []; the JSON column never holds null. SchemaVersion lets future
+// schema changes coexist with older rows.
+//
+// The 15 categories (carried in Categories[name]):
+//   - features_worked_on, features_picked, shipped
+//   - bugs_found, bugs_fixed
+//   - investigations, decisions
+//   - config_changes, reviews_given
+//   - blockers, blocked_on, pending, followups_for_others
+//   - must_remember, mistakes_or_dead_ends
+type WorklogEntryJSON struct {
+	SchemaVersion int                      `json:"schema_version"`
+	Categories    map[string][]WorklogItem `json:"categories"`
+}
+
+// UpsertStopSummaryWithEntry writes a stop_summaries row plus the
+// migration-019 rich entry, gate verdict, and worker-attempts counter.
+// Following the 015 precedent: ON CONFLICT ONLY updates the
+// migration-019 columns, preserving the base body
+// (summary/last_user/last_bash/files_json) and the 015 worklog
+// metadata so this pass can run after the Stop hook without
+// clobbering anything.
+//
+// attempts is the worker's try-count. The gate calls this with 0 on
+// first success; the worker increments on retry. When attempts
+// >= MAX_WORKLOG_ATTEMPTS the caller is expected to pass
+// gateVerdict='failed-permanent' so the worker queue scan drops the row.
+func UpsertStopSummaryWithEntry(
+	ctx context.Context, db *DB, row StopSummary, entry WorklogEntryJSON,
+	gateVerdict string, attempts int,
+) error {
+	if strings.TrimSpace(row.SessionID) == "" {
+		return errors.New("store: upsert entry: session_id required")
+	}
+	if row.Ts == 0 {
+		row.Ts = time.Now().UnixMilli()
+	}
+	if row.CLI == "" {
+		row.CLI = "claude"
+	}
+	files := row.Files
+	if files == nil {
+		files = []string{}
+	}
+	filesJSON, err := json.Marshal(files)
+	if err != nil {
+		return fmt.Errorf("store: marshal files: %w", err)
+	}
+	entryBytes, err := json.Marshal(entry)
+	if err != nil {
+		return fmt.Errorf("store: marshal worklog entry: %w", err)
+	}
+	const q = `
+INSERT INTO stop_summaries (
+    session_id, ts, project_path, cli, summary, last_user, last_bash, files_json,
+    worklog_entry_json, worklog_gate_verdict, worklog_attempts
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(session_id, ts) DO UPDATE SET
+    worklog_entry_json   = excluded.worklog_entry_json,
+    worklog_gate_verdict = excluded.worklog_gate_verdict,
+    worklog_attempts     = excluded.worklog_attempts`
+	_, err = db.Write().ExecContext(ctx, q,
+		row.SessionID, row.Ts, row.ProjectPath, row.CLI, row.Summary,
+		row.LastUser, row.LastBash, string(filesJSON),
+		string(entryBytes), gateVerdict, attempts)
+	if err != nil {
+		return fmt.Errorf("store: upsert stop summary with entry: %w", err)
+	}
+	return nil
+}
+
 // LatestStopSummaryForProject returns the most recent stop-hook
 // summary scoped to projectPath, or nil if there is none. Empty
 // projectPath returns the most recent summary across all projects.
