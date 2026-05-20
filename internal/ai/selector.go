@@ -26,7 +26,7 @@ const (
 // Choice is the result of Pick: the recommended provider+model combination.
 type Choice struct {
 	// Provider is the stable lower-case provider identifier:
-	// "anthropic" | "openai" | "gemini" | "ollama".
+	// "claude-cli" | "codex-cli" | "ollama".
 	Provider string
 	// Model is the model identifier to pass in ChatRequest.Model.
 	Model string
@@ -43,23 +43,24 @@ type preferenceEntry struct {
 }
 
 // preferenceTable maps each TaskKind to its ordered list of candidates.
-// First matching available provider wins (spec §8).
+// First matching available provider wins.
+//
+// Post 2026-05-20: API-key-backed providers (anthropic / openai /
+// gemini) are gone. Klyne's product promise is "no separate API key",
+// so every cloud provider shells out to the user's existing CLI
+// subscription. Embed has no CLI equivalent — Ollama (local) is the
+// only option for that task.
 var preferenceTable = map[TaskKind][]preferenceEntry{
 	TaskSummarize: {
 		{
-			provider: "gemini",
-			model:    "gemini-2.5-flash-lite",
-			reason:   "Gemini Flash-Lite picked: free tier, 1,000 RPD covers your workload",
+			provider: "claude-cli",
+			model:    "claude-haiku-4-5",
+			reason:   "Claude CLI (haiku-4-5) picked: your Claude Code subscription, no API key",
 		},
 		{
-			provider: "openai",
+			provider: "codex-cli",
 			model:    "gpt-5-mini",
-			reason:   "OpenAI gpt-5-mini picked: cost-efficient, fast turnaround for summaries",
-		},
-		{
-			provider: "anthropic",
-			model:    "claude-haiku-4",
-			reason:   "Anthropic claude-haiku-4 picked: lightest Claude model, low latency",
+			reason:   "Codex CLI (gpt-5-mini) picked: your Codex subscription, no API key",
 		},
 		{
 			provider: "ollama",
@@ -69,19 +70,14 @@ var preferenceTable = map[TaskKind][]preferenceEntry{
 	},
 	TaskTitle: {
 		{
-			provider: "gemini",
-			model:    "gemini-2.5-flash-lite",
-			reason:   "Gemini Flash-Lite picked: free tier, instant title generation",
+			provider: "claude-cli",
+			model:    "claude-haiku-4-5",
+			reason:   "Claude CLI (haiku-4-5) picked: lightweight, your Claude Code subscription",
 		},
 		{
-			provider: "openai",
+			provider: "codex-cli",
 			model:    "gpt-5-nano",
-			reason:   "OpenAI gpt-5-nano picked: smallest OpenAI model, ideal for short-output tasks",
-		},
-		{
-			provider: "anthropic",
-			model:    "claude-haiku-4",
-			reason:   "Anthropic claude-haiku-4 picked: lightest Claude model, low latency",
+			reason:   "Codex CLI (gpt-5-nano) picked: smallest model, your Codex subscription",
 		},
 		{
 			provider: "ollama",
@@ -91,19 +87,9 @@ var preferenceTable = map[TaskKind][]preferenceEntry{
 	},
 	TaskEmbed: {
 		{
-			provider: "openai",
-			model:    "text-embedding-3-small",
-			reason:   "OpenAI text-embedding-3-small picked: high quality, low cost embeddings",
-		},
-		{
-			provider: "gemini",
-			model:    "text-embedding-004",
-			reason:   "Gemini text-embedding-004 picked: free tier embedding model",
-		},
-		{
 			provider: "ollama",
 			model:    "nomic-embed-text",
-			reason:   "Ollama nomic-embed-text picked: local embedding, no API cost",
+			reason:   "Ollama nomic-embed-text picked: only embedding option without an API key",
 		},
 	},
 }
@@ -112,17 +98,18 @@ var preferenceTable = map[TaskKind][]preferenceEntry{
 // preference order is available.
 var ErrNoProviderAvailable = errors.New("ai/selector: no provider available for this task")
 
-// Pick returns the recommended provider+model for task given the available
-// providers reported by providers.DetectAvailable. It implements the spec §8
-// preference order:
+// Pick returns the recommended provider+model for task given the
+// available providers reported by providers.DetectAvailable. Preference
+// order (post 2026-05-20 CLI-subprocess rewrite):
 //
-//	Summarize: Gemini Flash-Lite → gpt-5-mini → claude-haiku-4 → ollama llama3.1:8b
-//	Title:     Gemini Flash-Lite → gpt-5-nano  → claude-haiku-4 → ollama llama3.1:8b
-//	Embed:     OpenAI text-embedding-3-small → Gemini text-embedding-004 → ollama nomic-embed-text
+//	Summarize: claude-cli (haiku-4) → codex-cli (gpt-5-mini) → ollama llama3.1:8b
+//	Title:     claude-cli (haiku-4) → codex-cli (gpt-5-nano) → ollama llama3.1:8b
+//	Embed:     ollama nomic-embed-text  (no CLI provider supports embeddings)
 //
-// If override is non-empty (e.g. "openai:gpt-5-mini"), Pick forces that
-// provider+model IF that provider is available; otherwise it falls back to the
-// preference order and notes the miss in Choice.Reason.
+// If override is non-empty (e.g. "claude-cli:claude-sonnet-4-6"), Pick
+// forces that provider+model IF that provider is available; otherwise
+// it falls back to the preference order and notes the miss in
+// Choice.Reason.
 //
 // If no provider in the preference order is available, Pick returns
 // ErrNoProviderAvailable.

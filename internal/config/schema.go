@@ -44,6 +44,15 @@ type WorklogConfig struct {
 	// older than 30 min) and write a worklog entry for each. This is
 	// the cross-AI capture differentiator.
 	CodexDetectorEnabled bool `toml:"codex_detector_enabled" json:"codex_detector_enabled"`
+
+	// RichEntryWorkerEnabled, when true, starts the migration-019
+	// rich worklog-entry background worker on a 30s tick. The worker
+	// drains stop_summaries rows whose worklog_gate_verdict is '' or
+	// 'pending', runs the hybrid gate, and for admitted turns calls
+	// the writer LLM to produce a structured 15-category WorklogEntryJSON
+	// validated against an allowlist (no hallucinated SHAs / PRs /
+	// UUIDs). Off by default so opting-in is explicit per spec §11.
+	RichEntryWorkerEnabled bool `toml:"rich_entry_worker_enabled" json:"rich_entry_worker_enabled"`
 }
 
 // AdvisorConfig is the [advisor] table. Lives separately from
@@ -141,7 +150,8 @@ func Defaults() *Config {
 			EmbedModel:   AIModelOff, // v1.1 feature, off by default
 		},
 		Worklog: WorklogConfig{
-			CodexDetectorEnabled: false,
+			CodexDetectorEnabled:   false,
+			RichEntryWorkerEnabled: false,
 		},
 	}
 }

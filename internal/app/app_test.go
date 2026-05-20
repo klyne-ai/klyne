@@ -655,10 +655,12 @@ func TestBuildProvider_Switch(t *testing.T) {
 		name   string
 		expect string
 	}{
-		{"anthropic", "anthropic"},
-		{"openai", "openai"},
-		{"gemini", "gemini"},
+		{"claude-cli", "claude-cli"},
+		{"codex-cli", "codex-cli"},
 		{"ollama", "ollama"},
+		{"anthropic", ""}, // legacy name — must not resolve post-rewrite
+		{"openai", ""},
+		{"gemini", ""},
 		{"unknown", ""},
 	}
 	for _, tc := range cases {

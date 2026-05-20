@@ -60,7 +60,13 @@ const breakAdviceFallbackReason = "could not analyze — keep going"
 // breakAdviceCallTimeout caps how long we wait for the AI provider. If
 // the network is flapping or the upstream model is slow we'd rather
 // surface a degraded "continue" than hang the request.
-const breakAdviceCallTimeout = 8 * time.Second
+// 30s ceiling because CLI subprocess providers (`claude -p`, `codex
+// exec`) carry Node.js startup + auth resolution latency well past the
+// old 8s limit — empirically 5–15s per call. The UI already shows a
+// "thinking" indicator and falls back to "continue" on error, so the
+// cost of a longer ceiling is only the worst-case wait, not a worse
+// failure mode.
+const breakAdviceCallTimeout = 30 * time.Second
 
 // AIProviderFactory builds an ai.Provider on demand. Returning ok=false
 // is the convention for "no provider was configured / detected at app
