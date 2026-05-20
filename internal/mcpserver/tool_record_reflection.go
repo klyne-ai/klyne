@@ -8,6 +8,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/klyne-ai/klyne/internal/config"
+	"github.com/klyne-ai/klyne/internal/productivity"
 	"github.com/klyne-ai/klyne/internal/store"
 	"github.com/klyne-ai/klyne/internal/worklog"
 )
@@ -44,11 +45,38 @@ func handleRecordReflection(ctx context.Context, db *store.DB, in RecordReflecti
 		}
 		day = parsed
 	}
-	refl, err := worklog.RecordReflection(ctx, db, in.ProjectPath, day, in.Insights)
+
+	// Layer-2 enrichment (spec §7.2): build the deterministic git
+	// substrate for this project+day and record the reflection through
+	// the substrate-aware path so it carries the open-loops / shipped /
+	// cross-project sections and the §7.1 PR-ref guard runs against real
+	// commit evidence. A non-git project yields an empty substrate and
+	// the call degrades to the plain RecordReflection behaviour (D8).
+	since, until := reflectionDayWindow(day)
+	rep, err := worklog.BuildProjectSubstrate(in.ProjectPath, since, until)
+	if err != nil {
+		// Substrate build must never block the reflection — degrade.
+		rep = productivity.Report{}
+	}
+	refl, err := worklog.RecordReflectionWithSubstrate(ctx, db, in.ProjectPath, day, in.Insights, rep)
 	if err != nil {
 		return nil, err
 	}
 	return &RecordReflectionOutput{ReflectionID: refl.ID, EvidenceCount: len(refl.EvidenceEntryIDs)}, nil
+}
+
+// reflectionDayWindow returns the [00:00, next-00:00) UTC window for the
+// calendar day a reflection covers. A zero day (legacy single-day call)
+// falls back to a 24h window ending now so recent git activity is still
+// grounded.
+func reflectionDayWindow(day time.Time) (since, until time.Time) {
+	if day.IsZero() {
+		until = time.Now()
+		return until.Add(-24 * time.Hour), until
+	}
+	d := day.UTC()
+	since = time.Date(d.Year(), d.Month(), d.Day(), 0, 0, 0, 0, time.UTC)
+	return since, since.Add(24 * time.Hour)
 }
 
 // HandleRecordReflection is the MCP entry-point. The citation invariant
