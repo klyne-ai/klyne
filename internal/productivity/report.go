@@ -105,6 +105,16 @@ func BuildReport(ctx context.Context, in ReportInput, refl ReflectionLookup) (Re
 		}
 		svc.ManualOnly = manualOnly && anyUserCommits
 
+		// Always emit JSON arrays, never null, so UI consumers can
+		// rely on the [] contract (a service with no branches/risks
+		// would otherwise marshal nil slices to null).
+		if svc.Branches == nil {
+			svc.Branches = []Branch{}
+		}
+		if svc.Risks == nil {
+			svc.Risks = []RiskSignal{}
+		}
+
 		// Salience ordering (§7.1 rule 5) applied across the merged
 		// branch set so the highest-impact worktree leads.
 		sortBranches(svc.Branches)
