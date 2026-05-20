@@ -88,6 +88,33 @@
     return Number.isNaN(t) ? null : t;
   }
 
+  // Short calendar date for a timestamp ("19 May 13:50"). '' when empty.
+  function shortDateTime(iso: string): string {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    return d.toLocaleString([], {
+      day: '2-digit',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  }
+
+  // Coarse "N ago" for a timestamp. '' for empty / the Go zero value
+  // (0001-01-01, which parses to a deeply-negative epoch).
+  function relTime(iso: string): string {
+    if (!iso) return '';
+    const t = new Date(iso).getTime();
+    if (Number.isNaN(t) || t <= 0) return '';
+    const mins = Math.round((Date.now() - t) / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins}m ago`;
+    const h = Math.floor(mins / 60);
+    if (h < 24) return `${h}h ago`;
+    return `${Math.floor(h / 24)}d ago`;
+  }
+
   // ---- derived metrics (tile values) --------------------------------------
 
   const branches = $derived(service.branches ?? []);
@@ -136,11 +163,17 @@
     return shas.size;
   });
 
-  // PRs MERGED — distinct PR numbers from commit subjects.
+  // PRs MERGED — GitHub PRs the user merged in the window (gh-sourced,
+  // sorted ascending by merged_at by the backend).
   const mergedPrs = $derived(service.merged_prs ?? []);
+  const latestPr = $derived(
+    mergedPrs.length > 0 ? mergedPrs[mergedPrs.length - 1] : null
+  );
+  // Freshness of the gh-sourced PR data — '' when there is none.
+  const prsAsOf = $derived(relTime(service.merged_prs_as_of));
 
-  // TIME-TO-SHIP — span from earliest first_commit_at to latest
-  // last_commit_at across all branches.
+  // Project-level work span: earliest first_commit_at → latest
+  // last_commit_at across all branches (local-git only).
   const projectSpanMinutes = $derived.by(() => {
     let min: number | null = null;
     let max: number | null = null;
@@ -152,6 +185,22 @@
     }
     if (min === null || max === null || max < min) return null;
     return Math.round((max - min) / 60000);
+  });
+
+  // TIME-TO-SHIP — prefer the true PR-based span (first commit → PR
+  // merge, from gh) when merged PRs exist; else fall back to the local
+  // first→last-commit work span. Returns { minutes, caption } or null.
+  const timeToShip = $derived.by(() => {
+    if (latestPr && latestPr.time_to_ship_minutes > 0) {
+      return {
+        minutes: latestPr.time_to_ship_minutes,
+        caption: `#${latestPr.number} opened → merged`
+      };
+    }
+    if (projectSpanMinutes !== null) {
+      return { minutes: projectSpanMinutes, caption: 'first → last commit' };
+    }
+    return null;
   });
 
   // AI TIME — per-CLI minutes; Claude + Codex always shown (Codex at 0 too).
@@ -254,8 +303,12 @@
         {#each service.risks as r, ri (ri)}
           {@const meta = risk(r.kind)}
           {@const age = hm(r.age_minutes)}
+          {@const brLabel = r.branch && r.branch !== 'HEAD' ? r.branch : ''}
           <li class="risk-chip {meta.cls}">
             <span class="risk-kind">{meta.label}</span>
+            {#if brLabel}
+              <span class="risk-branch ad-mono" title={r.worktree_path}>{brLabel}</span>
+            {/if}
             <span class="risk-detail">{r.detail}</span>
             {#if age}<span class="risk-age ad-tnum">{age} ago</span>{/if}
           </li>
@@ -314,24 +367,32 @@
         <span class="tile-value ad-tnum">{mergedPrs.length}</span>
         <ul class="tile-chips">
           {#each mergedPrs as pr, pi (pi)}
-            <li class="mini-chip ad-mono ad-tnum">#{pr}</li>
+            <li class="mini-chip ad-mono ad-tnum" title={pr.title}>#{pr.number}</li>
           {/each}
         </ul>
+        {#if prsAsOf}
+          <span class="tile-caption" title="GitHub data is cached; refresh interval defaults to 2h">
+            from GitHub · {prsAsOf}
+          </span>
+        {/if}
       {:else}
         <span class="tile-value tile-value--empty">—</span>
-        <span class="tile-caption">none detected</span>
+        <span class="tile-caption">
+          {#if prsAsOf}no PRs in window · checked {prsAsOf}{:else}gh data unavailable{/if}
+        </span>
       {/if}
     </div>
 
     <!-- TIME-TO-SHIP -->
     <div class="tile" role="listitem">
       <span class="tile-label">Time to ship</span>
-      {#if projectSpanMinutes !== null}
-        <span class="tile-value ad-tnum">{hmPlain(projectSpanMinutes)}</span>
+      {#if timeToShip !== null}
+        <span class="tile-value ad-tnum">{hmPlain(timeToShip.minutes)}</span>
+        <span class="tile-caption">{timeToShip.caption}</span>
       {:else}
         <span class="tile-value tile-value--empty">—</span>
+        <span class="tile-caption">first → last commit</span>
       {/if}
-      <span class="tile-caption">first → last commit</span>
     </div>
 
     <!-- AI TIME -->
@@ -375,6 +436,32 @@
 
     {#if detailOpen}
       <div id="svc-detail" class="detail-body">
+        <!-- ---- merged PRs (gh-sourced) ---- -->
+        {#if mergedPrs.length > 0}
+          <section class="pr-section">
+            <h4 class="section-h">
+              Merged PRs
+              <span class="section-meta ad-mono">
+                from GitHub{#if prsAsOf} · {prsAsOf}{/if}
+              </span>
+            </h4>
+            <ul class="pr-list">
+              {#each mergedPrs as pr, pi (pi)}
+                <li class="pr-row">
+                  <span class="pr-num ad-mono ad-tnum">#{pr.number}</span>
+                  <span class="pr-title ad-truncate" title={pr.title}>{pr.title}</span>
+                  <span class="pr-meta ad-mono ad-tnum">
+                    merged {shortDateTime(pr.merged_at)}
+                    {#if pr.time_to_ship_minutes > 0}
+                      · shipped in {hmPlain(pr.time_to_ship_minutes)}
+                    {/if}
+                  </span>
+                </li>
+              {/each}
+            </ul>
+          </section>
+        {/if}
+
         <!-- ---- branches ---- -->
         {#if branches.length === 0}
           <p class="svc-empty">No branch activity in this window.</p>
@@ -556,6 +643,19 @@
     letter-spacing: 0.04em;
     font-size: 9.5px;
     white-space: nowrap;
+  }
+
+  .risk-branch {
+    font-size: 10.5px;
+    font-weight: 500;
+    color: var(--ad-fg-2);
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: color-mix(in oklch, var(--ad-bg-2) 60%, transparent);
+    white-space: nowrap;
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .risk-detail {
@@ -759,6 +859,74 @@
 
   .detail-body {
     border-top: 1px solid var(--ad-border-soft);
+  }
+
+  /* ---- merged-PR section ---- */
+  .pr-section {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--ad-border-soft);
+    background: color-mix(in oklch, var(--ad-bg-2) 30%, transparent);
+  }
+
+  .section-h {
+    margin: 0 0 8px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--ad-faint);
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+
+  .section-meta {
+    font-size: 9.5px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    color: var(--ad-faint);
+    text-transform: none;
+  }
+
+  .pr-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .pr-row {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .pr-num {
+    flex: none;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ad-live);
+    background: color-mix(in oklch, var(--ad-live) 12%, transparent);
+    border: 1px solid color-mix(in oklch, var(--ad-live) 35%, var(--ad-border));
+    border-radius: 5px;
+    padding: 1.5px 7px;
+  }
+
+  .pr-title {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: var(--ad-fs-sm);
+    color: var(--ad-fg-2);
+  }
+
+  .pr-meta {
+    flex: none;
+    font-size: 10.5px;
+    color: var(--ad-faint);
+    white-space: nowrap;
   }
 
   /* ---- branches ---- */

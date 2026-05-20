@@ -463,10 +463,36 @@ export interface ProductivityService {
    */
   reflection_markdown: string;
   /**
-   * Distinct PR numbers referenced in the repo's commit subjects (the
-   * "(#124)" squash/merge titles) — a deterministic merged-PR signal.
+   * GitHub pull requests the user merged within the report window — a
+   * Layer-2 `gh`-sourced enrichment, NOT a deterministic git fact.
+   * Empty when gh/auth/network is unavailable.
    */
-  merged_prs: number[];
+  merged_prs: MergedPR[];
+  /**
+   * When the merged-PR data was fetched (cache timestamp, RFC3339).
+   * The zero value ("0001-01-01T00:00:00Z") means no PR data.
+   */
+  merged_prs_as_of: string;
+}
+/**
+ * One GitHub pull request the user authored and merged within the
+ * window. Mirrors Go productivity.MergedPR. Populated by the API-layer
+ * `gh pr list` enrichment, not by the deterministic core.
+ */
+export interface MergedPR {
+  number: number;
+  title: string;
+  /** PR head branch name. */
+  head_ref: string;
+  /** When the PR merged (RFC3339). */
+  merged_at: string;
+  /** When the PR was opened (RFC3339). */
+  opened_at: string;
+  /**
+   * Minutes from opened_at → merged_at (PR open → merge cycle). 0
+   * when openedAt is unknown.
+   */
+  time_to_ship_minutes: number;
 }
 /**
  * One gap-capped active wall-clock sub-interval of a session. The union
@@ -534,8 +560,27 @@ export interface ProductivityCommit {
   deletions: number;
   is_user: boolean;
 }
+/** A minimal commit reference attached to an "unpushed" risk. */
+export interface ProductivityRiskCommit {
+  sha: string;
+  subject: string;
+}
 export interface ProductivityRisk {
   kind: string;
   detail: string;
   age_minutes: number;
+  /** Branch the risk is on — disambiguates per-worktree rows. */
+  branch: string;
+  /** Working directory the risk was observed in. */
+  worktree_path: string;
+  /**
+   * For an "unpushed" risk: the commits ahead of origin (SHA + subject)
+   * — the concrete evidence behind the count. Empty for other kinds.
+   */
+  commits: ProductivityRiskCommit[];
+  /**
+   * For a "done-uncommitted" risk: the uncommitted/untracked file
+   * paths. Empty for other kinds.
+   */
+  files: string[];
 }
