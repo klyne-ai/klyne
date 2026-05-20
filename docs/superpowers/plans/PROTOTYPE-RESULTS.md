@@ -27,19 +27,23 @@ Reproduce the exact verification: a throwaway read-only harness was used (`inter
 - Rough read-only `/productivity` Svelte page renders the grouped Service→Branch→narrative view (deliberately unstyled; real UI/UX is a separate brainstorm per spec scope).
 - `go test ./internal/productivity/... ./internal/api/... ./internal/store/...` pass, except one **pre-existing, unrelated** failure (`TestNewRouter_AllRoutesPresent/GET_/settings`, reproduced on the untouched base commit).
 
+## Fixed since the first prototype pass (2026-05-20)
+
+- **Ahead-count inflation FIXED.** `aheadBehind`/`hasUpstream` treated "no local upstream tracking ref" as "no remote", reporting a detached/untracked branch's whole history as unpushed (the bogus "4192 commits ahead"). Now falls back through `origin/<branch>` → remote default ref before the whole-history case. Verified: counts are now meaningful (44, 35, 24…). Unit test `TestScanRepo_PushedWithoutLocalTracking` added.
+- **UI render hang FIXED.** Detached worktrees all report branch name `HEAD` and a repo can have two identical risk strings, so the keyed `{#each}` blocks threw `each_key_duplicate` and the page hung on "loading…". Keyed by index. Also added optional `?since=&until=` epoch-ms window to the page URL.
+- **`ticket_id` is NOT broken** (an earlier draft of this file claimed it was — that was wrong; it was only ever observed on genuinely ticketless branches). Verified: `feat/CLI-1397-…` → `CLI-1397`, `feature/cli-1336-…` → `CLI-1336` parse correctly.
+- **Production half MERGED** (branches `feat/pd-snapshot` + `feat/pd-worklog`): session-end git snapshot capture (D6 snapshot half — `productivity.CaptureSessionSnapshots`, `store.InsertGitSnapshot`, wired non-fatally into both session-end paths) and the 7 worklog-reflection improvements (§7.2, in `internal/worklog`, consuming this substrate).
+
 ## Honest caveats / known issues (NOT masked)
 
-1. **Ship-states read `pushed-to-remote`, not `committed-local-only`.** The original spec success-criterion 1 expected consultation-service CLI-1396 as committed-local. It is now the next day and that work has since been pushed — the dashboard correctly reports *current* truth. This is data drift, not a defect; the committed-local path is exercised by unit tests and the klyne worktree branch.
-2. **`ticket_id` is empty even on `feat/CLI-1397-...` / `feature/cli-1336-...` branches.** The ticket regex isn't extracting the embedded `CLI-####` token. Minor, real bug — fix in follow-up.
-3. **`unpushed` risk shows inflated counts** (e.g. consultation-service "4192 commits ahead"). When a scanned branch has no upstream tracking ref, ahead-count = total history. Needs a no-upstream guard. Minor correctness issue.
-4. **Two `klyne-showcase-*` temp repos under `os.TempDir()` still appear as services.** Left intentionally (filtering by tempdir prefix risked excluding legitimate repos); cosmetic noise only.
-5. **Identity seed is hardcoded** (`mohitpatel9753@gmail.com`, `coders@clinikk.com`, `mohit@clinikk.com`). Spec §11 already scopes config-wiring as a production follow-up; the seed is the placeholder.
+1. **Ship-states read `pushed-to-remote`, not `committed-local-only`** for the labstack repos. The original spec success-criterion 1 expected consultation-service CLI-1396 as committed-local; it is now the next day and that work has since been pushed — the dashboard correctly reports *current* truth. Data drift, not a defect; the committed-local path is exercised by unit tests and the klyne feature branches.
+2. **Two `klyne-showcase-*` temp repos under `os.TempDir()` still appear as services.** Left intentionally (filtering by tempdir prefix risked excluding legitimate repos); cosmetic noise only.
+3. **Identity seed is hardcoded** (`mohitpatel9753@gmail.com`, `coders@clinikk.com`, `mohit@clinikk.com`). Config-wiring is a documented follow-up; the seed is the placeholder.
+4. **klyne's own feature branches show ~67 commits each with identical narratives** — `feat/pd-snapshot`/`feat/pd-worklog`/`feat/productivity-dashboard` share most history, so per-branch dedup of shared commits is a refinement worth doing.
 
-## Stubbed per spec §11 (by design, documented in code with `// PROTOTYPE STUB (spec §11):`)
+## Stubbed — remaining follow-up (spec §11)
 
-- Session-end git **snapshot capture** — migration `017` ships the tables, but only *current* dirty/ahead state is computed live; historical "uncommitted-at-11:30" reconstruction is the production follow-up (the D6 snapshot half).
-- **Layer-2 reflection enrichment** + the 7 worklog improvements (§7.2) — substrate is built and consumable; the `internal/worklog` upgrade is the next plan phase.
-- **`dashboard_cache` memoization** — prototype computes live each request.
+- **`dashboard_cache` memoization** — the dashboard computes live each request (acceptable at current repo count; caching is a perf follow-up). This is now the ONLY remaining §11 stub — snapshot capture and the worklog improvements are built and merged.
 
 ## Process deviation (disclosed)
 
