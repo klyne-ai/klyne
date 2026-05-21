@@ -254,3 +254,116 @@ func TestMergeDay_AdmittedEntries_RenderToMarkdown(t *testing.T) {
 		t.Errorf("end-to-end render missing content:\n%s", got)
 	}
 }
+
+// --- dedup + cap (high-cardinality day) -----------------------------------
+
+// Regression — a busy day with N turns each reporting the SAME work
+// in slightly-varying wording must collapse to ONE bullet, with refs
+// merged. Without this guard the dashboard reads like a per-turn
+// commit log (the original bug — 1000+ bullets per category).
+func TestMergeMarkdown_DedupCollapsesSameRepoAndSummary(t *testing.T) {
+	rows := []store.DayEntry{
+		{SessionID: "s1", Ts: 1, Entry: entryWithCategory("shipped", store.WorklogItem{
+			Summary: "rich-entry pipeline merged",
+			Repo:    "klyne",
+			Refs:    []string{"775d0bf"},
+		})},
+		{SessionID: "s2", Ts: 2, Entry: entryWithCategory("shipped", store.WorklogItem{
+			Summary: "rich-entry  pipeline   merged", // extra whitespace — same content
+			Repo:    "klyne",
+			Refs:    []string{"adfde38"},
+		})},
+		{SessionID: "s3", Ts: 3, Entry: entryWithCategory("shipped", store.WorklogItem{
+			Summary: "Rich-Entry Pipeline Merged", // different case — same content
+			Repo:    "klyne",
+			Refs:    []string{"f50edf1"},
+			Ticket:  "PIPE-9",
+		})},
+	}
+	got := richentry.MergeMarkdown(rows)
+	// Exactly one bullet under Shipped — three rows collapsed.
+	if c := strings.Count(got, "\n- "); c != 1 {
+		t.Errorf("expected 1 deduped bullet, got %d:\n%s", c, got)
+	}
+	// All three refs merged into the single bullet, in first-seen order.
+	if !strings.Contains(got, "`775d0bf, adfde38, f50edf1`") {
+		t.Errorf("refs not merged across dupes:\n%s", got)
+	}
+	// Ticket from any contributor is preserved.
+	if !strings.Contains(got, "[PIPE-9]") {
+		t.Errorf("ticket from a duplicate row dropped:\n%s", got)
+	}
+}
+
+// Regression — distinct work on the SAME repo must NOT collapse just
+// because the summaries happen to share words. Two unique summaries
+// → two bullets.
+func TestMergeMarkdown_DedupPreservesDistinctWork(t *testing.T) {
+	rows := []store.DayEntry{
+		{SessionID: "a", Ts: 1, Entry: entryWithCategory("shipped",
+			store.WorklogItem{Summary: "migration 019 landed", Repo: "klyne"},
+			store.WorklogItem{Summary: "migration 020 landed", Repo: "klyne"},
+		)},
+	}
+	got := richentry.MergeMarkdown(rows)
+	if !strings.Contains(got, "migration 019 landed") || !strings.Contains(got, "migration 020 landed") {
+		t.Errorf("distinct bullets lost:\n%s", got)
+	}
+	if c := strings.Count(got, "\n- "); c != 2 {
+		t.Errorf("expected 2 distinct bullets, got %d:\n%s", c, got)
+	}
+}
+
+// Regression — when distinct bullets in a category exceed the cap,
+// render the head N and append an honest "…and X more" overflow.
+func TestMergeMarkdown_PerCategoryCap(t *testing.T) {
+	// Generate 40 distinct bullets in one category — exceeds cap of 25.
+	rows := make([]store.DayEntry, 40)
+	for i := 0; i < 40; i++ {
+		rows[i] = store.DayEntry{
+			SessionID: "s", Ts: int64(i + 1),
+			Entry: entryWithCategory("features_worked_on", store.WorklogItem{
+				Summary: "distinct item #" + itoa(i),
+				Repo:    "klyne",
+			}),
+		}
+	}
+	got := richentry.MergeMarkdown(rows)
+	bullets := strings.Count(got, "\n- ")
+	// 25 capped bullets + 1 overflow line = 26 "- " starts.
+	if bullets != 26 {
+		t.Errorf("expected 25 capped + 1 overflow = 26 bullets, got %d:\n%s", bullets, got)
+	}
+	if !strings.Contains(got, "_…and 15 more") {
+		t.Errorf("missing overflow line:\n%s", got[len(got)-200:])
+	}
+	// Most-recent-first: the highest Ts (39) must appear; the lowest (0) must be in overflow.
+	if !strings.Contains(got, "distinct item #39") {
+		t.Errorf("newest bullet missing — sort order wrong:\n%s", got)
+	}
+	if strings.Contains(got, "distinct item #0\n") {
+		t.Errorf("oldest bullet shown despite exceeding cap:\n%s", got)
+	}
+}
+
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	var buf [12]byte
+	i := len(buf)
+	neg := n < 0
+	if neg {
+		n = -n
+	}
+	for n > 0 {
+		i--
+		buf[i] = byte('0' + n%10)
+		n /= 10
+	}
+	if neg {
+		i--
+		buf[i] = '-'
+	}
+	return string(buf[i:])
+}
