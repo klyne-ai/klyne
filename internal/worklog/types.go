@@ -38,6 +38,12 @@ type Entry struct {
 	EditWriteCount   int
 	EventTags        []EventTag
 	ExplicitUserText string
+	// AIDraftedSummary is the per-turn prose summary the assistant
+	// emitted via the `KLYNE_SUMMARY: <text>` instruction injected by
+	// the UserPromptSubmit hook. Empty when the assistant skipped or
+	// when the line couldn't be parsed. The Stop hook populates this
+	// from the assistant's last message; the daemon NEVER drafts it.
+	AIDraftedSummary string
 }
 
 func (e Entry) Has(t EventTag) bool {

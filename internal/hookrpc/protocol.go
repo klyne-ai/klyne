@@ -75,6 +75,13 @@ const (
 	EventAdvise       Event = "advise"
 	EventPreCompact   Event = "precompact"
 	EventSessionEnd   Event = "session-end"
+	// EventSessionStart fires when Claude Code starts a new session
+	// (interactive launch or `claude --print` invocation). It is the
+	// ONLY hook that fires in `--print` mode before the assistant
+	// generates, so it carries the KLYNE_SUMMARY instruction —
+	// without it, scripted/test/CI flows can't reach the assistant
+	// with our additionalContext.
+	EventSessionStart Event = "session-start"
 )
 
 // AllEvents enumerates every supported event. Used by the dispatcher
@@ -85,20 +92,19 @@ var AllEvents = []Event{
 	EventAdvise,
 	EventPreCompact,
 	EventSessionEnd,
+	EventSessionStart,
 }
 
 // DaemonRoutedEvents enumerates the events the daemon handles
-// in-process. All four Claude Code hook events now route through the
-// daemon when it is reachable; the session-end handler lives in
-// internal/hooks/sessionend.go alongside the other three. The stub
-// still falls back to exec'ing the full binary when the daemon socket
-// is missing or unresponsive — but that fallback emits a visible
-// warning so users notice the daemon needs to be started.
+// in-process. All Claude Code hook events route through the daemon
+// when it is reachable; the stub still falls back to exec'ing the
+// full binary when the daemon socket is missing or unresponsive.
 var DaemonRoutedEvents = map[Event]bool{
-	EventPreTool:    true,
-	EventAdvise:     true,
-	EventPreCompact: true,
-	EventSessionEnd: true,
+	EventPreTool:      true,
+	EventAdvise:       true,
+	EventPreCompact:   true,
+	EventSessionEnd:   true,
+	EventSessionStart: true,
 }
 
 // Request is the single JSON object the stub sends per connection.

@@ -15,14 +15,11 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/klyne-ai/klyne/internal/ai"
 	"github.com/klyne-ai/klyne/internal/api"
 	"github.com/klyne-ai/klyne/internal/config"
 	"github.com/klyne-ai/klyne/internal/connectors"
 )
 
-func aiChatReqStub() ai.ChatRequest  { return ai.ChatRequest{Model: "x"} }
-func aiEmbedReqStub() ai.EmbedRequest { return ai.EmbedRequest{Model: "x", Input: "y"} }
 
 // newTestConfig returns a *config.Config rooted at t.TempDir(): the DB
 // lives in <tempdir>/klyne.db and connectors point at empty
@@ -64,9 +61,6 @@ func TestBuildOnly_AllDepsWired(t *testing.T) {
 	}
 	if a.hub == nil {
 		t.Fatal("hub nil")
-	}
-	if a.runner == nil {
-		t.Fatal("runner nil")
 	}
 	if len(a.connectors) != 2 {
 		t.Fatalf("expected 2 connectors (claude+codex), got %d", len(a.connectors))
@@ -650,52 +644,10 @@ func TestExpandHomeOrDefault(t *testing.T) {
 	}
 }
 
-func TestBuildProvider_Switch(t *testing.T) {
-	cases := []struct {
-		name   string
-		expect string
-	}{
-		{"claude-cli", "claude-cli"},
-		{"codex-cli", "codex-cli"},
-		{"ollama", "ollama"},
-		{"anthropic", ""}, // legacy name — must not resolve post-rewrite
-		{"openai", ""},
-		{"gemini", ""},
-		{"unknown", ""},
-	}
-	for _, tc := range cases {
-		got := buildProvider(tc.name)
-		if tc.expect == "" {
-			if got != nil {
-				t.Errorf("buildProvider(%q) = %v, want nil", tc.name, got)
-			}
-			continue
-		}
-		if got == nil {
-			t.Errorf("buildProvider(%q) returned nil", tc.name)
-			continue
-		}
-		if got.Name() != tc.expect {
-			t.Errorf("buildProvider(%q).Name() = %q, want %q", tc.name, got.Name(), tc.expect)
-		}
-	}
-}
-
-func TestNoopProvider(t *testing.T) {
-	p := noopProvider{}
-	if p.Name() != "noop" {
-		t.Fatal("noopProvider.Name != noop")
-	}
-	if _, err := p.Chat(context.Background(), aiChatReqStub()); err == nil {
-		t.Fatal("noopProvider.Chat must return error")
-	}
-	if _, err := p.Embed(context.Background(), aiEmbedReqStub()); err == nil {
-		t.Fatal("noopProvider.Embed must return error")
-	}
-	if got := p.Models(); got != nil {
-		t.Fatalf("Models = %v, want nil", got)
-	}
-}
+// TestBuildProvider_Switch was retired with the daemon-side AI path.
+// klyne no longer constructs providers — all synthesis happens inside
+// the user's interactive Claude/Codex session via the
+// UserPromptSubmit + Stop hooks.
 
 func TestPickConnectorForPath(t *testing.T) {
 	cfg := newTestConfig(t)

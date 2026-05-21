@@ -35,3 +35,7 @@ Thumbs.db
 dist/
 
 .claude
+
+# Local dev worktrees and tool artifacts
+.worktrees/
+.playwright-mcp/

@@ -12,7 +12,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/klyne-ai/klyne/internal/ai/providers"
 	"github.com/klyne-ai/klyne/internal/config"
 	"github.com/klyne-ai/klyne/internal/store"
 )
@@ -39,6 +38,11 @@ func newDoctorCmd() *cobra.Command {
 }
 
 // doctorReport is the structured output of `klyne doctor`.
+//
+// Providers used to be reported here, but klyne no longer talks to any
+// AI provider from the daemon — synthesis runs inside the user's
+// interactive Claude/Codex session via the UserPromptSubmit + Stop
+// hooks. The `providers` field is gone for that reason.
 type doctorReport struct {
 	OK            bool                       `json:"ok"`
 	Version       string                     `json:"version"`
@@ -47,7 +51,6 @@ type doctorReport struct {
 	DBPath        string                     `json:"db_path"`
 	DBSizeBytes   int64                      `json:"db_size_bytes"`
 	Connectors    map[string]connectorStatus `json:"connectors"`
-	Providers     map[string]bool            `json:"providers"`
 }
 
 type connectorStatus struct {
@@ -82,7 +85,6 @@ func buildDoctorReport() (doctorReport, bool) {
 		Version:    version,
 		ConfigPath: config.ConfigFile(),
 		Connectors: map[string]connectorStatus{},
-		Providers:  map[string]bool{},
 	}
 
 	// --- Config ----------------------------------------------------------
@@ -133,24 +135,11 @@ func buildDoctorReport() (doctorReport, bool) {
 
 	anyRootExists := r.Connectors["claude"].Exists || r.Connectors["codex"].Exists
 
-	// --- Providers -------------------------------------------------------
-	detectCtx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
-	defer cancel()
-	infos := providers.DetectAvailable(detectCtx)
-	anyProvider := false
-	for _, p := range infos {
-		r.Providers[p.Name] = p.Available
-		if p.Available {
-			anyProvider = true
-		}
-	}
-
 	// "ok" = green:
 	//   * config loaded (or defaulted) without panic
 	//   * DB opens
 	//   * at least one connector root exists
-	//   * at least one provider available
-	r.OK = dbOK && anyRootExists && anyProvider && cfgErr == nil
+	r.OK = dbOK && anyRootExists && cfgErr == nil
 	return r, r.OK
 }
 

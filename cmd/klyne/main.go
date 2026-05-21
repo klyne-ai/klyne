@@ -64,6 +64,9 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newOtelCmd())
 	// Stop-hook session summary writer.
 	root.AddCommand(newSessionEndCmd())
+	// SessionStart hook — injects KLYNE_SUMMARY instruction so the
+	// model emits per-turn summaries even in `claude --print` mode.
+	root.AddCommand(newSessionStartCmd())
 	// Cross-AI worklog — weekly digest exports + reflection ops.
 	root.AddCommand(newWorklogCmd())
 	// v0 Context X-ray — scorecard of context fill, cache trajectory, and MCP source attribution.

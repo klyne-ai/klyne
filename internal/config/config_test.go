@@ -48,12 +48,8 @@ func TestLoad_DefaultsWhenMissing(t *testing.T) {
 	if cfg.Connectors.Claude.Enabled != def.Connectors.Claude.Enabled {
 		t.Errorf("Claude.Enabled = %v; want %v", cfg.Connectors.Claude.Enabled, def.Connectors.Claude.Enabled)
 	}
-	if cfg.AI.SummaryModel != AIModelAuto {
-		t.Errorf("AI.SummaryModel = %q; want %q", cfg.AI.SummaryModel, AIModelAuto)
-	}
-	if cfg.AI.EmbedModel != AIModelOff {
-		t.Errorf("AI.EmbedModel = %q; want %q", cfg.AI.EmbedModel, AIModelOff)
-	}
+	// The [ai] table was removed when daemon-side AI synthesis was
+	// retired (2026-05-21) — Defaults() no longer carries AI.* fields.
 
 	// Load() must have written the file so a subsequent call finds it.
 	cfgFile := ConfigFile()
@@ -72,7 +68,6 @@ func TestSave_Load_RoundTrip(t *testing.T) {
 	// Modify a few fields and save.
 	cfg := Defaults()
 	cfg.Server.Addr = "127.0.0.1:9999"
-	cfg.AI.SummaryModel = "openai/gpt-5-mini"
 	cfg.Connectors.Codex.Enabled = false
 
 	if err := Save(cfg); err != nil {
@@ -87,9 +82,6 @@ func TestSave_Load_RoundTrip(t *testing.T) {
 
 	if loaded.Server.Addr != "127.0.0.1:9999" {
 		t.Errorf("Server.Addr = %q; want %q", loaded.Server.Addr, "127.0.0.1:9999")
-	}
-	if loaded.AI.SummaryModel != "openai/gpt-5-mini" {
-		t.Errorf("AI.SummaryModel = %q; want %q", loaded.AI.SummaryModel, "openai/gpt-5-mini")
 	}
 	if loaded.Connectors.Codex.Enabled != false {
 		t.Errorf("Codex.Enabled = true; want false")

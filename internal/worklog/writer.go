@@ -69,11 +69,12 @@ func WriteEntry(ctx context.Context, db *store.DB, e Entry, dismissed map[string
 		Files:    e.Files,
 	}
 	cols := store.WorklogColumns{
-		RecapVisible:   visible,
-		DraftState:     "proposed",
-		Signature:      sig,
-		Importance:     imp,
-		LastAccessedAt: time.Now().UnixMilli(),
+		RecapVisible:     visible,
+		DraftState:       "proposed",
+		Signature:        sig,
+		Importance:       imp,
+		LastAccessedAt:   time.Now().UnixMilli(),
+		AIDraftedSummary: e.AIDraftedSummary,
 	}
 	if err := upsert(ctx, db, row, cols); err != nil {
 		return WriteResult{}, fmt.Errorf("worklog: upsert: %w", err)

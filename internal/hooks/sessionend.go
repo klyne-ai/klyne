@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -17,6 +18,118 @@ import (
 	"github.com/klyne-ai/klyne/internal/store"
 	"github.com/klyne-ai/klyne/internal/worklog"
 )
+
+// klyneSummaryRe captures the `KLYNE_SUMMARY: <text>` line the
+// UserPromptSubmit hook asks the assistant to emit at the end of each
+// reply. Anchored to start-of-line so a passing mention of the literal
+// string inside markdown / quotes / code blocks doesn't false-match.
+//
+// The text portion is captured up to end-of-line. A leading "skip"
+// (case-insensitive, exact word) is treated as the assistant
+// declaring the turn unworthy of a summary — we discard such lines.
+var klyneSummaryRe = regexp.MustCompile(`(?m)^\s*KLYNE_SUMMARY:\s*(.+?)\s*$`)
+
+// klyneSummaryMaxLen caps the captured summary length so a runaway
+// reply can't bloat ai_drafted_summary. The instruction asks for
+// ≤100 words; 1000 characters is a generous ceiling.
+const klyneSummaryMaxLen = 1000
+
+// loadSnapshotWaitForFinalText loads path via mcpserver.LoadSnapshot
+// and retries until the most recent assistant message carries
+// non-empty text content, or budget elapses. This sidesteps the race
+// where Claude Code's Stop hook fires before the model's final text
+// block is flushed to JSONL — a naive single LoadSnapshot loses the
+// KLYNE_SUMMARY line we just instructed the model to emit.
+//
+// "Final text content present" is the proxy for "transcript is
+// complete" — much more reliable than mtime polling on macOS where
+// mtime granularity and write coalescing can lie. We give up on
+// budget and return whatever's loaded; the caller proceeds with that
+// (the deterministic columns still write, ai_drafted_summary just
+// stays empty for that row).
+func loadSnapshotWaitForFinalText(ctx context.Context, path string, budget time.Duration) (*mcpserver.SessionSnapshot, error) {
+	const pollEvery = 100 * time.Millisecond
+	deadline := time.Now().Add(budget)
+	var lastSnap *mcpserver.SessionSnapshot
+	for {
+		snap, err := mcpserver.LoadSnapshot(ctx, path)
+		if err != nil {
+			return nil, err
+		}
+		lastSnap = snap
+		if hasFinalAssistantText(snap) {
+			return snap, nil
+		}
+		if time.Now().After(deadline) {
+			return lastSnap, nil
+		}
+		select {
+		case <-ctx.Done():
+			return lastSnap, ctx.Err()
+		case <-time.After(pollEvery):
+		}
+	}
+}
+
+// hasFinalAssistantText reports whether snap's most recent assistant
+// message has non-empty text content. Tool-call-only assistant turns
+// don't count — they're a sign the model hasn't emitted its final
+// reply yet (the typical sequence is: tool_use, tool_result,
+// tool_use, ..., final text). The Stop hook fires once the LAST
+// assistant turn includes plain text — which is also where the
+// KLYNE_SUMMARY line will live.
+func hasFinalAssistantText(snap *mcpserver.SessionSnapshot) bool {
+	if snap == nil {
+		return false
+	}
+	for i := len(snap.Messages) - 1; i >= 0; i-- {
+		m := snap.Messages[i]
+		if m == nil || m.Role != connectors.RoleAssistant {
+			continue
+		}
+		if strings.TrimSpace(m.Content) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+
+// extractKlyneSummary scans msgs (in reverse) for the most recent
+// assistant message and returns its trailing `KLYNE_SUMMARY: ...`
+// payload. Returns "" when the line is missing, says "skip", or the
+// capture is empty. The match is taken from the LAST occurrence so
+// an interrupted earlier draft doesn't shadow the final answer.
+func extractKlyneSummary(msgs []*connectors.Message) string {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		m := msgs[i]
+		if m == nil || m.Role != connectors.RoleAssistant {
+			continue
+		}
+		body := m.Content
+		if body == "" {
+			// First assistant message with non-empty text wins;
+			// pure tool-call turns have empty Content and are skipped.
+			continue
+		}
+		matches := klyneSummaryRe.FindAllStringSubmatch(body, -1)
+		if len(matches) == 0 {
+			return ""
+		}
+		raw := strings.TrimSpace(matches[len(matches)-1][1])
+		if raw == "" {
+			return ""
+		}
+		if strings.EqualFold(raw, "skip") {
+			return ""
+		}
+		if len(raw) > klyneSummaryMaxLen {
+			raw = raw[:klyneSummaryMaxLen]
+		}
+		return raw
+	}
+	return ""
+}
 
 // sessionEndTimeout caps wall-clock time for the entire hook. Larger
 // than the advise hook's 2s because we may walk a longer transcript;
@@ -86,7 +199,14 @@ func computeAndPersistSessionEnd(ctx context.Context, stdin io.Reader, db *store
 		transcript = path
 	}
 
-	snap, err := mcpserver.LoadSnapshot(ctx, transcript)
+	// Load the transcript, retrying briefly if the final assistant
+	// turn hasn't been flushed to disk yet. Claude Code's Stop hook
+	// fires the moment the model stops generating — a few hundred
+	// milliseconds BEFORE the final text block lands in JSONL. The
+	// retry loop polls until the most recent assistant message
+	// carries non-empty text content (i.e., not just tool calls), or
+	// the budget elapses. Bounded ≤ 3s, well within the 5s sessionEndTimeout.
+	snap, err := loadSnapshotWaitForFinalText(ctx, transcript, 3*time.Second)
 	if err != nil {
 		return fmt.Errorf("load snapshot: %w", err)
 	}
@@ -176,19 +296,29 @@ func computeAndPersistSessionEnd(ctx context.Context, stdin io.Reader, db *store
 		Files:          summary.Files,
 	})
 
+	// Pull the per-turn KLYNE_SUMMARY line out of the last assistant
+	// message. The UserPromptSubmit hook injects an instruction asking
+	// the assistant to emit one such line at the end of each reply;
+	// when present we store it verbatim in ai_drafted_summary so
+	// reflection has a real prose record without any daemon-side LM call.
+	// Empty / "skip" / missing → empty AIDraftedSummary; reflection still
+	// works using the deterministic columns.
+	aiDraftedSummary := extractKlyneSummary(snap.Messages)
+
 	entry := worklog.Entry{
-		SessionID:      row.SessionID,
-		TS:             time.UnixMilli(row.Ts),
-		ProjectPath:    row.ProjectPath,
-		CLI:            row.CLI,
-		LastUser:       row.LastUser,
-		LastBash:       row.LastBash,
-		Files:          row.Files,
-		CommitSHA:      "",
-		WallTime:       wallTime,
-		ToolCallCount:  toolCount,
-		EditWriteCount: editWriteCount,
-		EventTags:      tags,
+		SessionID:        row.SessionID,
+		TS:               time.UnixMilli(row.Ts),
+		ProjectPath:      row.ProjectPath,
+		CLI:              row.CLI,
+		LastUser:         row.LastUser,
+		LastBash:         row.LastBash,
+		Files:            row.Files,
+		CommitSHA:        "",
+		WallTime:         wallTime,
+		ToolCallCount:    toolCount,
+		EditWriteCount:   editWriteCount,
+		EventTags:        tags,
+		AIDraftedSummary: aiDraftedSummary,
 	}
 	if _, werr := worklog.WriteEntry(ctx, db, entry, map[string]bool{}, store.UpsertStopSummaryWithWorklog); werr != nil {
 		fmt.Fprintf(stderr, "klyne session-end: worklog write failed: %v\n", werr)
@@ -251,10 +381,13 @@ type sessionFixture struct {
 func deriveEventTags(s sessionFixture) []worklog.EventTag {
 	var tags []worklog.EventTag
 	cmd := strings.TrimSpace(s.LastBash)
-	if strings.HasPrefix(cmd, "git commit") {
+	// Detect commits and PR-opens in compound commands too — e.g.
+	// `git add README.md && git commit -m "..."`. Strict-prefix match
+	// missed these and undercounted the events.
+	if containsCommandToken(cmd, "git commit") {
 		tags = append(tags, worklog.TagCommitLanded)
 	}
-	if strings.HasPrefix(cmd, "gh pr create") {
+	if containsCommandToken(cmd, "gh pr create") {
 		tags = append(tags, worklog.TagPROpened)
 	}
 	if s.EditWriteCount >= 2 {
@@ -299,6 +432,35 @@ func readSessionEndInput(r io.Reader) sessionEndInput {
 		return sessionEndInput{}
 	}
 	return in
+}
+
+// containsCommandToken reports whether cmd contains token as a
+// standalone command — guarding against the false positive where a
+// substring like `git committed` would match `git commit`. We split
+// cmd on shell separators (&&, ;, |, newlines) and prefix-match each
+// segment, which catches both compound commands and chained pipes.
+func containsCommandToken(cmd, token string) bool {
+	if cmd == "" || token == "" {
+		return false
+	}
+	// Replace separators with a single sentinel so a single Split
+	// pass covers all three.
+	normalized := cmd
+	for _, sep := range []string{"&&", "||", "|", ";", "\n"} {
+		normalized = strings.ReplaceAll(normalized, sep, "\x00")
+	}
+	for _, seg := range strings.Split(normalized, "\x00") {
+		seg = strings.TrimSpace(seg)
+		if strings.HasPrefix(seg, token) {
+			// Require either end-of-segment or a space/flag character
+			// after the token so `git committed` doesn't pass.
+			tail := seg[len(token):]
+			if tail == "" || tail[0] == ' ' || tail[0] == '\t' {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // derivedCWD picks the cwd off the latest message that has one set.

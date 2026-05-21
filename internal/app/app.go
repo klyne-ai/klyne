@@ -70,9 +70,6 @@ import (
 	"time"
 
 	rootembed "github.com/klyne-ai/klyne"
-	"github.com/klyne-ai/klyne/internal/ai"
-	"github.com/klyne-ai/klyne/internal/ai/providers"
-	"github.com/klyne-ai/klyne/internal/ai/tasks"
 	"github.com/klyne-ai/klyne/internal/api"
 	"github.com/klyne-ai/klyne/internal/api/handlers"
 	"github.com/klyne-ai/klyne/internal/config"
@@ -107,15 +104,6 @@ type App struct {
 
 	// SSE broadcast hub
 	hub *api.Hub
-
-	// AI runner (summaries / titles)
-	runner *tasks.Runner
-
-	// aiProvider is the shared AI provider buildRunner selected — kept
-	// here so background workers (rich-entry worker) can reuse the
-	// same provider without re-running detection. noopProvider{} when
-	// no real provider is available.
-	aiProvider ai.Provider
 
 	// Connectors selected by config (Claude, Codex, …)
 	connectors []connectors.Connector
@@ -165,11 +153,6 @@ type App struct {
 	// a summary marker and waits for the next assistant message before
 	// firing — so we must keep one instance per session, not per call.
 	claudeCompactBySession map[string]*claude.CompactDetector
-
-	// runnerStarted is true once Start has booted the AI runner. Stop
-	// should NOT call runner.Stop unless Start ran — runner.Stop blocks
-	// on its internal done channel which is only closed by Start.
-	runnerStarted bool
 
 	// Demo, when true, marks this App as running in `klyne start
 	// --demo` mode. Start prints the demo banner before binding the HTTP
@@ -223,32 +206,16 @@ func BuildOnly(cfg *config.Config) (*App, error) {
 	// 4. Connectors selected by config.
 	conns := buildConnectors(cfg)
 
-	// 5. AI runner — provider/model selected by selector against detected
-	// providers. If no provider is available the runner is still constructed
-	// (with a no-op provider) so Start cannot panic; summaries simply error
-	// out and log. The detection happens once at build time.
-	runner, aiProv, err := buildRunner(cfg, db, hub, logger)
-	if err != nil {
-		_ = db.Close()
-		hub.Close()
-		return nil, fmt.Errorf("app: build ai runner: %w", err)
-	}
-
-	// AI factory for the break-advice handler. We pick a Title-class
-	// (cheapest) model so the per-call cost is trivial — the prompt is
-	// short and the expected reply is a one-line JSON. Build it lazily
-	// inside the closure so we honour any provider state at request
-	// time rather than baking in a stale snapshot.
-	aiFactory := buildBreakAdviceFactory(cfg, logger)
-
-	// 6. Default mounters — W7 handlers + W8 events + W15 wizard/restore.
+	// 5. Default mounters — W7 handlers + W8 events + W15 wizard/restore.
+	// The daemon no longer wires an AI factory; handlers that previously
+	// depended on one (e.g. break-advice) have been retired in favour of
+	// the user's interactive session doing the synthesis.
 	mounters := []api.RouterMounter{
 		handlers.NewMounter(handlers.Deps{
-			DB:        db,
-			Cfg:       cfg,
-			Cost:      costEngine,
-			Logger:    logger,
-			AIFactory: aiFactory,
+			DB:     db,
+			Cfg:    cfg,
+			Cost:   costEngine,
+			Logger: logger,
 		}),
 		&handlers.EventsMounter{Hub: hub},
 	}
@@ -259,8 +226,6 @@ func BuildOnly(cfg *config.Config) (*App, error) {
 		db:                     db,
 		cost:                   costEngine,
 		hub:                    hub,
-		runner:                 runner,
-		aiProvider:             aiProv,
 		connectors:             conns,
 		mounters:               mounters,
 		OpenBrowserFunc:        DefaultOpenBrowser,
@@ -403,19 +368,6 @@ func (a *App) Start(ctx context.Context) error {
 		a.runWriter(ctx, rawEvents)
 	}()
 
-	// AI runner goroutine. Documented invariant #2: summaries NEVER run
-	// inline with the writer — tasks.Runner has its own work pool.
-	if a.runner != nil {
-		a.runnerStarted = true
-		a.ingestWG.Add(1)
-		go func() {
-			defer a.ingestWG.Done()
-			if rerr := a.runner.Start(ctx); rerr != nil && !errors.Is(rerr, context.Canceled) {
-				a.logger.Error("ai runner ended", slog.Any("error", rerr))
-			}
-		}()
-	}
-
 	// Cross-AI worklog tickers (T8 + T18). Both off by default — see
 	// WorklogConfig. Each ticker swallows per-iteration errors so a
 	// transient DB hiccup or LM outage doesn't tear down the daemon.
@@ -439,18 +391,14 @@ func (a *App) Start(ctx context.Context) error {
 		}()
 	}
 
-	// Migration-019 rich worklog-entry worker (Phase 5 of the rich-
-	// entry plan). Gated on cfg.Worklog.RichEntryWorkerEnabled —
-	// the call is a no-op + info-log when the flag is off so opting
-	// in is explicit (same convention as CodexDetectorEnabled).
-	// Implementation lives in richentry_worker.go.
-	a.startRichEntryWorker(ctx)
-
-	// Reflection synthesis used to run here on a 5-minute ticker against
-	// the Anthropic Messages API. It now happens inside the user's own
-	// AI session via the /klyne:reflect slash command — the daemon
-	// surfaces a "Reflection due" advisory in the bootstrap brief but
-	// never issues an LM call itself.
+	// The daemon issues ZERO LM calls. All synthesis happens inside
+	// the user's interactive Claude/Codex session:
+	//   - per-turn summary: UserPromptSubmit hook instructs the model
+	//     to emit `KLYNE_SUMMARY: ...` at the end of each response;
+	//     the Stop hook then extracts that line into ai_drafted_summary.
+	//   - reflection synthesis: /klyne:reflect surfaces raw rows and
+	//     the user's session does the synthesis itself.
+	// No background worker, no claude --print, no API key.
 
 	// 3.5. Start the klyne-hook RPC server (Unix socket) so the
 	// klyne-hook stub can forward Claude Code hook events without
@@ -542,13 +490,6 @@ func (a *App) Stop(ctx context.Context) error {
 		case <-done:
 		case <-ctx.Done():
 			a.logger.Warn("ingest goroutines did not exit within grace window")
-		}
-
-		// Stop the AI runner only if Start booted it. Calling runner.Stop
-		// when Start never ran would block forever on its internal done
-		// channel.
-		if a.runner != nil && a.runnerStarted {
-			_ = a.runner.Stop()
 		}
 
 		// Drain the hook RPC listener BEFORE closing the DB so any
@@ -886,142 +827,6 @@ func buildConnectors(cfg *config.Config) []connectors.Connector {
 	}
 	return out
 }
-
-// buildRunner builds the AI runner, picking provider+model via the
-// selector against detected providers. Returns the runner AND the
-// chosen provider (so callers like the rich-entry worker can reuse
-// the same provider without re-running detection). The returned
-// provider is non-nil even when no real provider is available — it
-// is noopProvider{} in that case, so callers can use it unconditionally;
-// calls will fail with ai.ErrNoCredential and the runner logs the error.
-func buildRunner(cfg *config.Config, db *store.DB, hub *api.Hub, logger *slog.Logger) (*tasks.Runner, ai.Provider, error) {
-	detectCtx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
-	defer cancel()
-
-	available := providers.DetectAvailable(detectCtx)
-
-	override := ""
-	if cfg.AI.SummaryModel != "" && cfg.AI.SummaryModel != config.AIModelAuto && cfg.AI.SummaryModel != config.AIModelOff {
-		override = cfg.AI.SummaryModel
-	}
-
-	choice, err := ai.Pick(ai.TaskSummarize, available, override)
-	if err != nil {
-		// No provider available — return a runner with the noop provider
-		// so Start is non-fatal. Summaries will log and skip.
-		logger.Warn("ai: no provider available; summaries will be skipped",
-			slog.Any("error", err))
-		noop := noopProvider{}
-		return tasks.NewRunner(tasks.RunnerDeps{
-			DB:       db,
-			Hub:      hub,
-			Provider: noop,
-			Model:    "",
-			Logger:   logger,
-		}), noop, nil
-	}
-
-	prov := buildProvider(choice.Provider)
-	if prov == nil {
-		logger.Warn("ai: provider constructor missing; using noop",
-			slog.String("provider", choice.Provider))
-		prov = noopProvider{}
-	}
-
-	return tasks.NewRunner(tasks.RunnerDeps{
-		DB:       db,
-		Hub:      hub,
-		Provider: prov,
-		Model:    choice.Model,
-		Logger:   logger,
-	}), prov, nil
-}
-
-// buildBreakAdviceFactory returns a handlers.AIProviderFactory used by
-// the /sessions/{id}/break-advice endpoint. It picks a Title-class
-// (smallest/cheapest) model from whatever providers are currently
-// available; when none is, it returns a factory that reports
-// "unavailable" so the handler can short-circuit without touching the
-// network.
-//
-// The returned factory caches its decision after the first successful
-// call — provider availability rarely changes during a daemon's
-// lifetime, and re-running detection on every click would burn cycles
-// for no benefit. A factory that initially failed (no provider) keeps
-// re-detecting on each call so the user can flip on advice mid-session
-// by exporting an API key.
-func buildBreakAdviceFactory(cfg *config.Config, logger *slog.Logger) handlers.AIProviderFactory {
-	override := ""
-	if cfg != nil && cfg.AI.TitleModel != "" &&
-		cfg.AI.TitleModel != config.AIModelAuto &&
-		cfg.AI.TitleModel != config.AIModelOff {
-		override = cfg.AI.TitleModel
-	}
-
-	var (
-		mu     sync.Mutex
-		cached ai.Provider
-		model  string
-	)
-
-	return func() (ai.Provider, string, bool) {
-		mu.Lock()
-		defer mu.Unlock()
-		if cached != nil {
-			return cached, model, true
-		}
-
-		detectCtx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
-		defer cancel()
-		available := providers.DetectAvailable(detectCtx)
-
-		choice, err := ai.Pick(ai.TaskTitle, available, override)
-		if err != nil {
-			logger.Debug("ai: no provider for break-advice", slog.Any("error", err))
-			return nil, "", false
-		}
-		prov := buildProvider(choice.Provider)
-		if prov == nil {
-			return nil, "", false
-		}
-		cached = prov
-		model = choice.Model
-		return cached, model, true
-	}
-}
-
-// buildProvider wires concrete provider constructors. Returns nil for
-// unknown names — the caller falls back to noopProvider.
-//
-// Post 2026-05-20: the Anthropic and OpenAI cloud providers are reached
-// only via subprocess wrappers around the user's already-authenticated
-// `claude` / `codex` CLIs. No env-var keys, no credential file reads.
-func buildProvider(name string) ai.Provider {
-	switch name {
-	case "claude-cli":
-		return providers.NewClaudeCLI(providers.ClaudeCLIOpts{})
-	case "codex-cli":
-		return providers.NewCodexCLI(providers.CodexCLIOpts{})
-	case "ollama":
-		return providers.NewOllama(providers.OllamaOpts{})
-	default:
-		return nil
-	}
-}
-
-// noopProvider is a safe-fail placeholder used when no real provider can
-// be detected. Both Chat and Embed return ai.ErrNoCredential — callers
-// log and skip rather than crash.
-type noopProvider struct{}
-
-func (noopProvider) Name() string { return "noop" }
-func (noopProvider) Chat(_ context.Context, _ ai.ChatRequest) (*ai.ChatResponse, error) {
-	return nil, ai.ErrNoCredential
-}
-func (noopProvider) Embed(_ context.Context, _ ai.EmbedRequest) (*ai.EmbedResponse, error) {
-	return nil, ai.ErrUnsupported
-}
-func (noopProvider) Models() []string { return nil }
 
 // pickConnectorForPath returns the connector whose Name matches a heuristic
 // segment in path. Both v1 connectors carry their own root, so any path

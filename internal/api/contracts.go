@@ -36,7 +36,6 @@ const (
 	RouteSessionRestore      = "/sessions/{id}/restore"
 	RouteSessionSummary      = "/sessions/{id}/summary"
 	RouteSessionUsage        = "/sessions/{id}/usage"
-	RouteSessionBreakAdvice  = "/sessions/{id}/break-advice"
 	RouteSessionTokenTimeline = "/sessions/{id}/token-timeline"
 	RouteSearch              = "/search"
 	RouteCostSummary         = "/cost/summary"
@@ -89,7 +88,6 @@ func AllRoutes() []string {
 		RouteSessionRestore,
 		RouteSessionSummary,
 		RouteSessionUsage,
-		RouteSessionBreakAdvice,
 		RouteSessionTokenTimeline,
 		RouteSearch,
 		RouteCostSummary,

@@ -12,7 +12,6 @@ import (
 
 	"github.com/klyne-ai/klyne/internal/productivity"
 	"github.com/klyne-ai/klyne/internal/store"
-	"github.com/klyne-ai/klyne/internal/worklog/richentry"
 )
 
 // ProductivityHandler serves GET /productivity — the deterministic-first
@@ -167,18 +166,12 @@ func (h *ProductivityHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Report-level "What was done": prefer the cross-project rich-entry
-	// merge over the legacy first-service body BuildReport assigned. The
-	// merge names each bullet's source repo (renderItem) so a multi-
-	// service day reads cleanly as one timeline. Falls back silently to
-	// whatever BuildReport set when there are no admitted entries for
-	// the day OR the lookup errors — the deterministic numbers stand
-	// regardless.
-	if dayTime, dayErr := time.Parse("2006-01-02", rep.Day); dayErr == nil {
-		if globalMerge, mErr := richentry.MergeDayAll(ctx, h.db, dayTime); mErr == nil && globalMerge != "" {
-			rep.ReflectionMarkdown = globalMerge
-		}
-	}
+	// Report-level "What was done" is now driven entirely by the
+	// deterministic body BuildReport assigned (event tags + importance
+	// + per-session sessions list). The rich-entry merge path was
+	// removed when daemon-side AI synthesis was retired — the
+	// reflectionLookup below still falls back to the legacy
+	// worklog_reflections row for historical days.
 
 	// Layer-2 GitHub enrichment: attach merged PRs per Service via the
 	// TTL-cached `gh pr list` (productivity_github.go). Best-effort —
@@ -318,20 +311,12 @@ WHERE last_msg_at >= ? AND last_msg_at <= ?`
 }
 
 // reflectionLookup adapts *store.DB to productivity.ReflectionLookup
-// with a TWO-TIER read (Phase 7 of the rich-entry plan):
-//
-//  1. PREFERRED: mechanical merge over the day's admitted rich entries
-//     (richentry.MergeDay). Produces a deterministic per-category
-//     timeline from migration-019 entries — no LLM in the join, so
-//     no opportunity for re-hallucination.
-//  2. FALLBACK: legacy LLM-authored worklog_reflections row for the
-//     same (project, day). Used when (a) no rich entries exist yet
-//     (historical sessions before migration 019) or (b) every
-//     contributing turn was suppressed / failed validation.
-//
-// The L3 existence flag fires for EITHER source — the dashboard nudge
-// still tells the user "we have something for this day", just from
-// whichever surface produced it.
+// by reading the legacy worklog_reflections row for (project, day).
+// The rich-entry merge tier was removed along with the daemon-side
+// AI synthesis path — reflections are now authored inside the
+// user's interactive Claude/Codex session via /klyne:reflect, and
+// the dashboard simply surfaces the resulting worklog_reflections
+// rows.
 type reflectionLookup struct {
 	db *store.DB
 }
@@ -339,16 +324,8 @@ type reflectionLookup struct {
 func (l *reflectionLookup) HasReflection(
 	ctx context.Context, projectPath string, day time.Time,
 ) (bool, string, error) {
-	// Tier 1 — mechanical merge over admitted rich entries.
-	if merged, err := richentry.MergeDay(ctx, l.db, projectPath, day); err == nil && merged != "" {
-		return true, merged, nil
-	}
-
-	// Tier 2 — legacy worklog_reflections row.
-	// worklog_reflections.ts is epoch-ms (migration 016). Match on the
-	// local calendar date of the reflection's timestamp and return the
-	// most recent reflection's markdown body for that project+day so the
-	// dashboard can surface the worklog's own account of the work.
+	// Tier 1: most recent worklog_reflections row authored via
+	// /klyne:reflect inside the user's interactive session.
 	dayStr := day.Format("2006-01-02")
 	const q = `
 SELECT body_md
@@ -360,14 +337,85 @@ LIMIT 1`
 
 	var bodyMD string
 	err := l.db.Read().QueryRowContext(ctx, q, projectPath, dayStr).Scan(&bodyMD)
-	if err != nil {
-		// sql.ErrNoRows ⇒ no reflection in either tier ⇒ not an error.
-		if errors.Is(err, sql.ErrNoRows) {
-			return false, "", nil
-		}
+	if err == nil && strings.TrimSpace(bodyMD) != "" {
+		return true, bodyMD, nil
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return false, "", fmt.Errorf("productivity: reflection lookup: %w", err)
 	}
-	return true, bodyMD, nil
+
+	// Tier 2: deterministic fallback. When no reflection has been
+	// authored yet, synthesize a "what was done" body from the day's
+	// stop_summaries rows — but only the IMPORTANT ones (importance ≥
+	// 7). importance is the deterministic event-tag score
+	// (internal/worklog/importance.go): a base of 5 plus weighted
+	// contributions for commit_landed, pr_opened, decision_recorded,
+	// migration_or_schema_change, security_relevant_change, etc. The
+	// threshold of 7 admits rows that have at least one moderate
+	// event tag and drops read-only / lint-only / tiny sessions so
+	// the section stays short.
+	body := buildDeterministicWhatWasDone(ctx, l.db, projectPath, day)
+	if body == "" {
+		return false, "", nil
+	}
+	return true, body, nil
+}
+
+// importanceThreshold is the cutoff that defines "important enough to
+// surface in the dashboard's What-was-done block." Base importance is
+// 5; +2 for any of commit_landed / migration / revert / security /
+// error_resolved (etc.) and +3 for decision_recorded / pr_opened. A
+// threshold of 7 admits exactly those rows that carry at least one
+// such tag.
+const importanceThreshold = 7
+
+// buildDeterministicWhatWasDone renders a bullet list of important
+// sessions for projectPath on the local day. Each bullet shows the
+// assistant's KLYNE_SUMMARY (when present) or falls back to the
+// session's last_user line. Pure SQLite read; NO LM call.
+func buildDeterministicWhatWasDone(
+	ctx context.Context, db *store.DB, projectPath string, day time.Time,
+) string {
+	dayStr := day.Format("2006-01-02")
+	const q = `
+SELECT
+  COALESCE(ai_drafted_summary, ''),
+  COALESCE(last_user, '')
+FROM stop_summaries
+WHERE project_path = ?
+  AND date(ts / 1000, 'unixepoch', 'localtime') = ?
+  AND recap_visible = 1
+  AND COALESCE(importance, 0) >= ?
+ORDER BY importance DESC, ts ASC
+LIMIT 50`
+
+	rows, err := db.Read().QueryContext(ctx, q, projectPath, dayStr, importanceThreshold)
+	if err != nil {
+		return ""
+	}
+	defer rows.Close() //nolint:errcheck
+
+	var bullets []string
+	for rows.Next() {
+		var aiSummary, lastUser string
+		if err := rows.Scan(&aiSummary, &lastUser); err != nil {
+			continue
+		}
+		// Prefer the assistant's per-turn summary; fall back to the
+		// user's last prompt so a row always renders something useful.
+		text := strings.TrimSpace(aiSummary)
+		if text == "" {
+			text = strings.TrimSpace(lastUser)
+		}
+		if text == "" {
+			continue
+		}
+		bullets = append(bullets, "- "+text)
+	}
+	if len(bullets) == 0 {
+		return ""
+	}
+	return strings.Join(bullets, "\n")
 }
 
 // dirtyFileCap bounds how many uncommitted file paths a done-uncommitted

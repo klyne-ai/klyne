@@ -160,8 +160,6 @@ func minimalConfig(t testing.TB) *config.Config {
 	cfg := config.Defaults()
 	cfg.Connectors.Claude.Enabled = false
 	cfg.Connectors.Codex.Enabled = false
-	cfg.AI.SummaryModel = config.AIModelOff
-	cfg.AI.TitleModel = config.AIModelOff
 	cfg.Paths.DB = t.TempDir() + "/ram.db"
 	cfg.Paths.PricingOverride = ""
 	cfg.Server.Addr = "127.0.0.1:0"

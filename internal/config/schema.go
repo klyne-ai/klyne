@@ -14,45 +14,42 @@
 package config
 
 // Config is the root TOML document.
+//
+// The [ai] table was retired when daemon-side AI synthesis was removed
+// (2026-05-21). klyne no longer issues any LM calls — per-turn summaries
+// are emitted by the user's interactive Claude/Codex session via the
+// UserPromptSubmit + Stop hooks; reflections happen inside the same
+// session via the /klyne:reflect slash command. There is no provider
+// selection, no API key, no subprocess shell-out.
 type Config struct {
 	Server     ServerConfig     `toml:"server"     json:"server"`
 	Paths      PathsConfig      `toml:"paths"      json:"paths"`
 	Connectors ConnectorsConfig `toml:"connectors" json:"connectors"`
-	AI         AIConfig         `toml:"ai"         json:"ai"`
 	// Plan is the [plan] table — drives the 5-hour-window advisory.
 	// Empty Tier disables the 5-hour trigger.
 	Plan PlanConfig `toml:"plan" json:"plan"`
 	// Advisor is the [advisor] table — top-level on/off toggle for
 	// the UserPromptSubmit hook.
 	Advisor AdvisorConfig `toml:"advisor" json:"advisor"`
-	// Worklog is the [worklog] table — feature flags for the cross-AI
-	// worklog Memory + Reflection layers. Both off by default.
+	// Worklog is the [worklog] table — feature flag for the Codex
+	// boundary detector. Off by default.
 	Worklog WorklogConfig `toml:"worklog" json:"worklog"`
 }
 
-// WorklogConfig is the [worklog] table — feature flag for the
-// cross-AI worklog Memory layer. Off by default so a fresh install
-// runs without the new behavior until the user opts in.
+// WorklogConfig is the [worklog] table — feature flag for the Codex
+// boundary detector. Off by default so a fresh install runs without
+// the new behavior until the user opts in.
 //
-// Reflection synthesis is NOT a daemon concern: it now runs inside
-// the user's Claude/Codex session via the `/klyne:reflect` slash
-// command, using their existing subscription auth. The daemon no
-// longer issues any LM calls of its own.
+// The rich-entry worker flag was retired with the daemon-side AI
+// path on 2026-05-21. Per-turn summaries are produced by the user's
+// interactive session via the UserPromptSubmit + Stop hooks instead.
 type WorklogConfig struct {
 	// CodexDetectorEnabled, when true, makes the daemon poll the
 	// sessions table on a 60s tick for idle Codex sessions (last_msg_at
 	// older than 30 min) and write a worklog entry for each. This is
-	// the cross-AI capture differentiator.
+	// the cross-AI capture differentiator. No LM call — the detector
+	// only writes deterministic stop_summaries rows.
 	CodexDetectorEnabled bool `toml:"codex_detector_enabled" json:"codex_detector_enabled"`
-
-	// RichEntryWorkerEnabled, when true, starts the migration-019
-	// rich worklog-entry background worker on a 30s tick. The worker
-	// drains stop_summaries rows whose worklog_gate_verdict is '' or
-	// 'pending', runs the hybrid gate, and for admitted turns calls
-	// the writer LLM to produce a structured 15-category WorklogEntryJSON
-	// validated against an allowlist (no hallucinated SHAs / PRs /
-	// UUIDs). Off by default so opting-in is explicit per spec §11.
-	RichEntryWorkerEnabled bool `toml:"rich_entry_worker_enabled" json:"rich_entry_worker_enabled"`
 }
 
 // AdvisorConfig is the [advisor] table. Lives separately from
@@ -103,28 +100,8 @@ type CodexConnectorConfig struct {
 	Root string `toml:"root" json:"root"`
 }
 
-// AIConfig is the [ai] table — see spec §8.
-//
-// Each model field is either a literal provider/model string
-// (e.g. "openai/gpt-5-mini") or one of the sentinel values:
-//
-//	"auto" — let the smart selector pick (default for summary, title)
-//	"off"  — disable this internal task entirely (default for embed in v1)
-type AIConfig struct {
-	SummaryModel string `toml:"summary_model" json:"summary_model"`
-	TitleModel   string `toml:"title_model"   json:"title_model"`
-	EmbedModel   string `toml:"embed_model"   json:"embed_model"`
-}
-
-// Sentinel values for the AI* fields.
-const (
-	AIModelAuto = "auto"
-	AIModelOff  = "off"
-)
-
-// Defaults returns a *Config populated with the documented v1 defaults
-// (see docs/plan/04-shared-contracts.md §7). The loader (W6) starts from
-// Defaults() and overlays parsed TOML on top.
+// Defaults returns a *Config populated with the documented v1 defaults.
+// The loader (W6) starts from Defaults() and overlays parsed TOML on top.
 func Defaults() *Config {
 	return &Config{
 		Server: ServerConfig{
@@ -144,14 +121,8 @@ func Defaults() *Config {
 				Root:    "~/.codex/sessions",
 			},
 		},
-		AI: AIConfig{
-			SummaryModel: AIModelAuto,
-			TitleModel:   AIModelAuto,
-			EmbedModel:   AIModelOff, // v1.1 feature, off by default
-		},
 		Worklog: WorklogConfig{
-			CodexDetectorEnabled:   false,
-			RichEntryWorkerEnabled: false,
+			CodexDetectorEnabled: false,
 		},
 	}
 }

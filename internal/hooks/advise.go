@@ -25,6 +25,25 @@ const adviseTimeout = 2 * time.Second
 // re-walk every JSONL on disk.
 const adviseFiveHourCacheMs int64 = 60_000
 
+// klyneSummaryInstruction is appended to every UserPromptSubmit hook
+// payload. It asks the assistant to emit a one-line per-turn summary
+// at the end of its response so klyne can capture a real prose record
+// of what happened, WITHOUT the daemon ever calling an LM itself.
+//
+// The Stop hook (sessionend.go) then scans the assistant's last
+// message for a line matching `KLYNE_SUMMARY: ...` and writes the
+// captured text into stop_summaries.ai_drafted_summary.
+//
+// The instruction is kept short and unambiguous — additionalContext is
+// guidance, not a binding mandate, so we lean on a clear, single rule.
+const klyneSummaryInstruction = "At the end of your reply, on its own line, " +
+	"emit exactly one of:\n" +
+	"  KLYNE_SUMMARY: <a 1-2 sentence, ≤100-word summary of what was done this turn — files touched, decisions, outcomes>\n" +
+	"  KLYNE_SUMMARY: skip\n" +
+	"Use `skip` only when the turn was trivial (no edits, no commits, no decisions, no findings). " +
+	"Do not surround the line with code fences or quotes. " +
+	"Do not omit this line."
+
 // adviseHookInput is the JSON the UserPromptSubmit hook puts on stdin.
 type adviseHookInput struct {
 	CWD       string `json:"cwd,omitempty"`
@@ -135,13 +154,19 @@ func computeAdvisory(ctx context.Context, stdin io.Reader, fallbackCwd string) (
 		fmt.Fprintf(os.Stderr, "klyne advise: state save failed: %v\n", err)
 	}
 
-	if advisory.Line == "" {
-		return "", nil
+	// Always emit the KLYNE_SUMMARY instruction so every turn produces
+	// a one-line summary in the assistant's reply. The advisor line,
+	// when present, is prepended above it. The combined payload is the
+	// daemon's only contribution to context — pure deterministic text,
+	// no LM call.
+	context := klyneSummaryInstruction
+	if advisory.Line != "" {
+		context = advisory.Line + "\n\n" + context
 	}
 	body, err := json.Marshal(adviseHookOutput{
 		HookSpecificOutput: adviseHookSpecificOutput{
 			HookEventName:     "UserPromptSubmit",
-			AdditionalContext: advisory.Line,
+			AdditionalContext: context,
 		},
 	})
 	if err != nil {

@@ -13,17 +13,14 @@ import (
 
 // Deps holds the dependencies needed by all W7 handlers.
 // W12 populates this struct and passes it to NewMounter.
+//
+// The daemon no longer wires AI providers — all synthesis runs in the
+// user's interactive Claude/Codex session.
 type Deps struct {
 	DB     *store.DB
 	Cfg    *config.Config
 	Cost   *cost.Engine
 	Logger *slog.Logger
-
-	// AIFactory is used by the break-advice handler to obtain a
-	// Haiku-class chat provider on demand. When nil (no AI provider
-	// configured at app boot), the handler returns the "unavailable"
-	// verdict without touching the network.
-	AIFactory AIProviderFactory
 }
 
 // Mounter implements api.RouterMounter and registers all W7 read-only
@@ -78,13 +75,6 @@ func (m *Mounter) Mount(r chi.Router) {
 		Logger:    logger,
 	})
 	r.Get(api.RouteSessionUsage, hSessionUsage.Get)
-
-	hBreakAdvice := NewBreakAdviceHandler(BreakAdviceDeps{
-		DB:        m.deps.DB,
-		Logger:    logger,
-		AIFactory: m.deps.AIFactory,
-	})
-	r.Get(api.RouteSessionBreakAdvice, hBreakAdvice.Get)
 
 	// Per-session token-usage timeline — backs the cockpit line
 	// chart. Shares contexthealth.ComputeTimeline with `klyne tokens`
