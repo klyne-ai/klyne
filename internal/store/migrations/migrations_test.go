@@ -51,6 +51,7 @@ func TestMigrationsApply(t *testing.T) {
 		"017_git_dashboard.sql",         // AI productivity dashboard tables (git_session_snapshots, dashboard_cache)
 		"018_github_pr_cache.sql",       // merged-PR `gh` enrichment cache (TTL-refreshed)
 		"019_worklog_rich_entry.sql",    // structured 15-category worklog entry per stop_summaries row
+		"020_reflection_stop_summary_cursor.sql", // iterative reflection cursor (docs/features/iterative-reflection.md)
 	}
 	if len(sqlFiles) != len(expected) {
 		t.Fatalf("expected %d migrations, found %d: %v", len(expected), len(sqlFiles), sqlFiles)
