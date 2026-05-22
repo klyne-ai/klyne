@@ -124,9 +124,9 @@ func ListReflectionsForProject(ctx context.Context, db *DB, projectPath string, 
 	return out, rows.Err()
 }
 
-// MaxReflectionCursorForDay returns the largest stop_summary_cursor_ts
-// across rows for (projectPath, day) — the "what work have we already
-// summarized" watermark used by /klyne:reflect to fetch only the
+// MaxReflectionCursorForDay returns the largest "covered up through ts"
+// watermark across rows for (projectPath, day) — the "what work have we
+// already summarized" anchor used by /klyne:reflect to fetch only the
 // stop_summaries that arrived after the previous run.
 //
 // dayStr is the local-date string the row was filed under (YYYY-MM-DD,
@@ -134,12 +134,16 @@ func ListReflectionsForProject(ctx context.Context, db *DB, projectPath string, 
 // against the row's ts converted to local time, mirroring how the
 // dashboard's reflection lookup keys by day.
 //
-// Returns 0 when no row exists for the day or when every row has a
-// NULL cursor (legacy data). Callers MUST fall back to "fetch every
-// stop_summary for the day" in that case.
+// Legacy rows (written before the iterative workflow) have NULL in
+// stop_summary_cursor_ts; we fall back to the row's own ts so they
+// behave as "covers everything up through when I was written" — that
+// matches their pre-change effective semantics.
+//
+// Returns 0 only when no row exists at all for the day. Callers treat
+// that as "no cursor yet — fetch every stop_summary for the day."
 func MaxReflectionCursorForDay(ctx context.Context, db *DB, projectPath, dayStr string) (int64, error) {
 	const q = `
-SELECT COALESCE(MAX(stop_summary_cursor_ts), 0)
+SELECT COALESCE(MAX(COALESCE(stop_summary_cursor_ts, ts)), 0)
 FROM worklog_reflections
 WHERE project_path = ?
   AND date(ts / 1000, 'unixepoch', 'localtime') = ?`

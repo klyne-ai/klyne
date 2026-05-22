@@ -162,24 +162,83 @@ func recordReflection(ctx context.Context, db *store.DB, projectPath string, day
 		day = now
 	}
 	dayLabel := day.UTC().Format("2006-01-02")
+
+	// Iterative-reflection cursor (docs/features/iterative-reflection.md):
+	// record the latest stop_summary.ts covered by this reflection so the
+	// next /klyne:reflect run on the same day can skip everything ≤
+	// this watermark and synthesize only the delta slice.
+	// Computed from the cited session_ids within the day's local window —
+	// the slash command passes those ids in Insight.Evidence; we look up
+	// MAX(ts) and store it. Zero when no stop_summaries match (defensive;
+	// the citation invariant above usually prevents this).
+	cursor, err := stopSummaryCursorForCitations(ctx, db, projectPath, day, allEvidence)
+	if err != nil {
+		// A cursor lookup error doesn't justify failing the whole
+		// reflection write — degrade to NULL cursor (the row still
+		// records its work, just without the cursor advance, and the
+		// next run will re-evaluate from the row's ts via the legacy
+		// fallback in MaxReflectionCursorForDay).
+		cursor = 0
+	}
+
 	refl := store.Reflection{
 		// Date prefix is a debugging aid (grep-friendly); uniqueness comes from UnixNano.
-		ID:               fmt.Sprintf("ref-%s-%d", dayLabel, now.UnixNano()),
-		TS:               now.UnixMilli(),
-		ProjectPath:      projectPath,
-		Tier:             1, // daily
-		Title:            fmt.Sprintf("Daily reflection — %s", dayLabel),
-		BodyMD:           body.String(),
-		EvidenceEntryIDs: allEvidence,
-		Importance:       7,
-		SummarySource:    "ai",
-		State:            "proposed",
-		StateChangedAt:   now.UnixMilli(),
+		ID:                  fmt.Sprintf("ref-%s-%d", dayLabel, now.UnixNano()),
+		TS:                  now.UnixMilli(),
+		ProjectPath:         projectPath,
+		Tier:                1, // daily
+		Title:               fmt.Sprintf("Daily reflection — %s", dayLabel),
+		BodyMD:              body.String(),
+		EvidenceEntryIDs:    allEvidence,
+		Importance:          7,
+		SummarySource:       "ai",
+		State:               "proposed",
+		StateChangedAt:      now.UnixMilli(),
+		StopSummaryCursorTS: cursor,
 	}
 	if err := store.InsertReflection(ctx, db, refl); err != nil {
 		return store.Reflection{}, fmt.Errorf("worklog: persist reflection: %w", err)
 	}
 	return refl, nil
+}
+
+// stopSummaryCursorForCitations returns MAX(stop_summaries.ts) for the
+// cited session_ids inside the day's local window. The session-id space
+// is what /klyne:reflect cites; a session can produce multiple
+// stop_summary rows (one per turn), so we take the latest covered turn
+// as the cursor watermark for the next iterative reflection.
+//
+// Empty citations → 0 (no advance). Citations that don't match any row
+// in the day window → 0. Caller treats 0 as "leave cursor unset
+// (NULL)" so the legacy ts-based fallback applies.
+func stopSummaryCursorForCitations(ctx context.Context, db *store.DB, projectPath string, day time.Time, citations []string) (int64, error) {
+	if len(citations) == 0 {
+		return 0, nil
+	}
+	loc := day.Location()
+	dayStart := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, loc)
+	dayEnd := dayStart.Add(24 * time.Hour)
+
+	// Build "?, ?, ?, ..." for the IN clause.
+	placeholders := strings.Repeat(",?", len(citations))
+	placeholders = placeholders[1:] // drop the leading comma
+	q := fmt.Sprintf(`
+SELECT COALESCE(MAX(ts), 0)
+FROM stop_summaries
+WHERE project_path = ?
+  AND ts >= ? AND ts < ?
+  AND session_id IN (%s)`, placeholders)
+
+	args := make([]any, 0, 3+len(citations))
+	args = append(args, projectPath, dayStart.UnixMilli(), dayEnd.UnixMilli())
+	for _, c := range citations {
+		args = append(args, c)
+	}
+	var maxTs int64
+	if err := db.Read().QueryRowContext(ctx, q, args...).Scan(&maxTs); err != nil {
+		return 0, fmt.Errorf("worklog: stop_summary cursor lookup: %w", err)
+	}
+	return maxTs, nil
 }
 
 // dedupeOrdered returns the input slice with duplicate strings removed,

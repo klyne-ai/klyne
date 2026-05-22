@@ -30,31 +30,51 @@ type PendingEntry struct {
 	Importance       int       `json:"importance"`
 }
 
-// LoadPendingEntries returns the visible entries written for projectPath
-// since the last reflection. Used by the propose_reflection MCP tool and
+// LoadPendingEntries returns the visible stop_summary entries written
+// for projectPath on `day` (local time) since the last reflection's
+// cursor for that day. Used by the propose_reflection MCP tool and
 // (in the future) by any non-Claude AI host that wants to synthesize.
+//
+// `day` zero-value defaults to today (local). The window is a
+// [start-of-local-day, start-of-next-local-day) range in epoch-ms; the
+// cursor (docs/features/iterative-reflection.md) further restricts to
+// stop_summaries with ts > MaxReflectionCursorForDay(project, day).
 //
 // The `reason` return is a short, human-readable string explaining WHY
 // the synthesis is being proposed now: either "importance-sum N ≥ T",
-// "weekly cron (Sunday evening)", or "user-invoked" when neither
-// trigger fired.
-func LoadPendingEntries(ctx context.Context, db *store.DB, projectPath string, threshold int, now time.Time) ([]PendingEntry, string, error) {
+// "weekly cron (Sunday evening)", "nothing new since <ts>" (C1 no-op),
+// or "user-invoked".
+func LoadPendingEntries(ctx context.Context, db *store.DB, projectPath string, threshold int, now time.Time, day time.Time) ([]PendingEntry, string, error) {
 	if threshold <= 0 {
 		threshold = 150
 	}
-	var lastRefMs int64
-	if err := db.Read().QueryRowContext(ctx,
-		`SELECT COALESCE(MAX(ts), 0) FROM worklog_reflections WHERE project_path = ?`,
-		projectPath).Scan(&lastRefMs); err != nil {
-		return nil, "", fmt.Errorf("worklog: load last reflection ts: %w", err)
+	if day.IsZero() {
+		day = now
+	}
+	// Resolve the [day-start, day-end) window in the caller's local zone
+	// — matches how the dashboard buckets reflections (productivity API
+	// uses local-time date strings for its day key).
+	loc := day.Location()
+	dayStart := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, loc)
+	dayEnd := dayStart.Add(24 * time.Hour)
+	dayStr := dayStart.Format("2006-01-02")
+	dayStartMs := dayStart.UnixMilli()
+	dayEndMs := dayEnd.UnixMilli()
+
+	cursor, err := store.MaxReflectionCursorForDay(ctx, db, projectPath, dayStr)
+	if err != nil {
+		return nil, "", err
 	}
 	rows, err := db.Read().QueryContext(ctx,
 		`SELECT session_id, cli, COALESCE(recap_topic,''), COALESCE(ai_drafted_summary,''),
                 COALESCE(last_user,''), ts, importance
          FROM stop_summaries
-         WHERE project_path = ? AND recap_visible = 1 AND ts > ?
+         WHERE project_path = ?
+           AND recap_visible = 1
+           AND ts >= ? AND ts < ?
+           AND ts > ?
          ORDER BY ts ASC LIMIT 100`,
-		projectPath, lastRefMs)
+		projectPath, dayStartMs, dayEndMs, cursor)
 	if err != nil {
 		return nil, "", fmt.Errorf("worklog: load pending entries: %w", err)
 	}
@@ -77,11 +97,16 @@ func LoadPendingEntries(ctx context.Context, db *store.DB, projectPath string, t
 
 	// Determine reason. Order matters: importance-sum is the stronger
 	// signal so it takes precedence over the weekly cron when both fire.
+	// Empty entries when a cursor exists is the C1 no-op shape; with no
+	// cursor, an empty window is still just "user-invoked" so the host
+	// can render its own "nothing yet today" UX.
 	reason := "user-invoked"
 	if sum >= threshold {
 		reason = fmt.Sprintf("importance-sum %d ≥ %d", sum, threshold)
 	} else if now.Weekday() == time.Sunday && now.Hour() >= 20 && len(entries) > 0 {
 		reason = "weekly cron (Sunday evening)"
+	} else if len(entries) == 0 && cursor > 0 {
+		reason = fmt.Sprintf("nothing new since %s", time.UnixMilli(cursor).In(loc).Format("15:04"))
 	}
 	return entries, reason, nil
 }

@@ -21,8 +21,14 @@ import (
 const proposeReflectionEntryBody = 200
 
 // ProposeReflectionInput is the MCP-facing input schema.
+//
+// Day scopes the proposed slice to a single local calendar day in the
+// iterative-reflection workflow (docs/features/iterative-reflection.md):
+// the proposer fetches only stop_summaries inside [day-start, day-end)
+// AND with ts after the day's reflection cursor. Omitted ⇒ today.
 type ProposeReflectionInput struct {
 	ProjectPath string `json:"project_path" jsonschema:"absolute project path"`
+	Day         string `json:"day,omitempty" jsonschema:"calendar day to scope the proposal to, YYYY-MM-DD (local); defaults to today"`
 	Threshold   int    `json:"threshold,omitempty" jsonschema:"importance-sum threshold for trigger classification (default 150)"`
 }
 
@@ -40,7 +46,16 @@ func handleProposeReflection(ctx context.Context, db *store.DB, in ProposeReflec
 	// Roll worktrees up to the canonical main-repo path so /klyne:reflect
 	// from a worktree finds the entries seeded under that repo.
 	in.ProjectPath = projectpath.Canonical(in.ProjectPath)
-	entries, reason, err := worklog.LoadPendingEntries(ctx, db, in.ProjectPath, in.Threshold, time.Now())
+	now := time.Now()
+	var day time.Time
+	if in.Day != "" {
+		parsed, err := time.ParseInLocation("2006-01-02", in.Day, now.Location())
+		if err != nil {
+			return nil, fmt.Errorf("propose_reflection: bad day %q (want YYYY-MM-DD): %w", in.Day, err)
+		}
+		day = parsed
+	}
+	entries, reason, err := worklog.LoadPendingEntries(ctx, db, in.ProjectPath, in.Threshold, now, day)
 	if err != nil {
 		return nil, err
 	}
@@ -51,7 +66,6 @@ func handleProposeReflection(ctx context.Context, db *store.DB, in ProposeReflec
 	// contract so the AI host leads with the highest-impact work and
 	// never invents a PR/ticket id. The brief is empty for a non-git
 	// project — the proposal markdown is then unchanged (D8).
-	now := time.Now()
 	since := now.Add(-7 * 24 * time.Hour)
 	if rep, serr := worklog.BuildProjectSubstrate(in.ProjectPath, since, now); serr == nil {
 		if brief := worklog.ProposalGitBrief(rep, in.ProjectPath); brief != "" {

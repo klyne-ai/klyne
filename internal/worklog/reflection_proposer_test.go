@@ -65,7 +65,7 @@ func TestLoadPendingEntries_OnlyAfterLastReflection(t *testing.T) {
 	seedProposerEntry(t, db, "/p", "claude", "mid-1", "mid work", 6, mid)
 	seedProposerEntry(t, db, "/p", "codex", "fresh-1", "fresh work", 7, fresh)
 
-	entries, reason, err := LoadPendingEntries(context.Background(), db, "/p", 150, now)
+	entries, reason, err := LoadPendingEntries(context.Background(), db, "/p", 150, now, time.Time{})
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestLoadPendingEntries_ImportanceSumReason(t *testing.T) {
 	seedProposerEntry(t, db, "/p", "claude", "e2", "u2", 60, now.Add(-2*time.Hour))
 	seedProposerEntry(t, db, "/p", "codex", "e3", "u3", 60, now.Add(-1*time.Hour))
 
-	_, reason, err := LoadPendingEntries(context.Background(), db, "/p", 150, now)
+	_, reason, err := LoadPendingEntries(context.Background(), db, "/p", 150, now, time.Time{})
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestLoadPendingEntries_WeeklyCronReason(t *testing.T) {
 	// One low-importance entry so sum stays well under threshold.
 	seedProposerEntry(t, db, "/p", "claude", "low-1", "small work", 3, sundayEvening.Add(-2*time.Hour))
 
-	_, reason, err := LoadPendingEntries(context.Background(), db, "/p", 150, sundayEvening)
+	_, reason, err := LoadPendingEntries(context.Background(), db, "/p", 150, sundayEvening, time.Time{})
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestLoadPendingEntries_WeeklyCronReason(t *testing.T) {
 
 func TestLoadPendingEntries_NoEntriesUserInvoked(t *testing.T) {
 	db := newProposerTestDB(t)
-	entries, reason, err := LoadPendingEntries(context.Background(), db, "/p", 150, time.Now())
+	entries, reason, err := LoadPendingEntries(context.Background(), db, "/p", 150, time.Now(), time.Time{})
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
