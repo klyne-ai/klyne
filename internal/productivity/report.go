@@ -373,7 +373,13 @@ func riskSignals(sc ScanResult, userCommits []Commit, dirty DirtyState, now time
 		})
 	}
 
-	if dirty.DirtyFileCount > 0 && !dirty.SessionEnd.IsZero() {
+	// Skip done-uncommitted when the branch is already merged into the
+	// default branch — at that point the worktree's lingering edits are
+	// stale leftovers from a closed line of work, not an "open loop" the
+	// user needs to act on. Pushed-but-not-merged branches still surface
+	// the risk because the user may have legitimate follow-up edits to
+	// commit on top of what's on origin.
+	if dirty.DirtyFileCount > 0 && !dirty.SessionEnd.IsZero() && sc.Ship != ShipMerged {
 		committedAfter := false
 		for _, c := range userCommits {
 			if c.CommittedAt.After(dirty.SessionEnd) {

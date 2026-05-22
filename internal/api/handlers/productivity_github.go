@@ -34,6 +34,15 @@ import (
 // in-dashboard setting is a documented follow-up).
 const defaultPRCacheTTL = 2 * time.Hour
 
+// mergedRecentlyLookbackDays widens the gh merged-PRs query past the
+// report window so squash-merged branches stay flagged as merged even
+// when the merge happened on a prior day. Local git's mergedInto check
+// returns false on squash merges (the content lands without the
+// feature-branch HEAD commit), so the dashboard would otherwise treat
+// a fully-shipped branch as still "pushed-to-remote". 30 days covers
+// the typical PR-aging horizon while keeping the gh response bounded.
+const mergedRecentlyLookbackDays = 30
+
 // prCacheTTL resolves the merged-PR cache freshness window.
 func prCacheTTL() time.Duration {
 	if v := strings.TrimSpace(os.Getenv("KLYNE_PR_CACHE_TTL_MIN")); v != "" {
@@ -90,33 +99,44 @@ func (h *ProductivityHandler) enrichMergedPRs(
 		toFetch = append(toFetch, slug)
 	}
 
-	// Live-fetch only the stale/missing repos, concurrently.
+	// Live-fetch only the stale/missing repos, concurrently. The wider
+	// head-refs set (squash-merged branches over the last
+	// mergedRecentlyLookbackDays) is collected only for fresh fetches —
+	// cached entries skip the ship-upgrade, which is acceptable because
+	// cache misses happen every prCacheTTL and the upgrade catches up
+	// on the next refresh.
+	recentRefsBySlug := map[string]map[string]bool{}
 	if len(toFetch) > 0 && ghAvailable(ctx) {
 		fctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 
 		var wg sync.WaitGroup
 		var mu sync.Mutex
-		fresh := map[string][]productivity.MergedPR{}
+		type fetchResult struct {
+			prs        []productivity.MergedPR
+			recentRefs map[string]bool
+		}
+		fresh := map[string]fetchResult{}
 		for _, slug := range toFetch {
 			wg.Add(1)
 			go func(slug string) {
 				defer wg.Done()
-				prs, ok := queryMergedPRs(fctx, slug, since, until)
+				prs, refs, ok := queryMergedPRs(fctx, slug, since, until)
 				if !ok {
 					return // keep the stale fallback already in results
 				}
 				mu.Lock()
-				fresh[slug] = prs
+				fresh[slug] = fetchResult{prs: prs, recentRefs: refs}
 				mu.Unlock()
 			}(slug)
 		}
 		wg.Wait()
 
 		now := time.Now()
-		for slug, prs := range fresh {
-			results[slug] = result{prs: prs, fetched: now}
-			h.storeMergedPRs(ctx, slug, windowKey, prs)
+		for slug, fr := range fresh {
+			results[slug] = result{prs: fr.prs, fetched: now}
+			recentRefsBySlug[slug] = fr.recentRefs
+			h.storeMergedPRs(ctx, slug, windowKey, fr.prs)
 		}
 	}
 
@@ -130,6 +150,43 @@ func (h *ProductivityHandler) enrichMergedPRs(
 		for _, i := range idxs {
 			rep.Services[i].MergedPRs = r.prs
 			rep.Services[i].MergedPRsAsOf = r.fetched
+		}
+	}
+
+	// Squash-merge upgrade: when gh reports a merged PR for a head_ref
+	// matching one of the service's branches, upgrade that branch's
+	// Ship to ShipMerged AND drop any done-uncommitted risk against it.
+	// Local git's mergedInto returns false on squash merges (the
+	// content lands without the feature HEAD commit), so this is the
+	// path that lets the dashboard recognize a fully-shipped branch
+	// even when the local merge-base check disagrees. Cached-only
+	// repos don't get the upgrade — picked up on the next refresh.
+	for slug, idxs := range byRepo {
+		refs := recentRefsBySlug[slug]
+		if len(refs) == 0 {
+			continue
+		}
+		for _, i := range idxs {
+			svc := &rep.Services[i]
+			for j := range svc.Branches {
+				if refs[svc.Branches[j].Name] {
+					svc.Branches[j].Ship = productivity.ShipMerged
+				}
+			}
+			// Drop done-uncommitted risks targeting merged branches —
+			// the worktree's lingering edits are post-merge cleanup
+			// noise, not an open loop. Keeps the open-loops list
+			// honest about what still needs action.
+			if len(svc.Risks) > 0 {
+				filtered := svc.Risks[:0]
+				for _, r := range svc.Risks {
+					if r.Kind == "done-uncommitted" && refs[r.Branch] {
+						continue
+					}
+					filtered = append(filtered, r)
+				}
+				svc.Risks = filtered
+			}
 		}
 	}
 }
@@ -189,12 +246,22 @@ func parseRepoSlug(raw string) string {
 // false on any failure (so the caller keeps a stale cache entry rather
 // than overwriting it with nothing); a successful query with zero
 // results returns (non-nil empty slice, true).
+//
+// The lookback window is widened to mergedRecentlyLookbackDays so that
+// branches squash-merged on prior days are still recognized as merged
+// — local git's mergedInto check returns false on squash merges (the
+// content lands without the feature HEAD commit), so we lean on gh to
+// catch them. PRs outside the report's [since, until] are filtered
+// out for the Service.MergedPRs list itself; the squash-merge
+// detection uses the raw widened set via mergedHeadRefsRecently().
 func queryMergedPRs(
 	ctx context.Context, slug string, since, until time.Time,
-) ([]productivity.MergedPR, bool) {
+) ([]productivity.MergedPR, map[string]bool, bool) {
 	// `gh`'s merged: search qualifier is day-granular — query a
-	// day-padded range, then filter precisely by mergedAt in Go.
-	lo := since.AddDate(0, 0, -1).Format("2006-01-02")
+	// widened range so recent squash-merges are visible to the
+	// ShipMerged upgrade, then filter precisely by mergedAt in Go
+	// when populating Service.MergedPRs.
+	lo := since.AddDate(0, 0, -mergedRecentlyLookbackDays).Format("2006-01-02")
 	hi := until.AddDate(0, 0, 1).Format("2006-01-02")
 	// IMPORTANT: do NOT request `commits` here — gh expands it to a
 	// GraphQL traversal of every commit's `authors` connection, which
@@ -210,7 +277,7 @@ func queryMergedPRs(
 	)
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, false
+		return nil, nil, false
 	}
 
 	var raw []struct {
@@ -221,11 +288,18 @@ func queryMergedPRs(
 		CreatedAt   time.Time `json:"createdAt"`
 	}
 	if err := json.Unmarshal(out, &raw); err != nil {
-		return nil, false
+		return nil, nil, false
 	}
 
+	// recentRefs spans the WIDENED window so squash-merges on prior
+	// days still resolve to ShipMerged. The filtered prs slice keeps
+	// the window-only contract for Service.MergedPRs.
+	recentRefs := map[string]bool{}
 	prs := []productivity.MergedPR{}
 	for _, p := range raw {
+		if p.HeadRefName != "" {
+			recentRefs[p.HeadRefName] = true
+		}
 		// gh's day-granular search can include PRs just outside the
 		// real window — clamp precisely.
 		if p.MergedAt.Before(since) || p.MergedAt.After(until) {
@@ -246,7 +320,7 @@ func queryMergedPRs(
 		prs = append(prs, pr)
 	}
 	sort.Slice(prs, func(i, j int) bool { return prs[i].MergedAt.Before(prs[j].MergedAt) })
-	return prs, true
+	return prs, recentRefs, true
 }
 
 // cachedMergedPRs reads a cached merged-PR list for (slug, windowKey).
