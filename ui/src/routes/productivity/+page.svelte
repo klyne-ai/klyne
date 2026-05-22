@@ -817,7 +817,14 @@
               {/each}
               {#if loops.length > 3}<span class="mono muted">+{loops.length-3} more</span>{/if}
             </div>
-            <button class="svc-hide" onclick={() => hideService(svc.repo)} title="Hide all sessions from {svc.repo}">×</button>
+            <button class="svc-hide" onclick={() => hideService(svc.repo)} title="Hide all sessions from {svc.repo}" aria-label="Hide {svc.repo}">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M3 3l18 18" />
+                <path d="M10.585 10.585a2 2 0 0 0 2.83 2.83" />
+                <path d="M16.681 16.673A8.717 8.717 0 0 1 12 18c-4 0-7.333-2-10-6 1.166-1.75 2.5-3.146 4-4.188" />
+                <path d="M9.882 5.205A9.336 9.336 0 0 1 12 5c4 0 7.333 2 10 6-.706 1.06-1.49 1.99-2.349 2.79" />
+              </svg>
+            </button>
           </div>
         {/each}
         {#if v.services.length === 0}
@@ -1138,14 +1145,13 @@
   .loop-note   { font-size: 10.5px; color: var(--fg-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
   .svc-empty   { padding: 24px; color: var(--fg-muted); font-family: var(--font-mono); font-size: 12px; text-align: center; }
   .svc-hide {
-    background: transparent; border: 1px solid transparent;
-    color: var(--fg-dim); width: 24px; height: 24px;
-    border-radius: 4px; cursor: pointer;
-    font-family: var(--font-mono); font-size: 14px; line-height: 1;
+    background: transparent; border: 1px solid var(--border-hair);
+    color: var(--fg-dim); width: 26px; height: 26px;
+    border-radius: 6px; cursor: pointer;
     display: inline-flex; align-items: center; justify-content: center;
-    opacity: 0; transition: opacity 120ms;
+    transition: color var(--t-fast), border-color var(--t-fast), background var(--t-fast);
   }
-  .svc-row:hover .svc-hide { opacity: 1; }
+  .svc-hide svg { width: 14px; height: 14px; display: block; }
   .svc-hide:hover { background: var(--bg-card-2); border-color: var(--border); color: var(--fg); }
 
   /* ── 7. Timeline ─────────────────────────────────────────── */
