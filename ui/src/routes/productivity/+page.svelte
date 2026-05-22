@@ -247,6 +247,7 @@
     title: string;
     body: string;
     evidence: string[];
+    repo?: string;
   }
   function classifyBullet(text: string): ReflectionBullet['chip'] {
     const t = text.toLowerCase();
@@ -313,12 +314,22 @@
       // this, `**operations-app**` leaks into the rendered title as
       // literal asterisks.
       const raw = ln.replace(/^[-*]\s+/, '').trim();
-      const clean = stripMarkdown(raw);
+      // Capture a leading `**repo-name**` bold prefix as the repo tag
+      // BEFORE we strip markdown — reflection bullets routinely start
+      // with the service name bolded (e.g. `**klyne** — ...`).
+      let repo: string | undefined;
+      const repoMatch = raw.match(/^\*\*([a-z0-9][a-z0-9._-]{1,40})\*\*\s*[—:\-]?\s*/i);
+      let body0 = raw;
+      if (repoMatch) {
+        repo = repoMatch[1].toLowerCase();
+        body0 = raw.slice(repoMatch[0].length);
+      }
+      const clean = stripMarkdown(body0);
       if (clean.length < 20) continue; // skip noise
       const chip = classifyBullet(clean);
       const { body: cleaned, evidence } = extractEvidence(clean);
       const { title, body } = splitTitle(cleaned);
-      out.push({ chip, title, body, evidence: Array.from(new Set(evidence)).slice(0, 2) });
+      out.push({ chip, title, body, evidence: Array.from(new Set(evidence)).slice(0, 2), repo });
     }
     return out.slice(0, 8); // cap at 8
   }
@@ -377,6 +388,7 @@
         title: `${s.repo} — ${s.cli} session`,
         body:  `${fmtMinutes(s.active_minutes)} of active time across ${s.message_count} messages.`,
         evidence: [shortId(s.session_id, 8)],
+        repo:  s.repo,
       }));
   }
   function topAlerts(svcs: ProductivityService[]): { level:'alert'|'warn'; rank:string; kicker:string; title:string; body:string; meta:string; actions:string[] }[] {
@@ -571,17 +583,7 @@
           <span class="grow"></span>
           <span class="mono dim">deterministic · git + jsonl + sqlite</span>
         </div>
-        {#if parsedBullets.length > 0}
-          {@const lead = parsedBullets[0]}
-          {@const leadProse = lead.body ? `${lead.title} — ${lead.body}` : lead.title}
-          <h2 class="hero-h">{leadProse.length > 240 ? leadProse.slice(0, 237) + '…' : leadProse}</h2>
-        {:else if v.reflection_markdown}
-          <h2 class="hero-h">{headlineFromMarkdown(v.reflection_markdown, 220)}</h2>
-        {:else if bullets.length > 0}
-          <h2 class="hero-h">
-            <mark class="mk-accent">{bullets.length} important moments</mark> from this window — {fmtMinutes(realSessions.reduce((a,s)=>a+s.active_minutes,0))} of focused AI time.
-          </h2>
-        {:else}
+        {#if parsedBullets.length === 0 && bullets.length === 0}
           <h2 class="hero-h hero-empty">No important sessions in this window. Pick a wider range or check back after end of day.</h2>
         {/if}
         {#if bullets.length > 0}
@@ -596,6 +598,7 @@
                   {#if b.body}<p class="bul-desc">{b.body}</p>{/if}
                 </div>
                 <div class="bul-ev">
+                  {#if b.repo}<span class="mono bul-repo">{b.repo}</span>{/if}
                   {#each b.evidence as e}<span class="mono dim">{e}</span>{/each}
                 </div>
               </li>
@@ -897,7 +900,16 @@
   .bul-title { font-size: 14px; color: var(--fg); line-height: 1.4; font-weight: 500; margin-bottom: 2px; }
   .bul-desc  { margin: 0; color: var(--fg-soft); font-size: 12.75px; line-height: 1.5; max-width: 78ch; }
   .bul-ev    { display: flex; flex-direction: column; gap: 4px; align-items: flex-end; }
-  .bul-ev .mono { font-size: 10.5px; }
+  .bul-ev .mono { font-size: 10.5px; color: var(--fg-dim); }
+  .bul-repo {
+    color: var(--fg-soft) !important;
+    background: var(--bg-inset);
+    border: 1px solid var(--border-hair);
+    padding: 1px 7px;
+    border-radius: 4px;
+    font-size: 10.5px;
+    letter-spacing: 0.01em;
+  }
 
   /* ── 5. Metrics ──────────────────────────────────────────── */
   .metrics { padding: 14px 4px; display: grid; grid-template-columns: repeat(6, 1fr); }
