@@ -93,7 +93,25 @@ func recordReflection(ctx context.Context, db *store.DB, projectPath string, day
 	// names + short SHAs so a genuinely-backed artifact ref survives.
 	gitEvidence := gitEvidenceFor(rep, projectPath)
 
+	// Pre-pass: per-insight dedupe of the cited evidence ids (intra-bullet)
+	// and decide whether every insight cites the same set so we can collapse
+	// repeated `(evidence: X)` parentheticals into a single trailing line
+	// when the source is uniform (the common case: a day of work in one
+	// session yields N bullets all citing the same session_id).
+	dedupedInsightEv := make([][]string, len(insights))
+	var firstSet []string
+	sourcesDiffer := false
+	for i, ins := range insights {
+		dedupedInsightEv[i] = dedupeOrdered(ins.Evidence)
+		if i == 0 {
+			firstSet = dedupedInsightEv[i]
+		} else if !equalStringSet(firstSet, dedupedInsightEv[i]) {
+			sourcesDiffer = true
+		}
+	}
+
 	var allEvidence []string
+	seenEvidence := map[string]bool{}
 	var body strings.Builder
 	for i, ins := range insights {
 		if strings.TrimSpace(ins.Text) == "" {
@@ -102,14 +120,32 @@ func recordReflection(ctx context.Context, db *store.DB, projectPath string, day
 		if len(ins.Evidence) == 0 {
 			return store.Reflection{}, fmt.Errorf("worklog: insight %d missing evidence (citation invariant)", i)
 		}
-		allEvidence = append(allEvidence, ins.Evidence...)
+		// Global dedupe: prevents the JSON column from storing the same
+		// session_id N times when N bullets all cite the same source.
+		for _, ev := range dedupedInsightEv[i] {
+			if !seenEvidence[ev] {
+				seenEvidence[ev] = true
+				allEvidence = append(allEvidence, ev)
+			}
+		}
 		// Improvement 4 (spec §7.2 / §7.1 rule 2): the deterministic
 		// unverified-artifact-ID guard. Any "PR #<n>" in the AI-authored
 		// insight text not backed by the evidence allowlist is the
 		// documented "PR #57" hallucination — strip it before persistence.
-		allow := append(append([]string{}, ins.Evidence...), gitEvidence...)
+		allow := append(append([]string{}, dedupedInsightEv[i]...), gitEvidence...)
 		text, _ := SanitizeArtifactIDs(ins.Text, allow)
-		body.WriteString(fmt.Sprintf("- %s (evidence: %s)\n", text, strings.Join(ins.Evidence, ", ")))
+		if sourcesDiffer {
+			// Bullets cite different sources — keep per-bullet attribution.
+			body.WriteString(fmt.Sprintf("- %s (evidence: %s)\n", text, strings.Join(dedupedInsightEv[i], ", ")))
+		} else {
+			// Uniform sources — render clean bullets; the footer below
+			// carries the single shared attribution. Avoids the visual
+			// noise of `(evidence: X)` repeated on every line.
+			body.WriteString(fmt.Sprintf("- %s\n", text))
+		}
+	}
+	if !sourcesDiffer && len(allEvidence) > 0 {
+		body.WriteString(fmt.Sprintf("\n(evidence: %s)\n", strings.Join(allEvidence, ", ")))
 	}
 
 	// Improvements 1/3/5/7: append the deterministic git-grounded
@@ -144,6 +180,47 @@ func recordReflection(ctx context.Context, db *store.DB, projectPath string, day
 		return store.Reflection{}, fmt.Errorf("worklog: persist reflection: %w", err)
 	}
 	return refl, nil
+}
+
+// dedupeOrdered returns the input slice with duplicate strings removed,
+// preserving the original first-seen order. Used to scrub repeated
+// evidence ids both intra-bullet (when a caller cites the same session
+// twice in one insight) and globally (when N bullets all cite the same
+// source — the common "single-session day" pattern).
+func dedupeOrdered(xs []string) []string {
+	if len(xs) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, len(xs))
+	out := make([]string, 0, len(xs))
+	for _, x := range xs {
+		if seen[x] {
+			continue
+		}
+		seen[x] = true
+		out = append(out, x)
+	}
+	return out
+}
+
+// equalStringSet returns true when a and b contain the same elements
+// (order-independent). Used to detect whether every insight in a
+// reflection cites an identical evidence set, in which case we collapse
+// per-bullet `(evidence: X)` parentheticals into one trailing line.
+func equalStringSet(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	seen := make(map[string]bool, len(a))
+	for _, x := range a {
+		seen[x] = true
+	}
+	for _, x := range b {
+		if !seen[x] {
+			return false
+		}
+	}
+	return true
 }
 
 // gitEvidenceFor returns the substrate evidence allowlist for projectPath
