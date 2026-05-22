@@ -369,6 +369,54 @@
          : chip === 'MERGED'  ? 'info'
          : 'muted';
   }
+  // ── reflection cards (iterative-reflection — phase 3) ────────────
+  // Each card is one /klyne:reflect run for one project on this day.
+  // docs/features/iterative-reflection.md: A1 — show every group
+  // chronologically (no cross-time AI re-synthesis), B — variable
+  // detail count per group, headline = first bullet's title.
+  interface ReflectionCard {
+    id: string;                    // unique per group, used as the disclosure key
+    ts: number;                    // ms epoch — when this reflection was written
+    repo: string;                  // service repo (for the small chip)
+    headline: ReflectionBullet;    // first bullet — the at-a-glance summary
+    details: ReflectionBullet[];   // remaining bullets — revealed by `view details`
+  }
+  function gatherReflectionCards(rep: ProductivityReport): ReflectionCard[] {
+    const cards: ReflectionCard[] = [];
+    for (const svc of rep.services ?? []) {
+      for (const g of svc.reflection_groups ?? []) {
+        const bullets = parseReflectionBullets(g.body_md).map(b => ({
+          ...b,
+          repo: b.repo ?? svc.repo,
+        }));
+        if (bullets.length === 0) continue;
+        cards.push({
+          id:       g.id,
+          ts:       g.ts,
+          repo:     svc.repo,
+          headline: bullets[0],
+          details:  bullets.slice(1),
+        });
+      }
+    }
+    cards.sort((a, b) => a.ts - b.ts);
+    return cards;
+  }
+  function fmtTimeHM(ms: number): string {
+    if (!ms) return '';
+    const d = new Date(ms);
+    return `${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;
+  }
+  // Disclosure state per card id — latest expanded by default, others
+  // collapsed. Toggled by the `▸ N details` button.
+  const expandedCards = $state<Record<string, boolean>>({});
+  function toggleCard(id: string) {
+    expandedCards[id] = !expandedCards[id];
+  }
+  function isExpanded(id: string, isLatest: boolean): boolean {
+    if (id in expandedCards) return expandedCards[id];
+    return isLatest;
+  }
   function totalBranches(svcs: ProductivityService[]): number { let c=0; for (const s of svcs) c += s.branches.length; return c; }
   function totalCommits(svcs: ProductivityService[]): number { let c=0; for (const s of svcs) for (const b of s.branches) c += b.commits.length; return c; }
   function totalShippedPushed(svcs: ProductivityService[]): number { let c=0; for (const s of svcs) for (const b of s.branches) if (b.ship==='pushed-to-remote') c+=1; return c; }
@@ -509,6 +557,7 @@
     {@const realSessions = meaningfulSessions(v, 1)}
     {@const peak = peakSweep(realSessions)}
     {@const hist = risksHistogram(v.services)}
+    {@const reflectionCards = gatherReflectionCards(v)}
     {@const parsedBullets = gatherProjectBullets(v)}
     {@const bullets = parsedBullets.length > 0 ? parsedBullets : fallbackSessionBullets(v)}
     {@const alerts = topAlerts(v.services)}
@@ -604,18 +653,79 @@
       </section>
 
       <!-- ── 4. Hero — what was done ─────────────────────────────── -->
+      <!--
+        Iterative reflection (docs/features/iterative-reflection.md):
+        one card per /klyne:reflect run, oldest at top. Each card shows
+        the headline (first bullet) by default; the rest expand behind
+        a "view details" disclosure. Falls back to the flat bullet list
+        when there are no reflection groups at all.
+      -->
       <section class="card hero">
         <div class="hero-head">
           <span class="kick kick-accent">What was done</span>
           <span class="sep">·</span>
-          <span class="mono muted">{bullets.length} important sessions · {realSessions.length} total · importance ≥ 7</span>
+          {#if reflectionCards.length > 0}
+            <span class="mono muted">{reflectionCards.length} reflection{reflectionCards.length === 1 ? '' : 's'} today · {realSessions.length} session{realSessions.length === 1 ? '' : 's'}</span>
+          {:else}
+            <span class="mono muted">{bullets.length} important sessions · {realSessions.length} total · importance ≥ 7</span>
+          {/if}
           <span class="grow"></span>
           <span class="mono dim">deterministic · git + jsonl + sqlite</span>
         </div>
-        {#if parsedBullets.length === 0 && bullets.length === 0}
+        {#if reflectionCards.length === 0 && bullets.length === 0}
           <h2 class="hero-h hero-empty">No important sessions in this window. Pick a wider range or check back after end of day.</h2>
         {/if}
-        {#if bullets.length > 0}
+
+        {#if reflectionCards.length > 0}
+          <ol class="refl-cards">
+            {#each reflectionCards as c, ci (c.id)}
+              {@const isLast = ci === reflectionCards.length - 1}
+              {@const expanded = isExpanded(c.id, isLast)}
+              {@const headTone = chipTone(c.headline.chip)}
+              <li class="refl-card">
+                <header class="refl-head">
+                  <span class="mono dim refl-num">T{ci + 1}</span>
+                  <span class="mono refl-ts">{fmtTimeHM(c.ts)}</span>
+                  <span class="mono dim refl-sep">·</span>
+                  <span class="mono refl-repo">{c.repo}</span>
+                  <span class="grow"></span>
+                  <span class="pill pill-{headTone} refl-chip">{c.headline.chip}</span>
+                </header>
+                <div class="refl-body">
+                  <div class="refl-title">{c.headline.title}</div>
+                  {#if c.headline.body}<p class="refl-desc">{c.headline.body}</p>{/if}
+                </div>
+                {#if c.details.length > 0}
+                  <button
+                    class="refl-disclose"
+                    onclick={() => toggleCard(c.id)}
+                    aria-expanded={expanded}
+                  >
+                    <span class="refl-caret" class:open={expanded}>▸</span>
+                    <span class="mono">{expanded ? 'hide' : 'view'} {c.details.length} detail{c.details.length === 1 ? '' : 's'}</span>
+                  </button>
+                  {#if expanded}
+                    <ol class="refl-details">
+                      {#each c.details as d, di (c.id + '|' + di)}
+                        {@const dTone = chipTone(d.chip)}
+                        <li class="refl-detail">
+                          <span class="pill pill-{dTone} refl-detail-chip">{d.chip}</span>
+                          <div class="refl-detail-body">
+                            <div class="refl-detail-title">{d.title}</div>
+                            {#if d.body}<p class="refl-detail-desc">{d.body}</p>{/if}
+                          </div>
+                          <div class="refl-detail-ev">
+                            {#each d.evidence as e}<span class="mono dim">{e}</span>{/each}
+                          </div>
+                        </li>
+                      {/each}
+                    </ol>
+                  {/if}
+                {/if}
+              </li>
+            {/each}
+          </ol>
+        {:else if bullets.length > 0}
           <ol class="bul-list">
             {#each bullets as b, i (b.title + i)}
               {@const tone = chipTone(b.chip)}
@@ -939,6 +1049,68 @@
     font-size: 10.5px;
     letter-spacing: 0.01em;
   }
+
+  /* ── 4b. Reflection cards (iterative-reflection phase 3) ─── */
+  .refl-cards { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 14px; }
+  .refl-card  {
+    border: 1px solid var(--border-soft);
+    border-radius: 8px;
+    background: var(--bg-card-2);
+    padding: 12px 16px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .refl-head { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--fg-muted); }
+  .refl-num  { font-size: 11px; color: var(--fg-dim); letter-spacing: 0.04em; }
+  .refl-ts   { color: var(--fg-soft); font-variant-numeric: tabular-nums; }
+  .refl-sep  { color: var(--fg-dim); }
+  .refl-repo {
+    color: var(--fg-soft);
+    background: var(--bg-inset);
+    border: 1px solid var(--border-hair);
+    padding: 1px 7px;
+    border-radius: 4px;
+    font-size: 10.5px;
+  }
+  .refl-chip { font-size: 10.5px; letter-spacing: 0.02em; }
+  .refl-body { display: flex; flex-direction: column; gap: 4px; }
+  .refl-title { font-size: 14.5px; color: var(--fg); font-weight: 500; line-height: 1.4; }
+  .refl-desc  { margin: 0; color: var(--fg-soft); font-size: 13px; line-height: 1.5; max-width: 78ch; }
+  .refl-disclose {
+    align-self: flex-start;
+    background: transparent;
+    border: 1px solid var(--border-hair);
+    border-radius: 6px;
+    padding: 3px 8px;
+    color: var(--fg-muted);
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: color var(--t-fast), border-color var(--t-fast), background var(--t-fast);
+  }
+  .refl-disclose:hover { color: var(--fg); border-color: var(--border-soft); background: var(--bg-inset); }
+  .refl-caret { display: inline-block; transition: transform 120ms ease-out; }
+  .refl-caret.open { transform: rotate(90deg); }
+  .refl-details {
+    margin: 4px 0 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    border-top: 1px dashed var(--border-hair);
+    padding-top: 10px;
+  }
+  .refl-detail { display: grid; grid-template-columns: 78px 1fr auto; gap: 12px; align-items: start; }
+  .refl-detail-chip { align-self: start; margin-top: 2px; justify-content: center; min-width: 64px; text-align: center; font-size: 10px; }
+  .refl-detail-body { min-width: 0; }
+  .refl-detail-title { font-size: 13px; color: var(--fg); font-weight: 500; line-height: 1.4; }
+  .refl-detail-desc  { margin: 2px 0 0; color: var(--fg-soft); font-size: 12px; line-height: 1.5; max-width: 78ch; }
+  .refl-detail-ev    { display: flex; flex-direction: column; gap: 3px; align-items: flex-end; font-size: 10.5px; color: var(--fg-dim); }
 
   /* ── 5. Metrics ──────────────────────────────────────────── */
   .metrics { padding: 14px 4px; display: grid; grid-template-columns: repeat(6, 1fr); }

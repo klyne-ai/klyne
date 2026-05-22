@@ -12,8 +12,21 @@ type fakeReflections struct {
 	body string
 }
 
-func (f fakeReflections) HasReflection(_ context.Context, _ string, _ time.Time) (bool, string, error) {
-	return f.has, f.body, nil
+func (f fakeReflections) LoadReflections(_ context.Context, _ string, _ time.Time) ([]ReflectionGroup, error) {
+	if !f.has {
+		return nil, nil
+	}
+	body := f.body
+	if strings.TrimSpace(body) == "" {
+		// Sentinel: tests that only assert "reflection is present"
+		// (status=current) set has:true without a body. Preserve that
+		// shape by emitting a group with a placeholder body.
+		body = "- reflection present"
+	}
+	return []ReflectionGroup{{
+		ID:     "fake",
+		BodyMD: body,
+	}}, nil
 }
 
 func TestBuildReport_RisksNarrativeAndReflectionStatus(t *testing.T) {

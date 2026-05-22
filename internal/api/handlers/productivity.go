@@ -2,8 +2,6 @@ package handlers
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"fmt"
 	"net/http"
 	"os/exec"
@@ -311,37 +309,40 @@ WHERE last_msg_at >= ? AND last_msg_at <= ?`
 }
 
 // reflectionLookup adapts *store.DB to productivity.ReflectionLookup
-// by reading the legacy worklog_reflections row for (project, day).
-// The rich-entry merge tier was removed along with the daemon-side
-// AI synthesis path — reflections are now authored inside the
-// user's interactive Claude/Codex session via /klyne:reflect, and
-// the dashboard simply surfaces the resulting worklog_reflections
-// rows.
+// by reading every worklog_reflections row for (project, day) — the
+// iterative-reflection workflow's T1/T2/T3 history
+// (docs/features/iterative-reflection.md). The dashboard renders each
+// row as a separate group; concat for legacy consumers happens upstream
+// in productivity.BuildReport.
 type reflectionLookup struct {
 	db *store.DB
 }
 
-func (l *reflectionLookup) HasReflection(
+func (l *reflectionLookup) LoadReflections(
 	ctx context.Context, projectPath string, day time.Time,
-) (bool, string, error) {
-	// Tier 1: most recent worklog_reflections row authored via
-	// /klyne:reflect inside the user's interactive session.
+) ([]productivity.ReflectionGroup, error) {
 	dayStr := day.Format("2006-01-02")
-	const q = `
-SELECT body_md
-FROM worklog_reflections
-WHERE project_path = ?
-  AND date(ts / 1000, 'unixepoch', 'localtime') = ?
-ORDER BY ts DESC
-LIMIT 1`
-
-	var bodyMD string
-	err := l.db.Read().QueryRowContext(ctx, q, projectPath, dayStr).Scan(&bodyMD)
-	if err == nil && strings.TrimSpace(bodyMD) != "" {
-		return true, bodyMD, nil
+	rows, err := store.ListReflectionsForProjectDay(ctx, l.db, projectPath, dayStr)
+	if err != nil {
+		return nil, fmt.Errorf("productivity: reflection lookup: %w", err)
 	}
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return false, "", fmt.Errorf("productivity: reflection lookup: %w", err)
+	if len(rows) > 0 {
+		groups := make([]productivity.ReflectionGroup, 0, len(rows))
+		for _, r := range rows {
+			if strings.TrimSpace(r.BodyMD) == "" {
+				continue
+			}
+			groups = append(groups, productivity.ReflectionGroup{
+				ID:                  r.ID,
+				TS:                  r.TS,
+				BodyMD:              r.BodyMD,
+				EvidenceEntryIDs:    r.EvidenceEntryIDs,
+				StopSummaryCursorTS: r.StopSummaryCursorTS,
+			})
+		}
+		if len(groups) > 0 {
+			return groups, nil
+		}
 	}
 
 	// Tier 2: deterministic fallback. When no reflection has been
@@ -356,9 +357,15 @@ LIMIT 1`
 	// the section stays short.
 	body := buildDeterministicWhatWasDone(ctx, l.db, projectPath, day)
 	if body == "" {
-		return false, "", nil
+		return nil, nil
 	}
-	return true, body, nil
+	// One synthetic group representing the deterministic fallback; ts
+	// is the end of the day so it sorts after any real T1/T2/T3 rows.
+	return []productivity.ReflectionGroup{{
+		ID:     "deterministic-" + dayStr,
+		TS:     day.UnixMilli(),
+		BodyMD: body,
+	}}, nil
 }
 
 // importanceThreshold is the cutoff that defines "important enough to

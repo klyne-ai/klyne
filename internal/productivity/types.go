@@ -125,14 +125,22 @@ type RiskSignal struct {
 // ReflectionMarkdown is the worklog reflection body (body_md) for this
 // repo on the report's day (Change 3) — the worklog's own account of
 // what was done. Empty when no reflection exists for the project+day.
+//
+// ReflectionGroups is the iterative-reflection list
+// (docs/features/iterative-reflection.md): one entry per
+// worklog_reflections row for this (project, day), ordered ts ASC.
+// The UI renders one group per entry with a "view details" disclosure;
+// ReflectionMarkdown is the legacy concatenation kept for back-compat
+// consumers that haven't moved to per-group rendering yet.
 type Service struct {
-	Repo               string         `json:"repo"`
-	ProjectPath        string         `json:"project_path"`
-	Branches           []Branch       `json:"branches"`
-	Risks              []RiskSignal   `json:"risks"`
-	ManualOnly         bool           `json:"manual_only"`
-	MinutesByCLI       map[string]int `json:"minutes_by_cli"`
-	ReflectionMarkdown string         `json:"reflection_markdown"`
+	Repo               string            `json:"repo"`
+	ProjectPath        string            `json:"project_path"`
+	Branches           []Branch          `json:"branches"`
+	Risks              []RiskSignal      `json:"risks"`
+	ManualOnly         bool              `json:"manual_only"`
+	MinutesByCLI       map[string]int    `json:"minutes_by_cli"`
+	ReflectionMarkdown string            `json:"reflection_markdown"`
+	ReflectionGroups   []ReflectionGroup `json:"reflection_groups,omitempty"`
 	// MergedPRs is the GitHub pull requests the user merged within the
 	// report window — a Layer-2 `gh`-sourced enrichment (see MergedPR),
 	// NOT a deterministic local-git fact. MergedPRsAsOf is when that
@@ -201,6 +209,19 @@ type SessionStat struct {
 	MessageCount    int              `json:"message_count"`
 }
 
+// ReflectionGroup is one worklog_reflections row in the
+// iterative-reflection workflow (docs/features/iterative-reflection.md).
+// The dashboard renders each group as a separate entry under WHAT WAS
+// DONE so the T1/T2/T3 history of the day is visible chronologically
+// — A1 (per-row groups, no cross-time AI re-synthesis).
+type ReflectionGroup struct {
+	ID                  string   `json:"id"`
+	TS                  int64    `json:"ts"`
+	BodyMD              string   `json:"body_md"`
+	EvidenceEntryIDs    []string `json:"evidence_entry_ids"`
+	StopSummaryCursorTS int64    `json:"stop_summary_cursor_ts,omitempty"`
+}
+
 // Report is the top-level fused record served to the API/UI.
 // ReflectionStatus is "missing" | "stale" | "current" (§7 L3); Nudge is
 // the human prompt shown when no/stale reflection exists.
@@ -229,6 +250,7 @@ type Report struct {
 	Nudge              string         `json:"nudge"`
 	TotalActiveMinutes int            `json:"total_active_minutes"`
 	MinutesByCLI       map[string]int `json:"minutes_by_cli"`
-	Sessions           []SessionStat  `json:"sessions"`
-	ReflectionMarkdown string         `json:"reflection_markdown,omitempty"`
+	Sessions           []SessionStat     `json:"sessions"`
+	ReflectionMarkdown string            `json:"reflection_markdown,omitempty"`
+	ReflectionGroups   []ReflectionGroup `json:"reflection_groups,omitempty"`
 }

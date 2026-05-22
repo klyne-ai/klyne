@@ -450,6 +450,21 @@ export interface ProductivityReport {
    * reflection_markdown carries the per-repo body.
    */
   reflection_markdown?: string;
+  /**
+   * Iterative-reflection groups for the first service that has any —
+   * mirrors that service's reflection_groups. Empty when no reflections
+   * for the day. See docs/features/iterative-reflection.md.
+   */
+  reflection_groups?: ReflectionGroup[];
+}
+/** One row from worklog_reflections — one /klyne:reflect run. */
+export interface ReflectionGroup {
+  id: string;
+  /** Epoch ms when this reflection was written. */
+  ts: number;
+  body_md: string;
+  evidence_entry_ids: string[];
+  stop_summary_cursor_ts?: number;
 }
 export interface ProductivityService {
   repo: string;
@@ -467,9 +482,17 @@ export interface ProductivityService {
   /**
    * Worklog reflection body (markdown) for this repo on the report's
    * day — the worklog's own account of what was done. Empty when no
-   * reflection exists for the project+day.
+   * reflection exists for the project+day. Legacy concatenated form;
+   * prefer `reflection_groups` for the per-row chronological view.
    */
   reflection_markdown: string;
+  /**
+   * Every worklog_reflections row for (project, day) ordered ts ASC —
+   * the iterative-reflection workflow's T1/T2/T3 history
+   * (docs/features/iterative-reflection.md). Empty when no reflections
+   * for the day.
+   */
+  reflection_groups?: ReflectionGroup[];
   /**
    * GitHub pull requests the user merged within the report window — a
    * Layer-2 `gh`-sourced enrichment, NOT a deterministic git fact.

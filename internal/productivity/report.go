@@ -8,19 +8,20 @@ import (
 	"time"
 )
 
-// ReflectionLookup is the §7 L2/L3 dependency: "is there a klyne worklog
-// reflection for this project on this day, and what does it say?".
+// ReflectionLookup is the §7 L2/L3 dependency: "what worklog
+// reflections exist for this project on this day?".
 // Defined as an interface so this package stays free of a direct
 // *store.DB dependency and testable with a stub (the API handler adapts
 // the real worklog_reflections store).
 //
-// HasReflection returns (found, bodyMD, err): found drives the L3
-// status/nudge; bodyMD is the reflection's markdown narrative surfaced
-// as Service.ReflectionMarkdown (Change 3) — it is "" when found is
-// false. bodyMD is purely additive enrichment and never gates the
-// deterministic numbers (D8).
+// LoadReflections returns every row for (projectPath, day) ordered
+// chronologically. An empty slice means "no reflection exists" and
+// drives the L3 nudge; multiple entries are the iterative-reflection
+// workflow's T1/T2/T3 history that the dashboard renders as separate
+// groups. Returned bodies are purely additive enrichment and never
+// gate the deterministic numbers (D8).
 type ReflectionLookup interface {
-	HasReflection(ctx context.Context, projectPath string, day time.Time) (found bool, bodyMD string, err error)
+	LoadReflections(ctx context.Context, projectPath string, day time.Time) ([]ReflectionGroup, error)
 }
 
 // DirtyState is the current working-tree state for a repo plus the end
@@ -151,24 +152,28 @@ func BuildReport(ctx context.Context, in ReportInput, refl ReflectionLookup) (Re
 		// branch set so the highest-impact worktree leads.
 		sortBranches(svc.Branches)
 
-		// Reflection status (§7 L3) + narrative body (Change 3): per
-		// canonical project/day. The body_md is purely additive
-		// enrichment — it never gates the deterministic numbers (D8).
+		// Reflection status (§7 L3) + iterative groups
+		// (docs/features/iterative-reflection.md): per canonical
+		// project/day. Each ReflectionGroup is one /klyne:reflect run;
+		// the dashboard renders them as separate T1/T2/T3 entries. The
+		// legacy ReflectionMarkdown is set to the concatenation so
+		// downstream code that still reads the flat string keeps
+		// working. Bodies are purely additive enrichment — they never
+		// gate the deterministic numbers (D8).
 		if refl != nil {
-			has, body, err := refl.HasReflection(ctx, svc.ProjectPath, day)
+			groups, err := refl.LoadReflections(ctx, svc.ProjectPath, day)
 			if err != nil {
 				return Report{}, fmt.Errorf("productivity: reflection lookup for %s: %w", svc.ProjectPath, err)
 			}
-			if has {
+			if len(groups) > 0 {
 				anyReflection = true
-				svc.ReflectionMarkdown = body
-				// Surface the most recent per-project reflection body as the
-				// report-wide overall narrative when none is set yet. With a
-				// single active project this is the natural overall summary;
-				// with several it is the first project's — honest, not
-				// fabricated (per-Service bodies carry the rest).
+				svc.ReflectionGroups = groups
+				svc.ReflectionMarkdown = concatReflectionBodies(groups)
 				if rep.ReflectionMarkdown == "" {
-					rep.ReflectionMarkdown = body
+					rep.ReflectionMarkdown = svc.ReflectionMarkdown
+				}
+				if len(rep.ReflectionGroups) == 0 {
+					rep.ReflectionGroups = groups
 				}
 			}
 		}
@@ -516,4 +521,27 @@ func dayTime(day string, now time.Time) time.Time {
 		return t
 	}
 	return now
+}
+
+// concatReflectionBodies joins the iterative-reflection groups' bodies
+// into one markdown blob — the legacy ReflectionMarkdown shape kept for
+// consumers that don't yet read ReflectionGroups. Bodies are separated
+// by a horizontal rule so a downstream parser can recover the boundary
+// if it needs to. Order matches the input (caller hands these in
+// chronological order).
+func concatReflectionBodies(groups []ReflectionGroup) string {
+	if len(groups) == 0 {
+		return ""
+	}
+	if len(groups) == 1 {
+		return groups[0].BodyMD
+	}
+	var sb strings.Builder
+	for i, g := range groups {
+		if i > 0 {
+			sb.WriteString("\n\n---\n\n")
+		}
+		sb.WriteString(g.BodyMD)
+	}
+	return sb.String()
 }
