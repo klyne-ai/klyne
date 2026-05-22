@@ -26,17 +26,19 @@
   const { onsearch }: Props = $props();
 
   const tabs = [
-    { id: 'work',     label: 'Work',     path: '/' },
-    { id: 'runbooks', label: 'Runbooks', path: '/runbooks' },
-    { id: 'worklog',  label: 'Worklog',  path: '/worklog' },
-    { id: 'insights', label: 'Insights', path: '/insights' }
+    { id: 'work',         label: 'Work',         path: '/' },
+    { id: 'productivity', label: 'Productivity', path: '/productivity' },
+    { id: 'runbooks',     label: 'Runbooks',     path: '/runbooks' },
+    { id: 'worklog',      label: 'Worklog',      path: '/worklog' },
+    { id: 'insights',     label: 'Insights',     path: '/insights' }
   ] as const;
 
   function currentRoute(): string {
     const p = $page.url.pathname;
-    // Order matters: check /worklog before /work since startsWith('/work') would
-    // match both.
+    // Order matters: check /worklog and /productivity before /work since
+    // startsWith('/work') would otherwise match both.
     if (p.startsWith('/worklog')) return 'worklog';
+    if (p.startsWith('/productivity')) return 'productivity';
     if (p === '/' || p.startsWith('/work') || p.startsWith('/cockpit') || p.startsWith('/projects') || p.startsWith('/sessions')) return 'work';
     if (p.startsWith('/runbooks')) return 'runbooks';
     if (p.startsWith('/insights') || p.startsWith('/stats')) return 'insights';
