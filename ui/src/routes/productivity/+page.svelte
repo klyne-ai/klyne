@@ -333,6 +333,35 @@
     }
     return out.slice(0, 8); // cap at 8
   }
+  // Flatten reflections across every service in the report so days
+  // where multiple projects ran `/klyne:reflect` show all bullets,
+  // not just the first-iterated one (BuildReport's first-wins
+  // assignment to rep.reflection_markdown drops the rest). Stamps the
+  // service repo onto bullets that don't already carry a `**repo**`
+  // prefix, and de-dupes by title so a bullet that also appears in
+  // the report-wide body isn't shown twice.
+  function gatherProjectBullets(rep: ProductivityReport): ReflectionBullet[] {
+    const seenTitle = new Set<string>();
+    const out: ReflectionBullet[] = [];
+    const push = (b: ReflectionBullet, repoFallback?: string) => {
+      const key = (b.title || '').trim().toLowerCase();
+      if (!key || seenTitle.has(key)) return;
+      seenTitle.add(key);
+      out.push({ ...b, repo: b.repo ?? repoFallback });
+    };
+    for (const svc of rep.services ?? []) {
+      if (!svc.reflection_markdown) continue;
+      for (const b of parseReflectionBullets(svc.reflection_markdown)) push(b, svc.repo);
+    }
+    // The report-wide body is also the first-iterated service's body,
+    // so its bullets normally land via the loop above. We still
+    // include it as a fallback for the (impossible-in-current-server)
+    // case where it diverges.
+    if (out.length === 0 && rep.reflection_markdown) {
+      for (const b of parseReflectionBullets(rep.reflection_markdown)) push(b);
+    }
+    return out.slice(0, 12); // raise cap to 12 since we now span projects
+  }
   function chipTone(chip: ReflectionBullet['chip']): 'ok'|'warn'|'alert'|'info'|'muted' {
     return chip === 'SHIPPED' ? 'ok'
          : chip === 'RISK'    ? 'warn'
@@ -427,9 +456,9 @@
       `${fmtMinutes(v.total_active_minutes)} focus · ${totalCommits(v.services)} commits · ${totalShippedPushed(v.services)+totalShippedMerged(v.services)} shipped · peak ${peak.peak}× parallel`,
       ``, `## What was done`,
     ];
-    const parsed = parseReflectionBullets(v.reflection_markdown ?? '');
+    const parsed = gatherProjectBullets(v);
     const standupBullets = parsed.length > 0 ? parsed : fallbackSessionBullets(v);
-    for (const b of standupBullets) lines.push(`- [${b.chip}] ${b.title}${b.body ? ' — ' + b.body : ''}`);
+    for (const b of standupBullets) lines.push(`- [${b.chip}]${b.repo ? ' **'+b.repo+'**' : ''} ${b.title}${b.body ? ' — ' + b.body : ''}`);
     const open = topAlerts(v.services);
     if (open.length > 0) {
       lines.push(``, `## Open loops`);
@@ -480,7 +509,7 @@
     {@const realSessions = meaningfulSessions(v, 1)}
     {@const peak = peakSweep(realSessions)}
     {@const hist = risksHistogram(v.services)}
-    {@const parsedBullets = parseReflectionBullets(v.reflection_markdown ?? '')}
+    {@const parsedBullets = gatherProjectBullets(v)}
     {@const bullets = parsedBullets.length > 0 ? parsedBullets : fallbackSessionBullets(v)}
     {@const alerts = topAlerts(v.services)}
     {@const totalRisks = hist.uncommitted + hist.unpushedSignal + hist.drifted + hist.unpushedNoise + alerts.length}
