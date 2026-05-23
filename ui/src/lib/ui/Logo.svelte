@@ -1,21 +1,36 @@
 <!--
-  Logo — combined K-with-merge brand mark. Distills the document-merge
-  motif into a clean K with two converging merge lines + accent dot.
-  Inherits currentColor for the K body so it adapts per-theme; uses
-  --brand-accent / --brand-line for accent details.
+  Logo — klyne mark v2. Geometric lowercase `k` on a 16-unit grid:
+  vertical stem at x=6, two diagonals converging into the stem at the
+  midline (y=16), and a gold node at the junction. The node is the same
+  pip used as the live/idle streaming indicator across the dashboard.
+
+  Stroke uses `currentColor` so the mark adapts to fg per theme. Node
+  fills with var(--accent). Strokes use square caps for the precise,
+  infra-tooling feel that matches the tile-border vocabulary.
 -->
 <script lang="ts">
   interface Props {
+    /** Pixel size of the (square) mark. Stroke widens slightly at <=20. */
     size?: number;
   }
-  const { size = 28 }: Props = $props();
+  const { size = 24 }: Props = $props();
+
+  // Stroke compensation: scale ladder calls for 3.4 at small sizes, 3.2 above.
+  const stroke = $derived(size <= 20 ? 3.4 : 3.2);
 </script>
 
-<svg width={size} height={size} viewBox="0 0 32 32" fill="none" aria-hidden="true">
-  <path d="M2 11 C6 11, 7.5 13, 9.5 15" stroke="var(--brand-line)" stroke-width="1.6" stroke-linecap="round" />
-  <path d="M2 21 C6 21, 7.5 19, 9.5 17" stroke="var(--brand-line)" stroke-width="1.6" stroke-linecap="round" />
-  <circle cx="11" cy="16" r="2" fill="var(--brand-accent)" />
-  <rect x="14.2" y="5.5" width="2.8" height="21" rx="0.6" fill="currentColor" />
-  <path d="M17 16 L25.5 6.5" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" />
-  <path d="M17 16 L25.5 25.5" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" />
+<svg
+  width={size}
+  height={size}
+  viewBox="0 0 32 32"
+  fill="none"
+  stroke="currentColor"
+  stroke-width={stroke}
+  stroke-linecap="square"
+  aria-hidden="true"
+>
+  <line x1="6" y1="3" x2="6" y2="29" />
+  <line x1="6" y1="16" x2="24" y2="3" />
+  <line x1="6" y1="16" x2="24" y2="29" />
+  <circle cx="6" cy="16" r="1.7" fill="var(--accent)" stroke="none" />
 </svg>

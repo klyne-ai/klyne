@@ -1,5 +1,6 @@
 <script lang="ts">
   import Icon from './Icon.svelte';
+  import Logo from '$lib/ui/Logo.svelte';
   import { NAV, type NavId } from './nav';
   import { goto } from '$app/navigation';
 
@@ -29,7 +30,7 @@
 
 <aside class="sidebar" class:collapsed>
   <div class="sidebar-brand">
-    <div class="mark">&gt;K</div>
+    <span class="mark"><Logo size={22} /></span>
     {#if !collapsed}<div class="name">klyne<em>·local</em></div>{/if}
     <button class="sidebar-toggle" onclick={onToggleCollapse} title={collapsed ? 'Expand' : 'Collapse'}>
       {collapsed ? '›' : '‹'}
@@ -113,11 +114,9 @@
   }
   .sidebar-toggle:hover { color: var(--fg); background: var(--bg-card); border-color: var(--border-soft); }
   .sidebar-brand .mark {
-    width: 24px; height: 24px; border-radius: 6px;
+    width: 24px; height: 24px;
     display: grid; place-items: center;
-    background: var(--accent); color: var(--bg);
-    font-family: var(--font-mono); font-weight: 600; font-size: 13px;
-    letter-spacing: -0.04em;
+    color: var(--fg);
   }
   .sidebar-brand .name { font-family: var(--font-mono); font-size: 14px; color: var(--fg); letter-spacing: -0.01em; }
   .sidebar-brand .name em { font-style: italic; color: var(--fg-soft); margin-left: 2px; }
