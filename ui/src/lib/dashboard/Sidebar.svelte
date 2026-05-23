@@ -61,7 +61,13 @@
         >
           <span class="icon"><Icon name={item.icon} /></span>
           {#if !collapsed}<span class="label">{item.label}</span>{/if}
-          {#if m.text}<span class="meta" class:live={m.kind === 'live'} class:alert={m.kind === 'alert'}>{m.text}</span>{/if}
+          {#if m.text}
+            <span class="meta" class:live={m.kind === 'live'} class:alert={m.kind === 'alert'} aria-hidden="true">{m.text}</span>
+            <!-- visually-hidden text for screen readers when sidebar is collapsed and badge renders as a dot -->
+            {#if collapsed}
+              <span class="vh">{m.text}{item.id === 'advisors' ? ' advisories' : item.id === 'live' ? ' sessions' : ''}</span>
+            {/if}
+          {/if}
         </a>
       {/each}
     </nav>
@@ -213,5 +219,16 @@
     width: 8px; height: 8px; border-radius: 50%;
     background: var(--ok);
     box-shadow: 0 0 0 3px color-mix(in oklch, var(--ok) 18%, transparent);
+  }
+
+  /* Visually hidden — keeps content in the AT tree without occupying layout space. */
+  .vh {
+    position: absolute;
+    width: 1px; height: 1px;
+    padding: 0; margin: -1px;
+    overflow: hidden;
+    clip: rect(0,0,0,0);
+    white-space: nowrap;
+    border-width: 0;
   }
 </style>

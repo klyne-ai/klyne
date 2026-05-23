@@ -9,6 +9,7 @@
   import { parseDashboardSearch, paletteUrl, sessionUrl } from './url-state';
   import { cockpitDerived } from '$lib/cockpit.svelte.js';
   import { projectsDerived } from '$lib/projects.svelte.js';
+  import { advisorsDerived } from '$lib/advisors.svelte.js';
   import type { Snippet } from 'svelte';
 
   interface Props { children: Snippet; rightSlot?: Snippet; }
@@ -39,7 +40,7 @@
 
   const liveCount = $derived(cockpitDerived.liveCount);
   const projectCount = $derived(projectsDerived.projects?.length ?? 0);
-  const advisorCount = $derived(0); // wired in Task 7 once advisor store lands
+  const advisorCount = $derived(advisorsDerived.total);
 </script>
 
 <svelte:window onkeydown={onKey} />
