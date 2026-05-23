@@ -13,6 +13,7 @@
   import Icon from './Icon.svelte';
   import TokenTimelineChart from '$lib/components/TokenTimelineChart.svelte';
   import RestoreContext from '$lib/components/RestoreContext.svelte';
+  import ToolCallBlock from '$lib/components/ToolCallBlock.svelte';
 
   interface Props {
     sessionId: string;
@@ -53,11 +54,23 @@
   const cachedRead = $derived(session?.cached_read_tokens ?? 0);
   const cachedWrite = $derived(session?.cached_write_tokens ?? 0);
   const freshIn = $derived(Math.max(0, (session?.tokens_in ?? 0) - cachedRead - cachedWrite));
-  const cachedPct = $derived(
-    (session?.tokens_in ?? 0) > 0
-      ? Math.round(((cachedRead + cachedWrite) / session!.tokens_in) * 100)
-      : 0
-  );
+  const cachedPct = $derived.by(() => {
+    const tIn = session?.tokens_in ?? 0;
+    return tIn > 0 ? Math.round(((cachedRead + cachedWrite) / tIn) * 100) : 0;
+  });
+
+  function modelContextLimit(model: string): number {
+    if (model.includes('opus-4-7')) return 1_000_000;
+    if (model.includes('opus-4-6')) return 200_000;
+    if (model.includes('haiku')) return 200_000;
+    if (model.includes('gpt-5')) return 400_000;
+    return 200_000;
+  }
+
+  function pctOfContext(s: typeof session): number {
+    if (!s || s.tokens_in <= 0) return 0;
+    return Math.round((s.tokens_in / modelContextLimit(s.model)) * 100);
+  }
 
   function resumeCommand(): string {
     if (!session) return `claude --resume ${sessionId}`;
@@ -245,7 +258,29 @@
         </div>
       </div>
 
-      <!-- 2. Token timeline chart -->
+      <!-- 2. Context % bar -->
+      {#if session.tokens_in > 0}
+        {@const pct = pctOfContext(session)}
+        <section class="card ctx-card">
+          <header class="ctx-head">
+            <span class="mono soft">Session {pct}% full</span>
+            <span class="mono dim">
+              {kfmt(session.tokens_in)} of {kfmt(modelContextLimit(session.model))} · {session.model}
+            </span>
+          </header>
+          <div class="hbar">
+            <div
+              class="fill"
+              class:alert={pct > 70}
+              class:warn={pct > 50 && pct <= 70}
+              class:ok={pct <= 50}
+              style:transform={`scaleX(${Math.min(pct, 100) / 100})`}
+            ></div>
+          </div>
+        </section>
+      {/if}
+
+      <!-- 3. Token timeline chart -->
       <TokenTimelineChart sessionId={session.id} />
 
       <!-- 3. Restore-context banner (compacted sessions) -->
@@ -308,34 +343,45 @@
           </div>
         </header>
         <div class="msg-stream">
-          {#each visibleMessages as m (m.id)}
-            {@const isUser = m.role === 'user'}
-            {@const cliColor = session.cli === 'codex' ? 'var(--fg-accent, #f59e0b)' : 'var(--fg-purple, #c084fc)'}
-            {@const lab = isUser ? 'you' : (session.cli === 'codex' ? 'codex' : 'claude')}
-            {@const labColor = isUser ? 'var(--fg)' : cliColor}
-            {@const isExpanded = expandedIds.has(m.id)}
-            {@const long = isLong(m.content)}
+          {#each messages as m (m.id)}
+            {#if m.tool_calls && m.tool_calls.length > 0}
+              {#each m.tool_calls as tc (tc.id)}
+                <div class="msg-row">
+                  <ToolCallBlock
+                    toolCall={tc}
+                    toolResult={m.tool_results?.find((r) => r.id === tc.id)}
+                  />
+                </div>
+              {/each}
+            {:else if isConversationalMessage(m)}
+              {@const isUser = m.role === 'user'}
+              {@const cliColor = session.cli === 'codex' ? 'var(--fg-accent, #f59e0b)' : 'var(--fg-purple, #c084fc)'}
+              {@const lab = isUser ? 'you' : (session.cli === 'codex' ? 'codex' : 'claude')}
+              {@const labColor = isUser ? 'var(--fg)' : cliColor}
+              {@const isExpanded = expandedIds.has(m.id)}
+              {@const long = isLong(m.content)}
 
-            <div class="msg-row">
-              <div class="msg-head">
-                <span class="msg-role" style="color: {labColor};">{lab}</span>
-                <span class="msg-meta mono">
-                  {m.tokens_out ? `↓ ${kfmt(m.tokens_out)} · ` : ''}{relAgo(Date.now() - m.ts)}
-                </span>
+              <div class="msg-row">
+                <div class="msg-head">
+                  <span class="msg-role" style="color: {labColor};">{lab}</span>
+                  <span class="msg-meta mono">
+                    {m.tokens_out ? `↓ ${kfmt(m.tokens_out)} · ` : ''}{relAgo(Date.now() - m.ts)}
+                  </span>
+                </div>
+                <div
+                  class="msg-body"
+                  class:msg-clipped={long && !isExpanded}
+                >{m.content}</div>
+                {#if long}
+                  <button
+                    class="msg-toggle"
+                    onclick={() => toggleExpanded(m.id)}
+                  >{isExpanded ? 'Show less' : 'Show more'}</button>
+                {/if}
               </div>
-              <div
-                class="msg-body"
-                class:msg-clipped={long && !isExpanded}
-              >{m.content}</div>
-              {#if long}
-                <button
-                  class="msg-toggle"
-                  onclick={() => toggleExpanded(m.id)}
-                >{isExpanded ? 'Show less' : 'Show more'}</button>
-              {/if}
-            </div>
+            {/if}
           {/each}
-          {#if visibleMessages.length === 0}
+          {#if messages.length === 0}
             <div class="empty-msg">No messages loaded.</div>
           {/if}
         </div>
@@ -478,6 +524,27 @@
   .stat-v.faint { color: var(--fg-muted); }
   .stat-s { font-size: 10px; color: var(--fg-muted); }
   .mono { font-family: var(--font-mono); }
+
+  /* ── Context % bar ──────────────────────────────────────────────────── */
+  .ctx-card { padding: 14px 16px; }
+  .ctx-head { display: flex; justify-content: space-between; margin-bottom: 6px; }
+  .soft { color: var(--fg-soft, var(--fg-muted)); font-size: 12px; }
+  .dim  { color: var(--fg-muted); font-size: 11px; }
+  .hbar {
+    position: relative; height: 6px;
+    background: var(--bg-inset);
+    border: 1px solid var(--border-hair);
+    border-radius: 3px; overflow: hidden;
+  }
+  .hbar .fill {
+    position: absolute; inset: 0;
+    transform-origin: left center;
+    background: var(--ok);
+    border-radius: 3px;
+    transition: transform 0.2s ease;
+  }
+  .hbar .fill.warn  { background: var(--warn); }
+  .hbar .fill.alert { background: var(--alert); }
 
   /* ── Restore banner ──────────────────────────────────────────────────── */
   .restore-banner {
