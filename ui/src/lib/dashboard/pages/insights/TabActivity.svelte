@@ -77,6 +77,7 @@
               {#each week as c, di (di)}
                 <div
                   title="{c.date ? `${c.date} · ${c.messages} msgs` : ''}"
+                  aria-label={c.date ? `${c.date}, ${c.messages} messages, intensity ${c.intensity}` : undefined}
                   style="width: 12px; height: 12px; border-radius: 2px; background: {c.date ? intensityColor(c.intensity) : 'transparent'};"
                 ></div>
               {/each}

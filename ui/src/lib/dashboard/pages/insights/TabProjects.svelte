@@ -111,7 +111,7 @@
                   class="ad-btn"
                   style="font-size: 11px; padding: 2px 8px;"
                   onclick={() => void goto(`/projects/${encodeURIComponent(p.name)}`)}
-                >open →</button>
+                >open →</button><!-- ProjectsList selects by p.name === selectedName; p.name is correct -->
               </td>
             </tr>
           {/each}

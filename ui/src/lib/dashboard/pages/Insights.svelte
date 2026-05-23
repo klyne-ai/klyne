@@ -1,13 +1,5 @@
 <script lang="ts">
-  /**
-   * Insights — merged /insights + /stats analytics surface.
-   *
-   * Five tabs: Overview · Activity · Models · Daily · Projects
-   * Driven by ?tab=, ?win=, ?cli= URL params.
-   *
-   * Window selector: primary buttons 1h · 3h · 6h · 1d; dropdown for 7d / 30d / 90d.
-   * Six always-visible KPIs: Spend · Input · Output · Sessions · Messages · Projects.
-   */
+  // Insights — merged analytics surface: Overview · Activity · Models · Daily · Projects
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
   import { kfmt, costFmt } from '$lib/format.js';
@@ -61,6 +53,8 @@
     '90d': 90 * 86_400_000,
   };
 
+  const HEATMAP_WEEKS = 14 as const;
+
   // Derive tab from URL
   const activeTab = $derived.by<TabId>(() => {
     const t = $page.url.searchParams.get('tab');
@@ -92,43 +86,58 @@
   let statsError = $state<string | null>(null);
   let projectsError = $state<string | null>(null);
 
+  // Generation counters — stale responses are discarded
+  let statsGen = 0;
+  let projectsGen = 0;
+
   async function loadStats(win: WinId, cli: CLI | ''): Promise<void> {
+    const gen = ++statsGen;
     loadingStats = true;
-    statsError = null;
     try {
-      statsData = await fetchUsageStats({
+      const data = await fetchUsageStats({
         cli: cli || undefined,
         days: WIN_DAYS[win],
-        heatmap_weeks: 14,
+        heatmap_weeks: HEATMAP_WEEKS,
       });
+      if (gen !== statsGen) return;
+      statsData = data;
+      statsError = null;
     } catch (e: unknown) {
+      if (gen !== statsGen) return;
       statsError = e instanceof Error ? e.message : 'failed to load stats';
       statsData = null;
     } finally {
-      loadingStats = false;
+      if (gen === statsGen) loadingStats = false;
     }
   }
 
   async function loadProjects(win: WinId): Promise<void> {
+    const gen = ++projectsGen;
     loadingProjects = true;
-    projectsError = null;
     try {
       const now = Date.now();
-      projectsData = await fetchProjectInsights({
+      const data = await fetchProjectInsights({
         since: now - WIN_MS[win],
         until: now,
       });
+      if (gen !== projectsGen) return;
+      projectsData = data;
+      projectsError = null;
     } catch (e: unknown) {
+      if (gen !== projectsGen) return;
       projectsError = e instanceof Error ? e.message : 'failed to load project insights';
       projectsData = null;
     } finally {
-      loadingProjects = false;
+      if (gen === projectsGen) loadingProjects = false;
     }
   }
 
-  // Reload when win or cli changes
+  // Separate effects so each loader only re-runs when its own inputs change
   $effect(() => {
     void loadStats(activeWin, cliFilter);
+  });
+
+  $effect(() => {
     void loadProjects(activeWin);
   });
 
@@ -260,10 +269,12 @@
   </div>
 
   <!-- Tab bar -->
-  <div style="display: flex; gap: 4px; border-bottom: 1px solid var(--ad-border); margin-bottom: 16px;">
+  <div role="tablist" style="display: flex; gap: 4px; border-bottom: 1px solid var(--ad-border); margin-bottom: 16px;">
     {#each TABS as t (t.id)}
       {@const isActive = activeTab === t.id}
       <a
+        role="tab"
+        aria-selected={isActive}
         href={tabUrl($page.url.pathname + $page.url.search, t.id)}
         style="border-radius: 0; border: none; border-bottom: 2px solid {isActive ? 'var(--ad-claude)' : 'transparent'}; padding: 8px 14px; font-size: 13px; color: {isActive ? 'var(--ad-fg)' : 'var(--ad-fg-2)'}; background: transparent; text-decoration: none; cursor: pointer;"
         onclick={(e) => { e.preventDefault(); setTab(t.id); }}

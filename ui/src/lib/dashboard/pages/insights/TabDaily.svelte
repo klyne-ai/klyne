@@ -13,6 +13,11 @@
   let sortCol = $state<SortCol>('date');
   let sortDir = $state<SortDir>('desc');
 
+  function ariaSort(col: SortCol): 'ascending' | 'descending' | 'none' {
+    if (sortCol !== col) return 'none';
+    return sortDir === 'asc' ? 'ascending' : 'descending';
+  }
+
   function setSort(col: SortCol): void {
     if (sortCol === col) {
       sortDir = sortDir === 'asc' ? 'desc' : 'asc';
@@ -77,35 +82,43 @@
       <thead style="background: var(--ad-bg-2);">
         <tr>
           <th
-            style="{thStyleLeft}"
+            style={thStyleLeft}
+            aria-sort={ariaSort('date')}
             onclick={() => setSort('date')}
           >Date{sortIndicator('date')}</th>
           <th
-            style="{thStyle}"
+            style={thStyle}
+            aria-sort={ariaSort('messages')}
             onclick={() => setSort('messages')}
           >Messages{sortIndicator('messages')}</th>
           <th
-            style="{thStyle}"
+            style={thStyle}
+            aria-sort={ariaSort('input')}
             onclick={() => setSort('input')}
           >Input{sortIndicator('input')}</th>
           <th
-            style="{thStyle}"
+            style={thStyle}
+            aria-sort={ariaSort('output')}
             onclick={() => setSort('output')}
           >Output{sortIndicator('output')}</th>
           <th
-            style="{thStyle}"
+            style={thStyle}
+            aria-sort={ariaSort('cache_read')}
             onclick={() => setSort('cache_read')}
           >Cache read{sortIndicator('cache_read')}</th>
           <th
-            style="{thStyle}"
+            style={thStyle}
+            aria-sort={ariaSort('cache_write')}
             onclick={() => setSort('cache_write')}
           >Cache write{sortIndicator('cache_write')}</th>
           <th
-            style="{thStyle}"
+            style={thStyle}
+            aria-sort={ariaSort('total')}
             onclick={() => setSort('total')}
           >Total{sortIndicator('total')}</th>
           <th
-            style="{thStyle}"
+            style={thStyle}
+            aria-sort={ariaSort('cost_usd')}
             onclick={() => setSort('cost_usd')}
           >Cost{sortIndicator('cost_usd')}</th>
         </tr>
