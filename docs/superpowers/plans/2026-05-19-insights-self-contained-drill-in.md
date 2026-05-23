@@ -130,7 +130,7 @@ Expected: PASS — 8 assertions green.
 - [ ] **Step 1.5: Commit**
 
 ```bash
-cd /Users/mohitpatel/Desktop/Project/klyne
+cd ~/Desktop/Project/klyne
 git add ui/src/lib/navlinks.ts ui/src/lib/navlinks.test.ts
 git commit -m "ui: add pure navlinks helpers for context-aware drill-in
 
@@ -234,7 +234,7 @@ Expected: PASS — all suites including `navlinks` stay green.
 - [ ] **Step 2.6: Commit**
 
 ```bash
-cd /Users/mohitpatel/Desktop/Project/klyne
+cd ~/Desktop/Project/klyne
 git add ui/src/lib/ui/ProjectDetail.svelte ui/src/routes/projects/\[name\]/+page.svelte
 git commit -m "ui: extract ProjectDetail component; route becomes a wrapper
 
@@ -336,7 +336,7 @@ Expected: PASS — all suites green.
 - [ ] **Step 3.6: Commit**
 
 ```bash
-cd /Users/mohitpatel/Desktop/Project/klyne
+cd ~/Desktop/Project/klyne
 git add ui/src/lib/ui/SessionDetail.svelte ui/src/routes/sessions/\[id\]/+page.svelte
 git commit -m "ui: extract SessionDetail component; route becomes a wrapper
 
@@ -450,7 +450,7 @@ Expected: PASS — all suites green.
 Build+install the app and exercise the flow:
 
 ```bash
-cd /Users/mohitpatel/Desktop/Project/klyne && make install
+cd ~/Desktop/Project/klyne && make install
 ```
 
 Then in the running klyne web UI:
@@ -468,7 +468,7 @@ Report any deviation; do not mark complete until all 8 pass.
 - [ ] **Step 4.8: Commit**
 
 ```bash
-cd /Users/mohitpatel/Desktop/Project/klyne
+cd ~/Desktop/Project/klyne
 git add ui/src/routes/insights/projects/\[name\]/+page.svelte ui/src/routes/insights/sessions/\[id\]/+page.svelte ui/src/routes/insights/+page.svelte
 git commit -m "ui: keep Insights drill-in inside the Insights tab
 

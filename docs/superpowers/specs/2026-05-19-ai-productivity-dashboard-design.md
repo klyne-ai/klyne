@@ -155,7 +155,7 @@ Per repo+worktree, within window:
 - current HEAD + dirty tree.
 
 ### 6.3 Identity filter (fixes the Ravi-Ranjan / Jenkins attribution defect)
-- "User" identity = `git config user.email` ∪ a configurable alias set in klyne config (default seed: `mohitpatel9753@gmail.com`).
+- "User" identity = `git config user.email` ∪ a configurable alias set in klyne config (default seed: `user@example.com`).
 - Commits not authored by the user are labelled `co-actor` and **excluded from the user's productivity figures** (kept only as context count). Bot/CI authors (e.g. Jenkins) excluded likewise.
 
 ### 6.4 Time attribution (D1, D4) — deterministic, no LLM
