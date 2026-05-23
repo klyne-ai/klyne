@@ -126,7 +126,7 @@ _, err := RecordReflection(context.Background(), db, "", time.Time{}, insights)
 
 - [ ] **Step 2: Run the test to verify the round-trip case fails**
 
-Run: `cd /Users/mohitpatel/Desktop/Project/klyne && go test ./internal/worklog/ -run TestRecordReflection_RoundTrip -v`
+Run: `cd ~/Desktop/Project/klyne && go test ./internal/worklog/ -run TestRecordReflection_RoundTrip -v`
 
 Expected: FAIL with a compile error in the test file (signature mismatch) OR — once the test file compiles after updating *all* callers in step 1 — FAIL with `expected tier=1 (daily), got 2` and `expected daily title, got "Weekly reflection — 2026-W20"`.
 
@@ -202,20 +202,20 @@ Replace `internal/worklog/reflection_recorder.go:1-7`:
 
 - [ ] **Step 5: Run the test to verify it passes**
 
-Run: `cd /Users/mohitpatel/Desktop/Project/klyne && go test ./internal/worklog/ -run TestRecordReflection -v`
+Run: `cd ~/Desktop/Project/klyne && go test ./internal/worklog/ -run TestRecordReflection -v`
 
 Expected: all `TestRecordReflection_*` subtests PASS.
 
 - [ ] **Step 6: Run the full worklog package tests to catch any other regression**
 
-Run: `cd /Users/mohitpatel/Desktop/Project/klyne && go test ./internal/worklog/ -v`
+Run: `cd ~/Desktop/Project/klyne && go test ./internal/worklog/ -v`
 
 Expected: every test PASS. The recorder change is the only signature change inside this package.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-cd /Users/mohitpatel/Desktop/Project/klyne
+cd ~/Desktop/Project/klyne
 git add internal/worklog/reflection_recorder.go internal/worklog/reflection_recorder_test.go
 git commit -m "$(cat <<'EOF'
 feat(worklog): RecordReflection writes tier-1 daily reflections
@@ -291,14 +291,14 @@ Add `"fmt"` to the imports block if not already present (it should be — alread
 
 - [ ] **Step 2: Run the new test**
 
-Run: `cd /Users/mohitpatel/Desktop/Project/klyne && go test ./internal/worklog/ -run TestRecordReflection_WritesOnePerDay -v`
+Run: `cd ~/Desktop/Project/klyne && go test ./internal/worklog/ -run TestRecordReflection_WritesOnePerDay -v`
 
 Expected: PASS.
 
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /Users/mohitpatel/Desktop/Project/klyne
+cd ~/Desktop/Project/klyne
 git add internal/worklog/reflection_recorder_test.go
 git commit -m "$(cat <<'EOF'
 test(worklog): assert RecordReflection writes one row per distinct day
@@ -377,7 +377,7 @@ func TestHandleRecordReflection_RejectsBadDay(t *testing.T) {
 
 - [ ] **Step 2: Run new tests to verify they fail**
 
-Run: `cd /Users/mohitpatel/Desktop/Project/klyne && go test ./internal/mcpserver/ -run TestHandleRecordReflection -v`
+Run: `cd ~/Desktop/Project/klyne && go test ./internal/mcpserver/ -run TestHandleRecordReflection -v`
 
 Expected: compile error (unknown `Day` field on `RecordReflectionInput`) — proves the next step is needed.
 
@@ -472,20 +472,20 @@ Inputs:
 
 - [ ] **Step 5: Run all `record_reflection` tests**
 
-Run: `cd /Users/mohitpatel/Desktop/Project/klyne && go test ./internal/mcpserver/ -run TestHandleRecordReflection -v`
+Run: `cd ~/Desktop/Project/klyne && go test ./internal/mcpserver/ -run TestHandleRecordReflection -v`
 
 Expected: all `TestHandleRecordReflection_*` subtests PASS (existing 3 + new 2).
 
 - [ ] **Step 6: Run the full mcpserver package tests to catch any regression**
 
-Run: `cd /Users/mohitpatel/Desktop/Project/klyne && go test ./internal/mcpserver/ -count=1`
+Run: `cd ~/Desktop/Project/klyne && go test ./internal/mcpserver/ -count=1`
 
 Expected: PASS.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-cd /Users/mohitpatel/Desktop/Project/klyne
+cd ~/Desktop/Project/klyne
 git add internal/mcpserver/tool_record_reflection.go internal/mcpserver/tool_record_reflection_test.go internal/mcpserver/server.go
 git commit -m "$(cat <<'EOF'
 feat(mcp): record_reflection accepts an explicit day (YYYY-MM-DD)
@@ -541,7 +541,7 @@ After all `record_reflection` calls succeed, report back the list of dates and r
 
 - [ ] **Step 2: Verify the slash command parses (embed test)**
 
-Run: `cd /Users/mohitpatel/Desktop/Project/klyne && go test ./internal/mcpserver/ -run TestSlashCommands -v`
+Run: `cd ~/Desktop/Project/klyne && go test ./internal/mcpserver/ -run TestSlashCommands -v`
 
 Expected: PASS. The slash commands are embedded via `//go:embed` and any broken frontmatter would surface here.
 
@@ -550,7 +550,7 @@ If `TestSlashCommands` does not exist (verify with `grep -l TestSlashCommand int
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /Users/mohitpatel/Desktop/Project/klyne
+cd ~/Desktop/Project/klyne
 git add internal/mcpserver/slashcommands/reflect.md
 git commit -m "$(cat <<'EOF'
 feat(slashcommands): /klyne:reflect buckets pending entries by UTC date
@@ -674,7 +674,7 @@ Add to the import block at the top of the file (`net/url` likely missing):
 
 - [ ] **Step 2: Run the new tests to verify they fail**
 
-Run: `cd /Users/mohitpatel/Desktop/Project/klyne && go test ./internal/api/handlers/ -run TestWorklogProject -v`
+Run: `cd ~/Desktop/Project/klyne && go test ./internal/api/handlers/ -run TestWorklogProject -v`
 
 Expected: FAIL at compile — `api.WorklogProjectResponse` undefined and the route returns 404. Proves the next steps are needed.
 
@@ -818,26 +818,26 @@ Edit `internal/api/handlers/mounter.go:126-127`. Replace the existing two-line w
 
 - [ ] **Step 7: Run the handler tests**
 
-Run: `cd /Users/mohitpatel/Desktop/Project/klyne && go test ./internal/api/handlers/ -run TestWorklog -v`
+Run: `cd ~/Desktop/Project/klyne && go test ./internal/api/handlers/ -run TestWorklog -v`
 
 Expected: all `TestWorklog_*` and `TestWorklogProject_*` PASS.
 
 - [ ] **Step 8: Run the contracts test**
 
-Run: `cd /Users/mohitpatel/Desktop/Project/klyne && go test ./internal/api/ -run TestAllRoutes -v`
+Run: `cd ~/Desktop/Project/klyne && go test ./internal/api/ -run TestAllRoutes -v`
 
 Expected: PASS.
 
 - [ ] **Step 9: Build the whole project**
 
-Run: `cd /Users/mohitpatel/Desktop/Project/klyne && go build ./...`
+Run: `cd ~/Desktop/Project/klyne && go build ./...`
 
 Expected: clean build.
 
 - [ ] **Step 10: Commit**
 
 ```bash
-cd /Users/mohitpatel/Desktop/Project/klyne
+cd ~/Desktop/Project/klyne
 git add internal/api/contracts.go internal/api/contracts_test.go internal/api/handlers/worklog.go internal/api/handlers/worklog_test.go internal/api/handlers/mounter.go
 git commit -m "$(cat <<'EOF'
 feat(api): /worklog/items/project drill-in endpoint
@@ -894,14 +894,14 @@ Also update the import line near the top of the file to include the new type. Fi
 
 - [ ] **Step 3: Run the contract check**
 
-Run: `cd /Users/mohitpatel/Desktop/Project/klyne/ui && npm run check`
+Run: `cd ~/Desktop/Project/klyne/ui && npm run check`
 
 Expected: PASS (the script verifies TS contracts match the Go side; the new interface mirrors the new DTO exactly).
 
 - [ ] **Step 4: Commit**
 
 ```bash
-cd /Users/mohitpatel/Desktop/Project/klyne
+cd ~/Desktop/Project/klyne
 git add ui/src/lib/types.ts ui/src/lib/api.ts
 git commit -m "$(cat <<'EOF'
 feat(ui): WorklogProjectResponse type + fetchWorklogProject client
@@ -1141,7 +1141,7 @@ Add at the end of the `<style>` block (before the closing `</style>` at the bott
 
 - [ ] **Step 3: Run the contract + svelte-check**
 
-Run: `cd /Users/mohitpatel/Desktop/Project/klyne/ui && npm run check`
+Run: `cd ~/Desktop/Project/klyne/ui && npm run check`
 
 Expected: PASS.
 
@@ -1150,8 +1150,8 @@ Expected: PASS.
 Start the daemon and serve the UI:
 
 ```bash
-cd /Users/mohitpatel/Desktop/Project/klyne && go run ./cmd/klyne serve &
-cd /Users/mohitpatel/Desktop/Project/klyne/ui && npm run dev
+cd ~/Desktop/Project/klyne && go run ./cmd/klyne serve &
+cd ~/Desktop/Project/klyne/ui && npm run dev
 ```
 
 Open `http://localhost:5173/worklog` in a browser. Click any project card heading — it should navigate to `/worklog/project?path=<encoded>` and display the per-week grouped daily list (or the empty state when the project has no tier-1 reflections yet). Toggling a week heading should collapse/expand its day list.
@@ -1163,7 +1163,7 @@ If you cannot run the UI in this environment, say so explicitly and note that ma
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /Users/mohitpatel/Desktop/Project/klyne
+cd ~/Desktop/Project/klyne
 git add ui/src/routes/worklog/project/+page.svelte ui/src/routes/worklog/+page.svelte
 git commit -m "$(cat <<'EOF'
 feat(ui): /worklog/project drill-in with ISO-week grouping
@@ -1215,14 +1215,14 @@ In `test/scenarios/scenarios/04-reflection-synthesis.js`, find the `if (reflecti
 
 - [ ] **Step 2: Dry-run the scenario (no Claude calls)**
 
-Run: `cd /Users/mohitpatel/Desktop/Project/klyne/test/scenarios && node -e "import('./scenarios/04-reflection-synthesis.js').then(m => m.run({ noClaude: true })).then(r => console.log(r.status, r.summary))"`
+Run: `cd ~/Desktop/Project/klyne/test/scenarios && node -e "import('./scenarios/04-reflection-synthesis.js').then(m => m.run({ noClaude: true })).then(r => console.log(r.status, r.summary))"`
 
 Expected: prints `SKIP Dry-run: would run 3 seed sessions then /klyne:reflect.` — proves the JS still parses cleanly.
 
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /Users/mohitpatel/Desktop/Project/klyne
+cd ~/Desktop/Project/klyne
 git add test/scenarios/scenarios/04-reflection-synthesis.js
 git commit -m "$(cat <<'EOF'
 test(scenarios): scenario 04 asserts daily tier + title format
@@ -1245,13 +1245,13 @@ Wrap up by running the entire test suite end-to-end and updating the handoff doc
 
 - [ ] **Step 1: Run the full Go test suite**
 
-Run: `cd /Users/mohitpatel/Desktop/Project/klyne && go test ./... -count=1`
+Run: `cd ~/Desktop/Project/klyne && go test ./... -count=1`
 
 Expected: PASS across every package.
 
 - [ ] **Step 2: Run the UI checks**
 
-Run: `cd /Users/mohitpatel/Desktop/Project/klyne/ui && npm run check && npm test`
+Run: `cd ~/Desktop/Project/klyne/ui && npm run check && npm test`
 
 Expected: PASS.
 
@@ -1278,7 +1278,7 @@ Plan: `docs/superpowers/plans/2026-05-18-daily-reflections.md`.
 - [ ] **Step 4: Commit**
 
 ```bash
-cd /Users/mohitpatel/Desktop/Project/klyne
+cd ~/Desktop/Project/klyne
 git add HANDOFF.md
 git commit -m "$(cat <<'EOF'
 docs: mark daily reflections section shipped in HANDOFF

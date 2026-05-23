@@ -125,26 +125,28 @@ func worktreePaths(dir string) []string {
 	return paths
 }
 
-// seedUserEmails is the hardcoded §6.3 identity alias set.
-//
-// PROTOTYPE STUB (spec §11): the alias set is a hardcoded seed here;
-// wiring it to klyne config (git user.email ∪ configurable aliases) is a
-// documented production follow-up. coders@clinikk.com is included because
-// it is the operating identity for this environment.
-var seedUserEmails = []string{
-	"mohitpatel9753@gmail.com",
-	"coders@clinikk.com",
-	"mohit@clinikk.com", // git author identity on the work microservices (mohit-clinikk)
+// extraUserEmails holds optional alias emails wired in at startup
+// (e.g. from klyne config). Multi-identity support (a single user with
+// distinct personal/work git authors) is opt-in via this list. The
+// daemon does NOT ship any hardcoded identity seed.
+var extraUserEmails []string
+
+// SetUserEmailAliases configures the alias list used by UserEmails().
+// Idempotent; pass an empty slice to clear.
+func SetUserEmailAliases(aliases []string) {
+	extraUserEmails = append(extraUserEmails[:0], aliases...)
 }
 
-// UserEmails returns the §6.3 identity set: the local `git config
-// user.email` (when resolvable) ∪ the hardcoded seed alias set. Commits
-// whose author email is NOT in this set are co-actors/bots and are
-// excluded from the user's productivity figures.
+// UserEmails returns the §6.3 identity set: `git config user.email`
+// (when resolvable) ∪ the alias list configured by SetUserEmailAliases.
+// Commits whose author email is NOT in this set are co-actors/bots and
+// are excluded from the user's productivity figures.
 func UserEmails() map[string]bool {
 	set := map[string]bool{}
-	for _, e := range seedUserEmails {
-		set[strings.ToLower(e)] = true
+	for _, e := range extraUserEmails {
+		if e = strings.ToLower(strings.TrimSpace(e)); e != "" {
+			set[e] = true
+		}
 	}
 	if out, err := exec.Command("git", "config", "user.email").Output(); err == nil {
 		if e := strings.ToLower(strings.TrimSpace(string(out))); e != "" {

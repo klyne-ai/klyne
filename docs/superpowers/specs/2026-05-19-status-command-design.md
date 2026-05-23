@@ -125,7 +125,7 @@ None — all decision points resolved during brainstorming. If the heatmap turns
 
 ## Cross-refs
 
-- Follow-up memory: `~/.claude/projects/-Users-mohitpatel-Desktop-Project-klyne/memory/project_klyne_followup_tokens_health_merge.md` (delete on ship).
+- Follow-up memory: `~/.claude/projects/-Users-user-Desktop-Project-klyne/memory/project_klyne_followup_tokens_health_merge.md` (delete on ship).
 - Existing pattern reference: `internal/mcpserver/slashcommands/handoff.md`, `bootstrap.md` (dumb-echo shim shape).
 - Existing renderers to reuse:
   - `internal/mcpserver/tool_context_health.go` — verdict header, bloat sources.

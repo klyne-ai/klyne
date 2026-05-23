@@ -195,7 +195,7 @@ func TestWatch_BackstopDetectsNewFile(t *testing.T) {
 	// emitNew internally without requiring a live fsnotify subscription.
 
 	// Instead, directly invoke emitNew to simulate what backstop does.
-	w.emitNew(p)
+	w.emitNew(context.Background(), p)
 
 	// Collect events with a short timeout.
 	var received []connectors.RawEvent
@@ -244,7 +244,7 @@ func TestWatch_NewDateDir_AttachesAutomatically(t *testing.T) {
 		t.Fatalf("discoverFiles: %v", err)
 	}
 	for _, f := range files {
-		w.emitNew(f)
+		w.emitNew(context.Background(), f)
 	}
 
 	// Collect.
@@ -337,7 +337,7 @@ func TestWatch_BackstopScanViaMethod(t *testing.T) {
 	}
 	defer fw.Close()
 
-	w.backstopScan(fw)
+	w.backstopScan(context.Background(), fw)
 
 	// Collect events.
 	var received []connectors.RawEvent
@@ -414,7 +414,7 @@ func TestWatch_HandleFSEvent_NewDir(t *testing.T) {
 	defer fw.Close()
 
 	// Simulate receiving a CREATE event for the new directory.
-	w.handleFSEvent(fw, fsnotifyCreateEvent(newDir))
+	w.handleFSEvent(context.Background(), fw, fsnotifyCreateEvent(newDir))
 
 	// Should have emitted the file in the new dir.
 	var received []connectors.RawEvent
@@ -455,7 +455,7 @@ func TestWatch_HandleFSEvent_WriteFile(t *testing.T) {
 	}
 	defer fw.Close()
 
-	w.handleFSEvent(fw, fsnotifyWriteEvent(p))
+	w.handleFSEvent(context.Background(), fw, fsnotifyWriteEvent(p))
 
 	var received []connectors.RawEvent
 	timeout := time.After(100 * time.Millisecond)
@@ -495,7 +495,7 @@ func TestWatch_HandleFSEvent_NonRolloutIgnored(t *testing.T) {
 	}
 	defer fw.Close()
 
-	w.handleFSEvent(fw, fsnotifyWriteEvent(p))
+	w.handleFSEvent(context.Background(), fw, fsnotifyWriteEvent(p))
 
 	select {
 	case ev := <-events:
@@ -528,7 +528,7 @@ func TestWatch_EmitNew_SeekBeyondEnd(t *testing.T) {
 	w.mu.Unlock()
 
 	// Should not panic and should emit 0 events (seek returns error or EOF).
-	w.emitNew(p)
+	w.emitNew(context.Background(), p)
 
 	select {
 	case ev := <-events:

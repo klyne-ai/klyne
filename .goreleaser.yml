@@ -48,10 +48,36 @@ builds:
       - goos: windows
         goarch: arm64
 
+  # klyne-hook is the tiny stub binary Claude Code invokes per
+  # PreToolUse / UserPromptSubmit / PreCompact / Stop event. The full
+  # klyne binary is ~22 MB and loads ~100 MB resident at launch, which
+  # the macOS jetsam killer terminates under memory pressure. Shipping
+  # the hook as a small sibling binary keeps every hook invocation fast.
+  - id: klyne-hook
+    main: ./cmd/klyne-hook
+    binary: klyne-hook
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+
 archives:
   - id: klyne
     ids:
       - klyne
+      - klyne-hook
     # Asset filename pattern. MUST stay in sync with scripts/install.sh,
     # which constructs the same string to fetch the archive.
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"

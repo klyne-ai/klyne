@@ -67,10 +67,10 @@ type reflectRunResponse struct {
 
 // Run handles POST /worklog/reflect/run.
 func (h *WorklogReflectRunHandler) Run(w http.ResponseWriter, r *http.Request) {
-	if !sameOriginOK(r) {
-		http.Error(w, "cross-origin request rejected", http.StatusForbidden)
-		return
-	}
+	// Same-origin / DNS-rebind enforcement is handled globally by the
+	// sameOriginOnly middleware in internal/api/http.go. The per-handler
+	// sameOriginOK helper below is retained for reference but is no longer
+	// called here — the global middleware runs before any route handler.
 
 	var req reflectRunRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

@@ -158,16 +158,6 @@
     return { rows, lanes: Math.max(1, laneEnds.length) };
   });
 
-  /**
-   * Peak parallelism — the maximum number of ACTIVE intervals overlapping
-   * at any instant. This is the max k over the active-interval sweep, not
-   * the lane count (lanes can over-count because they pack by presence
-   * span, which includes idle gaps).
-   */
-  const peakConcurrency = $derived(
-    concurrencyRaw.reduce((m, l) => Math.max(m, l.k), 0)
-  );
-
   // --- concurrency sweep-line ----------------------------------------------
 
   /**
@@ -218,6 +208,16 @@
       .map(([k, ms]) => ({ k, minutes: ms / 60_000 }))
       .sort((a, b) => a.k - b.k);
   });
+
+  /**
+   * Peak parallelism — the maximum number of ACTIVE intervals overlapping
+   * at any instant. This is the max k over the active-interval sweep, not
+   * the lane count (lanes can over-count because they pack by presence
+   * span, which includes idle gaps).
+   */
+  const peakConcurrency = $derived(
+    concurrencyRaw.reduce((m, l) => Math.max(m, l.k), 0)
+  );
 
   /**
    * Total wall-clock covered by at least one ACTIVE interval — the union

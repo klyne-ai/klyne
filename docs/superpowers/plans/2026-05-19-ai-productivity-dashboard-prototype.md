@@ -1,6 +1,6 @@
 # AI Productivity Dashboard — Prototype Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development. Steps use `- [ ]` checkboxes. Work happens in the worktree `/Users/mohitpatel/Desktop/Project/klyne/.worktrees/productivity-dashboard` on branch `feat/productivity-dashboard`. All `go`/`git` commands run from that worktree root.
+> **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development. Steps use `- [ ]` checkboxes. Work happens in the worktree `~/Desktop/Project/klyne/.worktrees/productivity-dashboard` on branch `feat/productivity-dashboard`. All `go`/`git` commands run from that worktree root.
 
 **Goal:** A deterministic-first dashboard that fuses live git activity with klyne session telemetry into a Service → Branch → Topic productivity view for 2026-05-19, viewable in a rough page, with no LLM call at render.
 
@@ -105,7 +105,7 @@ type Report struct{ Day string; Services []Service; ReflectionStatus, Nudge stri
 
 - [ ] **Step 1: Failing test** — given a store stub returning two `project_path`s for a window, `DiscoverRepos(store, since, until)` returns canonicalized repo roots; for a repo with `git worktree list` output it also includes sibling worktree paths (use a temp repo + real `git worktree add`).
 - [ ] **Step 2:** `go test ./internal/productivity/ -run Discover -v` → FAIL.
-- [ ] **Step 3: Implement:** query distinct session `project_path` in window (reuse store fn found in Task 0); canonicalize via `internal/projectpath`; for each run `git worktree list --porcelain`, add worktree paths. `UserEmails()` = `git config user.email` ∪ config aliases (seed `mohitpatel9753@gmail.com`); document `// PROTOTYPE: alias set hardcoded seed; config wiring is follow-up`.
+- [ ] **Step 3: Implement:** query distinct session `project_path` in window (reuse store fn found in Task 0); canonicalize via `internal/projectpath`; for each run `git worktree list --porcelain`, add worktree paths. `UserEmails()` = `git config user.email` ∪ config aliases (seed `user@example.com`); document `// PROTOTYPE: alias set hardcoded seed; config wiring is follow-up`.
 - [ ] **Step 4:** test → PASS. **Step 5: Commit.** `git commit -am "feat(productivity): repo discovery + identity"`
 
 ---

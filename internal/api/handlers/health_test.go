@@ -101,6 +101,7 @@ func TestHealth_LoopbackMiddleware(t *testing.T) {
 	// Loopback → not 403.
 	req2 := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	req2.RemoteAddr = "127.0.0.1:1234"
+	req2.Host = "127.0.0.1:7878" // sameOriginOnly also checks the Host header
 	w2 := httptest.NewRecorder()
 	router.ServeHTTP(w2, req2)
 	if w2.Code == http.StatusForbidden {

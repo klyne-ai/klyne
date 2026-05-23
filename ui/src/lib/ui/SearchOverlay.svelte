@@ -9,6 +9,7 @@
   import { search } from '$lib/api.js';
   import type { SearchHit } from '$lib/types.js';
   import { relTime } from '$lib/format.js';
+  import { sanitizeSnippet } from '$lib/markdown.js';
 
   interface Props {
     open: boolean;
@@ -122,7 +123,7 @@
           {#each hits as h, i (h.message_id)}
             <div class="search-row" style="animation: fadeUp 260ms cubic-bezier(.2,.8,.2,1) {i * 24}ms both;" onclick={() => pickHit(h)} role="button" tabindex="0" onkeydown={(e) => { if (e.key === 'Enter') pickHit(h); }}>
               <span class="where">{basename(h.project_path)} / {h.role}</span>
-              <span class="snip">{@html h.snippet}</span>
+              <span class="snip">{@html sanitizeSnippet(h.snippet)}</span>
               <span class="when">{relTime(h.ts)}</span>
             </div>
           {/each}

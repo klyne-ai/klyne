@@ -87,8 +87,10 @@ func discoverFiles(root string) ([]string, error) {
 }
 
 // emitNew reads any bytes appended to path since the last read and sends
-// RawEvent values for each complete line.
-func (w *watcher) emitNew(path string) {
+// RawEvent values for each complete line. The ctx is observed on every
+// channel send so that a shutdown does not deadlock the goroutine when
+// the events channel buffer fills up or the consumer has gone away.
+func (w *watcher) emitNew(ctx context.Context, path string) {
 	w.mu.Lock()
 	ts, ok := w.tails[path]
 	if !ok {
@@ -131,10 +133,14 @@ func (w *watcher) emitNew(path string) {
 		lineCopy := make([]byte, len(lineBytes))
 		copy(lineCopy, lineBytes)
 
-		w.events <- connectors.RawEvent{
+		select {
+		case w.events <- connectors.RawEvent{
 			Path: path,
 			Line: lineCopy,
 			Ts:   time.Now().UnixMilli(),
+		}:
+		case <-ctx.Done():
+			return
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -153,9 +159,12 @@ func (w *watcher) emitNew(path string) {
 // because nothing ever reads historical lines. Now we replay each existing
 // file from byte 0 — store.InsertMessage deduplicates by Message ID PK so
 // repeated runs are safe.
-func (w *watcher) warmupOffsets(files []string) {
+func (w *watcher) warmupOffsets(ctx context.Context, files []string) {
 	for _, path := range files {
-		w.emitNew(path)
+		if ctx.Err() != nil {
+			return
+		}
+		w.emitNew(ctx, path)
 	}
 }
 
@@ -245,7 +254,7 @@ func (w *watcher) attachAllDirs(fw *fsnotify.Watcher) {
 // backstopScan re-scans the root for files that may have been missed by
 // fsnotify (risk R9 mitigation). New files are emitted; existing file
 // offsets are advanced if new lines appeared.
-func (w *watcher) backstopScan(fw *fsnotify.Watcher) {
+func (w *watcher) backstopScan(ctx context.Context, fw *fsnotify.Watcher) {
 	files, err := discoverFiles(w.root)
 	if err != nil {
 		log.Printf("codex: backstop scan error: %v", err)
@@ -255,7 +264,10 @@ func (w *watcher) backstopScan(fw *fsnotify.Watcher) {
 	w.attachAllDirs(fw)
 	// Emit new lines from all known files.
 	for _, path := range files {
-		w.emitNew(path)
+		if ctx.Err() != nil {
+			return
+		}
+		w.emitNew(ctx, path)
 	}
 }
 
@@ -279,7 +291,7 @@ func (w *watcher) watch(ctx context.Context) error {
 	if err != nil {
 		log.Printf("codex: discover error during warmup: %v", err)
 	}
-	w.warmupOffsets(existingFiles)
+	w.warmupOffsets(ctx, existingFiles)
 
 	// Attach all directories currently under root.
 	w.attachAllDirs(fw)
@@ -296,7 +308,7 @@ func (w *watcher) watch(ctx context.Context) error {
 			if !ok {
 				return nil
 			}
-			w.handleFSEvent(fw, event)
+			w.handleFSEvent(ctx, fw, event)
 
 		case err, ok := <-fw.Errors:
 			if !ok {
@@ -305,13 +317,13 @@ func (w *watcher) watch(ctx context.Context) error {
 			log.Printf("codex: fsnotify error: %v", err)
 
 		case <-backstop.C:
-			w.backstopScan(fw)
+			w.backstopScan(ctx, fw)
 		}
 	}
 }
 
 // handleFSEvent processes a single fsnotify event.
-func (w *watcher) handleFSEvent(fw *fsnotify.Watcher, event fsnotify.Event) {
+func (w *watcher) handleFSEvent(ctx context.Context, fw *fsnotify.Watcher, event fsnotify.Event) {
 	path := event.Name
 
 	switch {
@@ -327,15 +339,18 @@ func (w *watcher) handleFSEvent(fw *fsnotify.Watcher, event fsnotify.Event) {
 			// Scan it immediately for any files already placed there.
 			matches, _ := filepath.Glob(filepath.Join(path, rolloutGlob))
 			for _, f := range matches {
-				w.emitNew(f)
+				if ctx.Err() != nil {
+					return
+				}
+				w.emitNew(ctx, f)
 			}
 		} else if isRolloutFile(path) {
-			w.emitNew(path)
+			w.emitNew(ctx, path)
 		}
 
 	case event.Has(fsnotify.Write):
 		if isRolloutFile(path) {
-			w.emitNew(path)
+			w.emitNew(ctx, path)
 		}
 	}
 }
