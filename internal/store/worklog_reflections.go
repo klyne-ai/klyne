@@ -124,6 +124,27 @@ func ListReflectionsForProject(ctx context.Context, db *DB, projectPath string, 
 	return out, rows.Err()
 }
 
+// MaxReflectionCursor returns the largest "covered up through ts"
+// watermark across EVERY reflection row for projectPath, regardless of
+// day. This is the "what work has any reflection ever summarized"
+// anchor used when /klyne:reflect is run without a specific day — the
+// proposer fetches all visible stop_summaries with ts > cursor and the
+// AI host buckets them by date to write one reflection per day.
+//
+// Returns 0 when no reflection row exists at all — callers treat that
+// as "no cursor yet — every visible entry is pending."
+func MaxReflectionCursor(ctx context.Context, db *DB, projectPath string) (int64, error) {
+	const q = `
+SELECT COALESCE(MAX(COALESCE(stop_summary_cursor_ts, ts)), 0)
+FROM worklog_reflections
+WHERE project_path = ?`
+	var cursor int64
+	if err := db.Read().QueryRowContext(ctx, q, projectPath).Scan(&cursor); err != nil {
+		return 0, fmt.Errorf("store: max reflection cursor: %w", err)
+	}
+	return cursor, nil
+}
+
 // MaxReflectionCursorForDay returns the largest "covered up through ts"
 // watermark across rows for (projectPath, day) — the "what work have we
 // already summarized" anchor used by /klyne:reflect to fetch only the
