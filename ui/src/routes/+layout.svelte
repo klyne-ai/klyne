@@ -10,8 +10,19 @@
   import { refreshProjects } from '$lib/projects.svelte.js';
   import { cockpitStore, refreshCockpit } from '$lib/cockpit.svelte.js';
   import { onMsgNew } from '$lib/stores.svelte.js';
+  import { beforeNavigate, goto } from '$app/navigation';
 
   const useNewShell = env.PUBLIC_DASHBOARD_V2 === '1';
+
+  if (useNewShell) {
+    beforeNavigate(({ to, cancel }) => {
+      if (!to) return;
+      if (to.url.pathname === '/cockpit') {
+        cancel();
+        void goto('/');
+      }
+    });
+  }
 
   interface Props {
     children: Snippet;
