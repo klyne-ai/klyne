@@ -2,7 +2,7 @@
 # install.sh — one-command installer for klyne.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/klyne-ai/klyne/init/scripts/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/klyne-ai/klyne/main/scripts/install.sh | sh
 #
 # Environment overrides:
 #   KLYNE_VERSION   pin a release tag (e.g. v0.5.0). Default: latest release.
