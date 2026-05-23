@@ -4,9 +4,12 @@
 -->
 <script lang="ts">
   import type { ProjectAggregate } from '$lib/projects.svelte.js';
+  import type { WorklogProjectRollup } from '$lib/types.js';
   import { relAgo, kfmt } from '$lib/format.js';
+  import { fetchWorklog } from '$lib/api.js';
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
+  import { onMount } from 'svelte';
 
   interface Props {
     projects: ProjectAggregate[];
@@ -14,6 +17,36 @@
     sort: string;
   }
   const { projects, selectedName, sort }: Props = $props();
+
+  // Worklog rollup map keyed by project_path
+  let rollupByPath = $state<Map<string, WorklogProjectRollup>>(new Map());
+
+  onMount(async () => {
+    try {
+      const resp = await fetchWorklog();
+      const m = new Map<string, WorklogProjectRollup>();
+      for (const r of resp.projects) m.set(r.project_path, r);
+      rollupByPath = m;
+    } catch {
+      // worklog unavailable — pills simply won't render
+    }
+  });
+
+  type ReflectionState = 'fresh' | 'stale' | 'cold';
+
+  function reflectionState(p: ProjectAggregate): ReflectionState {
+    const r = rollupByPath.get(p.project_path);
+    if (!r) return 'fresh'; // not yet loaded — don't show a pill
+    if (!r.latest_reflection) return 'cold';
+    if (r.stale) return 'stale';
+    return 'fresh';
+  }
+
+  function stalePillLabel(p: ProjectAggregate): string {
+    const r = rollupByPath.get(p.project_path);
+    const pending = r?.pending_entries ?? 0;
+    return `${pending} new since reflection`;
+  }
 
   function dotClass(p: ProjectAggregate): string {
     if (p.status === 'active') return 'ad-dot ad-dot--active';
@@ -102,6 +135,19 @@
             {p.sessions} sessions · {kfmt(p.tokensIn)}
           </span>
         </div>
+
+        <!-- Row 3: stale/cold reflection pill (spec §5.3) -->
+        {#if reflectionState(p) !== 'fresh'}
+          <div>
+            <span
+              class="pill"
+              class:warn={reflectionState(p) === 'stale'}
+              class:cold={reflectionState(p) === 'cold'}
+            >
+              {reflectionState(p) === 'stale' ? stalePillLabel(p) : 'no reflection yet'}
+            </span>
+          </div>
+        {/if}
       </button>
     {/each}
 
@@ -112,3 +158,28 @@
     {/if}
   </div>
 </section>
+
+<style>
+  .pill {
+    display: inline-block;
+    font-size: 10px;
+    padding: 1px 7px;
+    border-radius: 10px;
+    font-family: var(--ad-font-mono, monospace);
+    background: var(--ad-bg-2);
+    color: var(--ad-faint);
+    border: 1px solid var(--ad-border);
+  }
+
+  .pill.warn {
+    background: color-mix(in oklch, var(--ad-warn, #d97a4a) 12%, var(--ad-panel));
+    color: var(--ad-warn, #d97a4a);
+    border-color: color-mix(in oklch, var(--ad-warn, #d97a4a) 30%, transparent);
+  }
+
+  .pill.cold {
+    background: var(--ad-bg-2);
+    color: var(--ad-faint);
+    border-color: var(--ad-border);
+  }
+</style>

@@ -183,14 +183,15 @@
           >{r.body_md}</div>
         </div>
       {/each}
-
-      <!-- "See full" footer link -->
-      <div style="padding: 8px 0; text-align: right;">
-        <a
-          href="/worklog/project?path={encodeURIComponent(project.project_path)}"
-          style="font-size: 12px; color: var(--ad-faint); text-decoration: none;"
-        >See full worklog →</a>
-      </div>
     {/if}
+
+    <!-- "See full worklog →" always visible (ISO-week drill-in handles empty states) -->
+    <div style="padding: 8px 0; text-align: right;">
+      <a
+        class="see-full mono"
+        href={`/worklog/project?path=${encodeURIComponent(project.project_path)}`}
+        style="font-size: 12px; color: var(--ad-faint); text-decoration: none;"
+      >See full worklog →</a>
+    </div>
   {/if}
 </div>

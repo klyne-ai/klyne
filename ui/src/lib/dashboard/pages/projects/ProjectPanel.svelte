@@ -9,6 +9,7 @@
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
   import { tabUrl } from '$lib/dashboard/url-state.js';
+  import Icon from '$lib/dashboard/Icon.svelte';
   import TabOverview from './TabOverview.svelte';
   import TabSessions from './TabSessions.svelte';
   import TabWorklog from './TabWorklog.svelte';
@@ -45,6 +46,16 @@
     if (p.status === 'compacted') return 'ad-dot ad-dot--compacted';
     return 'ad-dot ad-dot--idle';
   }
+
+  let cliCopied = $state(false);
+
+  function openInCli(): void {
+    // No daemon endpoint yet — copy the resume command to clipboard.
+    void navigator.clipboard.writeText(`cd "${project.project_path}" && claude`).then(() => {
+      cliCopied = true;
+      setTimeout(() => { cliCopied = false; }, 2000);
+    });
+  }
 </script>
 
 <section class="ad-card" style="overflow: hidden;">
@@ -63,6 +74,29 @@
           >{c}</span>
         {/each}
       </div>
+      <button
+        type="button"
+        class="k-btn open-in-cli"
+        onclick={openInCli}
+        title="Copies cd command to clipboard"
+        style="
+          display: flex;
+          align-items: center;
+          gap: 5px;
+          padding: 4px 10px;
+          background: var(--ad-bg-2);
+          border: 1px solid var(--ad-border);
+          border-radius: 6px;
+          color: var(--ad-faint);
+          font-size: 11.5px;
+          cursor: pointer;
+          white-space: nowrap;
+          flex-shrink: 0;
+        "
+      >
+        <Icon name="open" size={13} />
+        {cliCopied ? '✓ copied' : 'Open in CLI'}
+      </button>
     </div>
     <div class="ad-mono" style="font-size: 11px; color: var(--ad-faint); word-break: break-all;">
       {project.project_path}
