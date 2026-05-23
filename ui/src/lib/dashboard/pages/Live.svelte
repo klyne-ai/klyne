@@ -11,7 +11,7 @@
 
   let filter = $state('');
   let cli = $state<'all' | 'claude' | 'codex'>('all');
-  let showIdle = $state(true);
+  let showIdle = $state(false);
   let focusSessionId = $state<string | null>(null);
 
   // Lazy-load tail messages per visible thread; cached by session_id.

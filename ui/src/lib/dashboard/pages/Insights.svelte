@@ -2,7 +2,7 @@
   // Insights — merged analytics surface: Overview · Activity · Models · Daily · Projects
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
-  import { kfmt, costFmt } from '$lib/format.js';
+  import { kfmt } from '$lib/format.js';
   import { fetchUsageStats, fetchProjectInsights } from '$lib/api.js';
   import { tabUrl } from '$lib/dashboard/url-state.js';
   import type { CLI, UsageStatsResponse, ProjectInsightsResponse } from '$lib/types.js';
@@ -14,7 +14,7 @@
   import TabProjects from './insights/TabProjects.svelte';
 
   type TabId = 'overview' | 'activity' | 'models' | 'daily' | 'projects';
-  type WinId = '1h' | '3h' | '6h' | '1d' | '7d' | '30d' | '90d';
+  type WinId = '1d' | '7d' | '30d' | '90d';
 
   const TABS: { id: TabId; label: string }[] = [
     { id: 'overview', label: 'Overview' },
@@ -24,29 +24,23 @@
     { id: 'projects', label: 'Projects' },
   ];
 
-  const PRIMARY_WINS: WinId[] = ['1h', '3h', '6h', '1d'];
+  // The /usage/stats backend buckets by calendar day, so sub-day windows
+  // (1h/3h/6h) all collapse to the same result — confusing to the user.
+  // Until the backend grows a since/until range, only ship windows that
+  // map to distinct day counts.
+  const PRIMARY_WINS: WinId[] = ['1d', '7d', '30d'];
   const DROPDOWN_WINS: { value: WinId; label: string }[] = [
-    { value: '7d', label: '7 days' },
-    { value: '30d', label: '30 days' },
     { value: '90d', label: '90 days' },
   ];
 
-  // Win → lookback days for /usage/stats
   const WIN_DAYS: Record<WinId, number> = {
-    '1h': 1,
-    '3h': 1,
-    '6h': 1,
     '1d': 1,
     '7d': 7,
     '30d': 30,
     '90d': 90,
   };
 
-  // Win → milliseconds for project insights since param
   const WIN_MS: Record<WinId, number> = {
-    '1h':  1 * 3_600_000,
-    '3h':  3 * 3_600_000,
-    '6h':  6 * 3_600_000,
     '1d':  1 * 86_400_000,
     '7d':  7 * 86_400_000,
     '30d': 30 * 86_400_000,
@@ -161,8 +155,9 @@
     void goto(`${u.pathname}?${sp.toString()}`, { replaceState: true });
   }
 
-  // KPI derivations from stats + projects
-  const totalCost = $derived(statsData?.total_cost_usd ?? 0);
+  // KPI derivations from stats + projects (no $/cost — subscription users
+  // don't care about dollar amounts; tokens, messages and sessions tell
+  // the same story without the price-tag framing).
   const totalInput = $derived(statsData?.total_input ?? 0);
   const totalOutput = $derived(statsData?.total_output ?? 0);
   const totalSessions = $derived(statsData?.total_sessions ?? 0);
@@ -237,12 +232,7 @@
   </div>
 
   <!-- KPI strip — always visible -->
-  <div class="ad-card" style="display: grid; grid-template-columns: repeat(6, 1fr); padding: 0; margin-bottom: 16px;">
-    <div style="padding: 12px 14px; border-right: 1px solid var(--ad-border-soft);">
-      <div class="ad-section-h" style="margin-bottom: 4px;">Spend</div>
-      <div class="mono ad-tnum" style="font-size: 17px; font-weight: 600; color: var(--ad-fg);">{costFmt(totalCost, totalCost > 0)}</div>
-      <div class="mono" style="font-size: 10px; color: var(--ad-faint); margin-top: 3px;">subscription</div>
-    </div>
+  <div class="ad-card" style="display: grid; grid-template-columns: repeat(5, 1fr); padding: 0; margin-bottom: 16px;">
     <div style="padding: 12px 14px; border-right: 1px solid var(--ad-border-soft);">
       <div class="ad-section-h" style="margin-bottom: 4px;">↑ Input</div>
       <div class="mono ad-tnum" style="font-size: 17px; font-weight: 600; color: var(--ad-fg);">{kfmt(totalInput)}</div>

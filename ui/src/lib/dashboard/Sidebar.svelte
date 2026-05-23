@@ -18,7 +18,7 @@
   function meta(id: NavId): { text: string; kind: '' | 'live' | 'alert' } {
     switch (id) {
       case 'live': return liveCount > 0 ? { text: `${liveCount} live`, kind: 'live' } : { text: '', kind: '' };
-      case 'productivity': return { text: 'today', kind: '' };
+      case 'productivity': return { text: '', kind: '' };
       case 'projects': return { text: String(projectCount), kind: '' };
       case 'insights': return { text: '1d', kind: '' };
       case 'runbooks': return { text: '', kind: '' };

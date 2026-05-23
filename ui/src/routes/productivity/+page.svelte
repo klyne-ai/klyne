@@ -516,6 +516,8 @@
   }
 </script>
 
+<svelte:head><title>klyne — Productivity</title></svelte:head>
+
 <div class="page">
   <!-- ── 1. Top rail ───────────────────────────────────────────── -->
   <div class="rail">

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { kfmt, costFmt } from '$lib/format.js';
+  import { kfmt } from '$lib/format.js';
   import type { UsageStatsResponse, DailyRow } from '$lib/types.js';
 
   interface Props {
@@ -7,7 +7,7 @@
   }
   const { stats }: Props = $props();
 
-  type SortCol = 'date' | 'messages' | 'input' | 'output' | 'cache_read' | 'cache_write' | 'total' | 'cost_usd';
+  type SortCol = 'date' | 'messages' | 'input' | 'output' | 'cache_read' | 'cache_write' | 'total';
   type SortDir = 'asc' | 'desc';
 
   let sortCol = $state<SortCol>('date');
@@ -58,9 +58,6 @@
           break;
         case 'total':
           cmp = a.total - b.total;
-          break;
-        case 'cost_usd':
-          cmp = a.cost_usd - b.cost_usd;
           break;
         default:
           cmp = 0;
@@ -116,11 +113,6 @@
             aria-sort={ariaSort('total')}
             onclick={() => setSort('total')}
           >Total{sortIndicator('total')}</th>
-          <th
-            style={thStyle}
-            aria-sort={ariaSort('cost_usd')}
-            onclick={() => setSort('cost_usd')}
-          >Cost{sortIndicator('cost_usd')}</th>
         </tr>
       </thead>
       <tbody>
@@ -133,7 +125,6 @@
             <td class="mono ad-tnum" style="padding: 10px 12px; text-align: right;">{kfmt(d.cache_read)}</td>
             <td class="mono ad-tnum" style="padding: 10px 12px; text-align: right;">{kfmt(d.cache_write)}</td>
             <td class="mono ad-tnum" style="padding: 10px 12px; text-align: right; font-weight: 600;">{kfmt(d.total)}</td>
-            <td class="mono ad-tnum" style="padding: 10px 12px; text-align: right; color: {d.cost_usd > 0 ? 'var(--ad-fg)' : 'var(--ad-faint)'};">{costFmt(d.cost_usd, d.cost_usd > 0)}</td>
           </tr>
         {/each}
       </tbody>
