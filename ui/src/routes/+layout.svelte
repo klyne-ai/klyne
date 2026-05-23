@@ -33,6 +33,18 @@
         void goto('/insights?tab=daily');
         return;
       }
+      if (to.url.pathname.startsWith('/sessions/')) {
+        const id = to.url.pathname.slice('/sessions/'.length);
+        cancel();
+        void goto(`/?session=${encodeURIComponent(id)}`);
+        return;
+      }
+      if (to.url.pathname.startsWith('/insights/sessions/')) {
+        const id = to.url.pathname.slice('/insights/sessions/'.length);
+        cancel();
+        void goto(`/insights?session=${encodeURIComponent(id)}`);
+        return;
+      }
     });
   }
 
