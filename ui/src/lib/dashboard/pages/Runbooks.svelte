@@ -5,7 +5,7 @@
   Filters persist in URL: ?scope= ?project= ?tag= ?q=
 -->
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
   import { fetchMemory } from '$lib/api.js';
@@ -216,6 +216,10 @@
     // TODO: implement new runbook creation when API is available
     console.log('TODO: new runbook — use `klyne remember this …` in your terminal');
   }
+
+  onDestroy(() => {
+    if (debounceTimer) clearTimeout(debounceTimer);
+  });
 </script>
 
 <div class="runbooks-page">

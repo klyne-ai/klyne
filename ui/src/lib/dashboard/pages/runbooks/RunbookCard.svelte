@@ -30,8 +30,7 @@
   let deleteError = $state<string | null>(null);
 
   async function handleDelete(): Promise<void> {
-    // TODO: wire to a real confirmation UI if design spec adds one
-    console.log('TODO: delete runbook', runbook.id);
+    if (!confirm('Delete this runbook? This cannot be undone.')) return;
     deleting = true;
     deleteError = null;
     try {
@@ -97,7 +96,7 @@
       class="btn-delete"
       onclick={handleDelete}
       disabled={deleting}
-      aria-label="Delete runbook"
+      aria-label={`Delete runbook ${runbook.title}`}
     >
       {deleting ? 'deleting…' : 'delete'}
     </button>
