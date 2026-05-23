@@ -39,3 +39,10 @@ dist/
 # Local dev worktrees and tool artifacts
 .worktrees/
 .playwright-mcp/
+
+# Internal pre-v0.1 workstream docs (not for public release)
+HANDOFF.md
+docs/handoffs/
+docs/plan/
+docs/research/
+docs/marketing/
