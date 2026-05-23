@@ -16,13 +16,26 @@
 
   // Lazy-load tail messages per visible thread; cached by session_id.
   let recents = $state<Record<string, Message[]>>({});
+  const inFlight = new Set<string>();
 
   $effect(() => {
-    for (const t of cockpitStore.threads) {
-      if (recents[t.session_id]) continue;
-      void fetchMessages(t.session_id, { limit: 10, order: 'desc' }).then((r) => {
-        recents = { ...recents, [t.session_id]: r.messages };
-      });
+    const currentIds = new Set(cockpitStore.threads.map((t) => t.session_id));
+
+    // Prune entries for sessions that have aged out of the cockpit window.
+    const pruned: Record<string, Message[]> = {};
+    for (const id of currentIds) if (recents[id]) pruned[id] = recents[id];
+    if (Object.keys(pruned).length !== Object.keys(recents).length) recents = pruned;
+
+    // Lazily fetch tail messages for sessions we haven't fetched yet.
+    for (const id of currentIds) {
+      if (recents[id] || inFlight.has(id)) continue;
+      inFlight.add(id);
+      void fetchMessages(id, { limit: 10, order: 'desc' })
+        .then((r) => {
+          if (!cockpitStore.threads.some((t) => t.session_id === id)) return;
+          recents = { ...recents, [id]: r.messages };
+        })
+        .finally(() => { inFlight.delete(id); });
     }
   });
 
@@ -42,9 +55,9 @@
   );
 
   const liveCount = $derived(
-    visible.filter((t) => cockpitStore.tick - t.last_msg_at < ACTIVE_MS).length
+    cockpitStore.threads.filter((t) => cockpitStore.tick - t.last_msg_at < ACTIVE_MS).length
   );
-  const idleCount = $derived(visible.length - liveCount);
+  const idleCount = $derived(cockpitStore.threads.length - liveCount);
 
   const focusThread = $derived(
     focusSessionId
@@ -52,6 +65,9 @@
       : null
   );
 
+  // Esc closes the Live focus modal only — the SessionDrawer's Esc handler
+  // lives in Shell.svelte and runs independently. The `&& focusSessionId`
+  // guard keeps both handlers idempotent when both are unmounted/null.
   function onKey(e: KeyboardEvent): void {
     if (e.key === 'Escape' && focusSessionId) {
       e.preventDefault();
@@ -99,18 +115,9 @@
         <option value="codex">codex</option>
       </select>
     </div>
-    <label
-      class="row"
-      style:gap="8px"
-      style:cursor="pointer"
-      style:padding="6px 10px"
-      style:background="var(--bg-card)"
-      style:border="1px solid var(--border-hair)"
-      style:border-radius="8px"
-      style:font-size="12px"
-    >
+    <label class="show-idle">
       <input type="checkbox" bind:checked={showIdle} />
-      <span>show idle</span>
+      show idle
     </label>
     <div class="grow"></div>
     <span class="mono dim" style:font-size="11px" style:white-space="nowrap">
@@ -181,5 +188,17 @@
     height: 78vh;
     display: flex;
     flex-direction: column;
+  }
+
+  .show-idle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    padding: 6px 10px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-hair);
+    border-radius: 8px;
+    font-size: 12px;
   }
 </style>

@@ -84,7 +84,7 @@
         <circle cx="4" cy="4" r="1.4"/><circle cx="4" cy="12" r="1.4"/><circle cx="12" cy="6" r="1.4"/>
         <path d="M4 5.5v5M4.7 11.6c4-1 7.3-2.4 7.3-5"/>
       </svg>
-      <span class="tile-branch-name">{thread.git_branch || 'main'}</span>
+      <span class="tile-branch-name">{thread.git_branch || '—'}</span>
     </span>
     <span class="muted">{thread.msg_count} · ↓ {kfmt(thread.tokens_out)}</span>
   </div>
@@ -264,13 +264,13 @@
     background: var(--bg-card-2, var(--bg-inset));
   }
 
-  /* Pill variants */
-  :global(.pill-claude) {
+  /* Pill variants — scoped to this component; no :global() leak */
+  .pill-claude {
     background: color-mix(in oklch, var(--accent) 15%, transparent);
     color: var(--accent);
     border-color: color-mix(in oklch, var(--accent) 25%, transparent);
   }
-  :global(.pill-codex) {
+  .pill-codex {
     background: color-mix(in oklch, var(--ok) 15%, transparent);
     color: var(--ok);
     border-color: color-mix(in oklch, var(--ok) 25%, transparent);
