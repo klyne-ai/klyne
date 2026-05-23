@@ -11,15 +11,19 @@ import (
 )
 
 // fakeMount is a minimal RouterMounter for smoke-testing RegisterMounter.
+// It registers both GET and POST handlers so middleware tests can exercise
+// state-changing methods without getting 405 Method Not Allowed.
 type fakeMount struct {
 	path   string
 	status int
 }
 
 func (f *fakeMount) Mount(r chi.Router) {
-	r.Get(f.path, func(w http.ResponseWriter, r *http.Request) {
+	handler := func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(f.status)
-	})
+	}
+	r.Get(f.path, handler)
+	r.Post(f.path, handler)
 }
 
 // TestRegisterMounter_RoutesAttached verifies that a mounter registered via
@@ -103,6 +107,7 @@ func TestLoopbackOnly_AllowsLoopback(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
 	req.RemoteAddr = "127.0.0.1:1234"
+	req.Host = "127.0.0.1:7878" // must also pass sameOriginOnly
 
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
@@ -122,11 +127,128 @@ func TestLoopbackOnly_AllowsIPv6Loopback(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
 	req.RemoteAddr = "[::1]:1234"
+	req.Host = "localhost:7878" // must also pass sameOriginOnly
 
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200 OK for IPv6 loopback, got %d", w.Code)
+	}
+}
+
+// --- sameOriginOnly middleware tests ---
+
+// newLoopbackRequest creates an httptest.Request that already passes
+// loopbackOnly (RemoteAddr = 127.0.0.1) so we can exercise sameOriginOnly
+// in isolation.
+func newLoopbackRequest(method, path string) *http.Request {
+	req := httptest.NewRequest(method, path, nil)
+	req.RemoteAddr = "127.0.0.1:9999"
+	return req
+}
+
+// TestSameOriginOnly_RejectsDNSReboundHost verifies that a POST with a
+// non-loopback Host header is blocked (DNS-rebind vector).
+func TestSameOriginOnly_RejectsDNSReboundHost(t *testing.T) {
+	t.Parallel()
+
+	router := api.NewRouter(api.Deps{
+		Mounters: []api.RouterMounter{&fakeMount{path: "/ping", status: http.StatusOK}},
+	})
+
+	req := newLoopbackRequest(http.MethodPost, "/ping")
+	req.Host = "evil.com:7878"
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for non-loopback Host, got %d", w.Code)
+	}
+}
+
+// TestSameOriginOnly_RejectsExternalOriginOnPost verifies that a POST with
+// an external Origin header is blocked regardless of Host.
+func TestSameOriginOnly_RejectsExternalOriginOnPost(t *testing.T) {
+	t.Parallel()
+
+	router := api.NewRouter(api.Deps{
+		Mounters: []api.RouterMounter{&fakeMount{path: "/ping", status: http.StatusOK}},
+	})
+
+	req := newLoopbackRequest(http.MethodPost, "/ping")
+	req.Host = "127.0.0.1:7878"
+	req.Header.Set("Origin", "http://evil.com")
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for external Origin on POST, got %d", w.Code)
+	}
+}
+
+// TestSameOriginOnly_AllowsGETWithNoOrigin verifies that a GET with no
+// Origin and a loopback Host passes the middleware (curl / CLI / same-origin
+// browser fetch where the browser omits Origin on GETs).
+func TestSameOriginOnly_AllowsGETWithNoOrigin(t *testing.T) {
+	t.Parallel()
+
+	router := api.NewRouter(api.Deps{
+		Mounters: []api.RouterMounter{&fakeMount{path: "/ping", status: http.StatusOK}},
+	})
+
+	req := newLoopbackRequest(http.MethodGet, "/ping")
+	req.Host = "127.0.0.1:7878"
+	// No Origin header — matches curl / CLI behaviour.
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 for loopback GET with no Origin, got %d", w.Code)
+	}
+}
+
+// TestSameOriginOnly_AllowsPostWithLoopbackOrigin verifies that a POST with
+// a matching loopback Host and loopback Origin is permitted.
+func TestSameOriginOnly_AllowsPostWithLoopbackOrigin(t *testing.T) {
+	t.Parallel()
+
+	router := api.NewRouter(api.Deps{
+		Mounters: []api.RouterMounter{&fakeMount{path: "/ping", status: http.StatusOK}},
+	})
+
+	req := newLoopbackRequest(http.MethodPost, "/ping")
+	req.Host = "127.0.0.1:7878"
+	req.Header.Set("Origin", "http://127.0.0.1:7878")
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 for loopback POST with loopback Origin, got %d", w.Code)
+	}
+}
+
+// TestSameOriginOnly_RejectsNullOriginOnPost verifies that an Origin: null
+// header is rejected for state-changing requests (sandboxed iframe vector).
+func TestSameOriginOnly_RejectsNullOriginOnPost(t *testing.T) {
+	t.Parallel()
+
+	router := api.NewRouter(api.Deps{
+		Mounters: []api.RouterMounter{&fakeMount{path: "/ping", status: http.StatusOK}},
+	})
+
+	req := newLoopbackRequest(http.MethodPost, "/ping")
+	req.Host = "127.0.0.1:7878"
+	req.Header.Set("Origin", "null")
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for Origin: null on POST, got %d", w.Code)
 	}
 }

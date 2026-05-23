@@ -477,6 +477,7 @@ func TestLoopback_Allows_Loopback(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	req.RemoteAddr = "127.0.0.1:1234"
+	req.Host = "127.0.0.1:7878" // sameOriginOnly also checks the Host header
 
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)

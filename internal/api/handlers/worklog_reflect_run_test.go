@@ -50,10 +50,19 @@ func (s *stubRunner) run(ctx context.Context, projectPath string) ([]byte, error
 
 func newReflectRunRouter(t *testing.T, db *store.DB, runner *stubRunner) http.Handler {
 	t.Helper()
-	r := chi.NewRouter()
 	h := &WorklogReflectRunHandler{db: db, runCmd: runner.run}
-	r.Post(api.RouteWorklogReflectRun, h.Run)
-	return r
+	// Use the full api.NewRouter so the global sameOriginOnly middleware is
+	// active — cross-origin enforcement now lives there, not in the handler.
+	return api.NewRouter(api.Deps{
+		Mounters: []api.RouterMounter{&reflectHandlerMounter{h: h}},
+	})
+}
+
+// reflectHandlerMounter satisfies api.RouterMounter for the reflect-run handler.
+type reflectHandlerMounter struct{ h *WorklogReflectRunHandler }
+
+func (m *reflectHandlerMounter) Mount(r chi.Router) {
+	r.Post(api.RouteWorklogReflectRun, m.h.Run)
 }
 
 // seedAllowlist drops one project row into worklog so the allowlist

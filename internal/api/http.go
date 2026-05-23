@@ -25,8 +25,11 @@
 package api
 
 import (
+	"encoding/json"
 	"net"
 	"net/http"
+	"net/url"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -67,14 +70,18 @@ type Deps struct {
 // Middleware stack (outermost first):
 //
 //  1. loopbackOnly — rejects non-127.0.0.1 source IPs with HTTP 403.
-//  2. chi middleware.RequestID — stamps X-Request-Id on every request.
-//  3. chi middleware.Logger — structured request logging.
-//  4. chi middleware.Recoverer — converts panics to HTTP 500.
+//  2. sameOriginOnly — rejects requests whose Host is not a loopback
+//     hostname, and for state-changing methods also rejects a present
+//     non-loopback Origin header. Guards against CSRF + DNS-rebind.
+//  3. chi middleware.RequestID — stamps X-Request-Id on every request.
+//  4. chi middleware.Logger — structured request logging.
+//  5. chi middleware.Recoverer — converts panics to HTTP 500.
 func NewRouter(deps Deps) http.Handler {
 	r := chi.NewRouter()
 
 	// --- middleware ---
 	r.Use(loopbackOnly)
+	r.Use(sameOriginOnly)
 	r.Use(middleware.RequestID)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
@@ -109,5 +116,89 @@ func loopbackOnly(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// sameOriginOnly is a chi middleware that guards against CSRF and DNS-rebind
+// attacks by validating the Host and Origin headers on every request.
+//
+// Threat model: a rebound domain pointing at 127.0.0.1 bypasses loopbackOnly
+// (which checks RemoteAddr) but can still trigger state-changing endpoints
+// from a browser tab on an external page. A combined Host + Origin check
+// closes this gap.
+//
+// Rules:
+//  1. The Host header's hostname must be a loopback address (127.0.0.1,
+//     localhost, ::1, or any net.IP.IsLoopback() address). Requests with a
+//     non-loopback Host — the DNS-rebind vector — are rejected with 403.
+//  2. For state-changing methods (anything other than GET / HEAD / OPTIONS),
+//     the Origin header, when present, must also resolve to a loopback host.
+//     An Origin of "null" is always rejected for state-changing requests.
+//     Requests with no Origin are allowed (curl, CLI tools, same-origin
+//     fetches where the browser omits Origin).
+//
+// This middleware is applied after loopbackOnly so RemoteAddr is already
+// known to be loopback — these are layered defenses.
+func sameOriginOnly(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// --- Rule 1: validate Host header hostname ---
+		hostHeader := r.Host // chi preserves r.Host from the request
+		if hostHeader == "" {
+			// HTTP/1.0 clients may omit Host; allow (loopbackOnly already
+			// guards the source IP, and real browsers always send Host).
+			next.ServeHTTP(w, r)
+			return
+		}
+		hostName := hostHeader
+		if h, _, err := net.SplitHostPort(hostHeader); err == nil {
+			hostName = h
+		}
+		if !isLoopbackHost(hostName) {
+			forbiddenOrigin(w)
+			return
+		}
+
+		// --- Rule 2: validate Origin for state-changing methods ---
+		stateChanging := r.Method != http.MethodGet &&
+			r.Method != http.MethodHead &&
+			r.Method != http.MethodOptions
+
+		if stateChanging {
+			origin := strings.TrimSpace(r.Header.Get("Origin"))
+			if origin != "" {
+				// "null" Origin is sent by sandboxed iframes / redirects and
+				// must never be trusted for state-changing requests.
+				if origin == "null" {
+					forbiddenOrigin(w)
+					return
+				}
+				u, err := url.Parse(origin)
+				if err != nil || !isLoopbackHost(u.Hostname()) {
+					forbiddenOrigin(w)
+					return
+				}
+			}
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+// isLoopbackHost returns true when hostname is 127.0.0.1, localhost, ::1, or
+// any address that net.IP.IsLoopback() considers loopback.
+func isLoopbackHost(hostname string) bool {
+	switch hostname {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	}
+	ip := net.ParseIP(hostname)
+	return ip != nil && ip.IsLoopback()
+}
+
+// forbiddenOrigin writes a 403 JSON response for same-origin enforcement
+// failures (DNS-rebind / CSRF).
+func forbiddenOrigin(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusForbidden)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": "forbidden_origin"})
 }
 

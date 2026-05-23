@@ -6,7 +6,7 @@
   import { projectsStore } from '$lib/projects.svelte.js';
   import { relTime } from '$lib/format.js';
   import type { SearchHit } from '$lib/types.js';
-  import DOMPurify from 'dompurify';
+  import { sanitizeSnippet } from '$lib/markdown.js';
 
   const urlQuery = $derived($page.url.searchParams.get('q') ?? '');
 
@@ -93,15 +93,7 @@
 
   const SUGGESTIONS = ['payment', 'race condition', 'refactor', 'stripe', 'redis', 'dedupe'];
 
-  // Sanitize FTS5 snippets. The server emits <mark> highlights inside
-  // snippets; everything else must be stripped to avoid stored-XSS vectors
-  // through indexed user-generated content.
-  function sanitizeSnippet(html: string): string {
-    return DOMPurify.sanitize(html, {
-      ALLOWED_TAGS: ['mark'],
-      ALLOWED_ATTR: ['style'],
-    });
-  }
+  // sanitizeSnippet is imported from $lib/markdown.js — shared with SearchOverlay.
 
   function styleMark(html: string): string {
     return html.replaceAll(
