@@ -63,10 +63,7 @@
           {#if !collapsed}<span class="label">{item.label}</span>{/if}
           {#if m.text}
             <span class="meta" class:live={m.kind === 'live'} class:alert={m.kind === 'alert'} aria-hidden="true">{m.text}</span>
-            <!-- visually-hidden text for screen readers when sidebar is collapsed and badge renders as a dot -->
-            {#if collapsed}
-              <span class="vh">{m.text}{item.id === 'advisors' ? ' advisories' : item.id === 'live' ? ' sessions' : ''}</span>
-            {/if}
+            <span class="vh">{item.label} · {m.text}</span>
           {/if}
         </a>
       {/each}

@@ -4,13 +4,12 @@
   Filter persisted in ?kind= URL param.
 -->
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
-  import { fetchAdvisories } from '$lib/api.js';
   import { relTime } from '$lib/format.js';
   import { sessionUrl } from '$lib/dashboard/url-state.js';
-  import type { AdvisoryRow, AdvisoryKind } from '$lib/types.js';
+  import { advisorsStore } from '$lib/advisors.svelte.js';
+  import type { AdvisoryKind } from '$lib/types.js';
 
   // ---------------------------------------------------------------------------
   // Types
@@ -56,12 +55,12 @@
   ];
 
   // ---------------------------------------------------------------------------
-  // State
+  // Store aliases
   // ---------------------------------------------------------------------------
 
-  let advisories = $state<AdvisoryRow[]>([]);
-  let loading = $state(true);
-  let error = $state<string | null>(null);
+  const advisories = $derived(advisorsStore.advisories);
+  const loading = $derived(advisorsStore.loading);
+  const error = $derived(advisorsStore.error);
 
   // Filter comes from the URL ?kind= param.
   const activeKind = $derived.by<KindFilter>(() => {
@@ -125,32 +124,9 @@
     void goto(url);
   }
 
-  function onCardKey(e: KeyboardEvent, sessionId: string): void {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      openSession(sessionId);
-    }
-  }
-
   // ---------------------------------------------------------------------------
-  // Data loading
+  // (no local fetch — data comes from advisorsStore, populated by +layout.svelte)
   // ---------------------------------------------------------------------------
-
-  async function load(): Promise<void> {
-    loading = true;
-    try {
-      const res = await fetchAdvisories({ limit: 500 });
-      advisories = res.advisories;
-      error = null;
-    } catch (e: unknown) {
-      error = e instanceof Error ? e.message : 'failed to load advisories';
-      advisories = [];
-    } finally {
-      loading = false;
-    }
-  }
-
-  onMount(() => { void load(); });
 </script>
 
 <div class="advisors-page">
@@ -220,7 +196,6 @@
             class="adv-card"
             style="--rail: {meta.railVar}"
             onclick={() => openSession(adv.session_id)}
-            onkeydown={(e) => onCardKey(e, adv.session_id)}
             aria-label="Open session {adv.session_id} — {meta.label} advisory"
           >
             <!-- Row 1: kicker · cli · session · project · ago -->
