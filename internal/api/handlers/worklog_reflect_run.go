@@ -163,10 +163,35 @@ func spawnClaudeReflect(ctx context.Context, projectPath string) ([]byte, error)
 	if err != nil {
 		return nil, fmt.Errorf("reflect-run: build mcp-config: %w", err)
 	}
+
+	// claude's --mcp-config flag is VARIADIC (<configs...>) and greedily
+	// consumes every following token until the next flag or end of argv,
+	// including the trailing /klyne:reflect prompt. Write the config to a
+	// temp file so the flag receives exactly one token. The file is cleaned
+	// up at the end of this function — claude has already finished reading
+	// it by then.
+	f, err := os.CreateTemp("", "klyne-reflect-mcp-*.json")
+	if err != nil {
+		return nil, fmt.Errorf("reflect-run: create mcp-config temp: %w", err)
+	}
+	defer os.Remove(f.Name()) //nolint:errcheck
+	if _, err := f.Write(mcpConfig); err != nil {
+		f.Close() //nolint:errcheck
+		return nil, fmt.Errorf("reflect-run: write mcp-config temp: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return nil, fmt.Errorf("reflect-run: close mcp-config temp: %w", err)
+	}
+
+	// Layout: every other flag first, --mcp-config dead last with `--`
+	// before the prompt. claude treats --mcp-config as variadic
+	// (<configs...>) and will greedily swallow every following token
+	// — including /klyne:reflect — unless `--` forces an end of flags.
 	cmd := exec.CommandContext(ctx, "claude",
 		"-p",
 		"--permission-mode", "bypassPermissions",
-		"--mcp-config", string(mcpConfig),
+		"--mcp-config", f.Name(),
+		"--",
 		"/klyne:reflect",
 	)
 	cmd.Dir = projectPath
