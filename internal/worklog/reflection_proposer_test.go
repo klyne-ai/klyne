@@ -136,6 +136,61 @@ func TestLoadPendingEntries_WeeklyCronReason(t *testing.T) {
 	}
 }
 
+// Regression: when day is omitted, the proposer must return ALL visible
+// pending entries since the last reflection — not just today's window.
+// Previously the day default of `now` silently scoped to today, so a
+// project whose entries landed yesterday would surface "N entries · no
+// reflection yet" in the UI but return zero from /klyne:reflect.
+func TestLoadPendingEntries_DayZeroReturnsAllPending_CrossDay(t *testing.T) {
+	db := newProposerTestDB(t)
+	now := time.Now()
+	yesterday := now.Add(-26 * time.Hour) // safely outside today's local window
+	twoDaysAgo := now.Add(-50 * time.Hour)
+
+	// No reflection seeded — entries are pending all-time.
+	seedProposerEntry(t, db, "/p", "claude", "yest-1", "yesterday's work", 4, yesterday)
+	seedProposerEntry(t, db, "/p", "claude", "yest-2", "more yesterday work", 5, yesterday.Add(2*time.Hour))
+	seedProposerEntry(t, db, "/p", "codex", "older", "two days ago", 3, twoDaysAgo)
+
+	entries, _, err := LoadPendingEntries(context.Background(), db, "/p", 150, now, time.Time{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("day-omitted call must return ALL pending since cursor; got %d, want 3", len(entries))
+	}
+	seen := map[string]bool{}
+	for _, e := range entries {
+		seen[e.SessionID] = true
+	}
+	for _, want := range []string{"yest-1", "yest-2", "older"} {
+		if !seen[want] {
+			t.Errorf("missing %q from cross-day pending result: %v", want, seen)
+		}
+	}
+}
+
+// Day-specific calls remain windowed: backfill mode for one calendar day
+// still rejects entries on neighbouring days.
+func TestLoadPendingEntries_DayArgRestrictsWindow(t *testing.T) {
+	db := newProposerTestDB(t)
+	now := time.Now()
+	loc := now.Location()
+	target := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc).Add(-48 * time.Hour)
+	other := target.Add(-25 * time.Hour) // a day before the target
+
+	seedProposerEntry(t, db, "/p", "claude", "target-1", "target day work", 5, target.Add(10*time.Hour))
+	seedProposerEntry(t, db, "/p", "claude", "other-1", "neighbour-day work", 5, other)
+
+	entries, _, err := LoadPendingEntries(context.Background(), db, "/p", 150, now, target)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(entries) != 1 || entries[0].SessionID != "target-1" {
+		t.Errorf("expected exactly target-1 in the day-windowed slice; got %d entries: %+v", len(entries), entries)
+	}
+}
+
 func TestLoadPendingEntries_NoEntriesUserInvoked(t *testing.T) {
 	db := newProposerTestDB(t)
 	entries, reason, err := LoadPendingEntries(context.Background(), db, "/p", 150, time.Now(), time.Time{})

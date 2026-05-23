@@ -22,13 +22,18 @@ const proposeReflectionEntryBody = 200
 
 // ProposeReflectionInput is the MCP-facing input schema.
 //
-// Day scopes the proposed slice to a single local calendar day in the
-// iterative-reflection workflow (docs/features/iterative-reflection.md):
-// the proposer fetches only stop_summaries inside [day-start, day-end)
-// AND with ts after the day's reflection cursor. Omitted ⇒ today.
+// Day, when present, scopes the proposal to a single local calendar day
+// (backfill mode): the proposer fetches only stop_summaries inside
+// [day-start, day-end) AND with ts after that day's reflection cursor.
+//
+// Day, when OMITTED, asks for every visible pending entry since the
+// project's global reflection cursor — i.e. the same set the Worklog UI
+// counts as "N entries · no reflection yet". The slash-command host
+// then buckets those entries by UTC date and writes one reflection per
+// bucket (see docs/features/iterative-reflection.md).
 type ProposeReflectionInput struct {
 	ProjectPath string `json:"project_path" jsonschema:"absolute project path"`
-	Day         string `json:"day,omitempty" jsonschema:"calendar day to scope the proposal to, YYYY-MM-DD (local); defaults to today"`
+	Day         string `json:"day,omitempty" jsonschema:"calendar day to scope the proposal to, YYYY-MM-DD (local); omitted ⇒ ALL pending entries since the last reflection (host buckets by date)"`
 	Threshold   int    `json:"threshold,omitempty" jsonschema:"importance-sum threshold for trigger classification (default 150)"`
 }
 

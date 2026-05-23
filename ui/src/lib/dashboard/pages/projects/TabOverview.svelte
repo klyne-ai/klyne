@@ -7,7 +7,7 @@
 <script lang="ts">
   import type { ProjectAggregate } from '$lib/projects.svelte.js';
   import type { ProjectInsight, Session } from '$lib/types.js';
-  import { kfmt, costFmt, relAgo, dayLabel } from '$lib/format.js';
+  import { kfmt, relAgo, dayLabel } from '$lib/format.js';
   import AgentMixDonut from '$lib/ui/AgentMixDonut.svelte';
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
@@ -25,7 +25,6 @@
     { k: 'Sessions', v: project.sessions.toLocaleString(), s: 'all-time' },
     { k: 'Messages', v: project.msgs.toLocaleString(), s: `${kfmt(project.tokensIn)} in` },
     { k: 'Tokens out', v: kfmt(project.tokensOut), s: 'cumulative' },
-    { k: 'Cost', v: costFmt(project.cost, project.priced), s: project.priced ? 'all-time' : 'no API key' },
   ]);
 
   // Agent mix from the project's own CLI breakdown — no extra API call.

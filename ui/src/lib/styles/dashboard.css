@@ -1,0 +1,179 @@
+/*
+ * Global utility classes shared across dashboard pages (Live, Projects,
+ * Insights, Runbooks, Worklog, Advisors). Mirrors the rules in the
+ * design bundle's shell.css. Lives at the global level (not inside any
+ * .svelte <style> block) because every page mounts these classes on
+ * direct markup and Svelte's scoped styles would otherwise drop them.
+ *
+ * Most rules raise specificity over app.css's older agentdeck legacy
+ * (.toolbar input { ... }) so the dashboard pages reclaim the design
+ * intent without disturbing the legacy surfaces.
+ */
+
+.field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-hair);
+  border-radius: 8px;
+}
+.field .lbl {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--fg-dim);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+/* Reclaim transparent + dark for inputs/selects living inside a .field
+   inside a .toolbar — overrides the agentdeck rule in app.css that
+   forces a 260px-wide pill with its own border. */
+.toolbar .field input,
+.toolbar .field select {
+  background: transparent !important;
+  color: var(--fg);
+  border: 0 !important;
+  outline: none;
+  width: auto !important;
+  padding: 0 !important;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  min-width: 0;
+}
+.toolbar .field select {
+  /* Drop the OS-default chrome so the select reads like the rest of
+     the dark toolbar. */
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+  padding-right: 14px !important;
+  background-image: linear-gradient(45deg, transparent 50%, var(--fg-muted) 50%),
+                    linear-gradient(135deg, var(--fg-muted) 50%, transparent 50%);
+  background-position: calc(100% - 7px) 50%, calc(100% - 3px) 50%;
+  background-size: 4px 4px;
+  background-repeat: no-repeat;
+}
+.toolbar .field select option {
+  background: var(--bg-card);
+  color: var(--fg);
+}
+
+.grow {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Live page "show idle" pill — restyle the native checkbox at a sane
+   size and align it with the surrounding text. */
+.live-toolbar-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  padding: 6px 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-hair);
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--fg-soft);
+}
+.live-toolbar-check input[type="checkbox"] {
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+/* Thread peek modal — used by Live tiles' expand button. The shell-css
+   rules live here (not scoped) so the modal can be portaled outside
+   the tile in the future without losing its animation. */
+.thread-scrim {
+  position: fixed; inset: 0;
+  background: color-mix(in oklch, var(--bg-inset) 78%, transparent);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  z-index: 60;
+  animation: tm-fadein .16s ease both;
+}
+.thread-modal {
+  position: fixed;
+  left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(680px, 92vw);
+  max-height: min(78vh, 760px);
+  background: var(--bg-card);
+  border: 1px solid var(--border-soft);
+  border-radius: 14px;
+  box-shadow: 0 30px 80px -20px rgba(0,0,0,.55),
+              0 0 0 1px color-mix(in oklch, var(--accent) 8%, transparent);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+  z-index: 61;
+  animation: tm-pop .26s cubic-bezier(.2,.8,.2,1) both;
+  transform-origin: var(--tm-origin-x, 50%) var(--tm-origin-y, 50%);
+}
+.thread-modal.is-closing { animation: tm-pop-out .14s ease-in both; }
+.thread-scrim.is-closing { animation: tm-fadeout .14s ease-in both; }
+
+@keyframes tm-fadein  { from { opacity: 0; } to { opacity: 1; } }
+@keyframes tm-fadeout { from { opacity: 1; } to { opacity: 0; } }
+@keyframes tm-pop {
+  0%   { opacity: 0; transform: translate(-50%, -50%) scale(.94) translateY(8px); }
+  60%  { opacity: 1; }
+  100% { opacity: 1; transform: translate(-50%, -50%) scale(1) translateY(0); }
+}
+@keyframes tm-pop-out {
+  from { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  to   { opacity: 0; transform: translate(-50%, -50%) scale(.96); }
+}
+
+.thread-modal__head {
+  display: flex; align-items: center; gap: 10px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border-hair);
+}
+.thread-modal__head .meta { flex: 1; min-width: 0; }
+.thread-modal__head h3 {
+  margin: 0; display: flex; align-items: baseline; gap: 8px;
+  font-size: 13.5px; color: var(--fg); font-weight: 500;
+}
+.thread-modal__head .sub {
+  font-family: var(--font-mono); font-size: 11px; color: var(--fg-muted);
+  display: flex; gap: 8px; flex-wrap: wrap; margin-top: 2px;
+}
+.thread-modal__body {
+  flex: 1;
+  overflow: auto;
+  padding: 14px 18px 18px;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.thread-modal__body .msg {
+  border-left: 2px solid color-mix(in oklch, var(--accent) 30%, transparent);
+  padding-left: 12px;
+  opacity: 0;
+  animation: tm-msg-in .35s cubic-bezier(.2,.8,.2,1) both;
+}
+@keyframes tm-msg-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.thread-modal__body .msg .role {
+  font-family: var(--font-mono); font-size: 10px;
+  letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--accent);
+}
+.thread-modal__body .msg p {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  color: var(--fg-soft);
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+.thread-modal__foot {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px;
+  padding: 10px 18px;
+  border-top: 1px solid var(--border-hair);
+  background: var(--bg-card-2);
+}

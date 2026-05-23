@@ -3,9 +3,11 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -136,10 +138,60 @@ func (h *WorklogReflectRunHandler) Run(w http.ResponseWriter, r *http.Request) {
 // cannot be reinterpreted as shell syntax. exec.Cmd.Dir sets the working
 // directory for the child process, replacing the previous `cd "$path" &&
 // claude …` pattern.
+//
+// `claude -p` (print/headless mode) does NOT auto-load user-level
+// MCP servers from ~/.claude.json — so even though the user has the
+// klyne MCP entry there for interactive sessions, the spawned child
+// would otherwise be unable to see klyne's propose_reflection /
+// record_reflection tools. We pass --mcp-config inline pointing at
+// THIS klyne binary (os.Executable) so the child always uses the same
+// build the daemon is running.
 func spawnClaudeReflect(ctx context.Context, projectPath string) ([]byte, error) {
+	klyneBin, err := os.Executable()
+	if err != nil {
+		return nil, fmt.Errorf("reflect-run: locate klyne binary: %w", err)
+	}
+	mcpConfig, err := json.Marshal(map[string]any{
+		"mcpServers": map[string]any{
+			"klyne": map[string]any{
+				"type":    "stdio",
+				"command": klyneBin,
+				"args":    []string{"mcp"},
+			},
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("reflect-run: build mcp-config: %w", err)
+	}
+
+	// claude's --mcp-config flag is VARIADIC (<configs...>) and greedily
+	// consumes every following token until the next flag or end of argv,
+	// including the trailing /klyne:reflect prompt. Write the config to a
+	// temp file so the flag receives exactly one token. The file is cleaned
+	// up at the end of this function — claude has already finished reading
+	// it by then.
+	f, err := os.CreateTemp("", "klyne-reflect-mcp-*.json")
+	if err != nil {
+		return nil, fmt.Errorf("reflect-run: create mcp-config temp: %w", err)
+	}
+	defer os.Remove(f.Name()) //nolint:errcheck
+	if _, err := f.Write(mcpConfig); err != nil {
+		f.Close() //nolint:errcheck
+		return nil, fmt.Errorf("reflect-run: write mcp-config temp: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return nil, fmt.Errorf("reflect-run: close mcp-config temp: %w", err)
+	}
+
+	// Layout: every other flag first, --mcp-config dead last with `--`
+	// before the prompt. claude treats --mcp-config as variadic
+	// (<configs...>) and will greedily swallow every following token
+	// — including /klyne:reflect — unless `--` forces an end of flags.
 	cmd := exec.CommandContext(ctx, "claude",
 		"-p",
 		"--permission-mode", "bypassPermissions",
+		"--mcp-config", f.Name(),
+		"--",
 		"/klyne:reflect",
 	)
 	cmd.Dir = projectPath

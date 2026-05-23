@@ -1,7 +1,7 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import AgentMixDonut from '$lib/ui/AgentMixDonut.svelte';
-  import { kfmt, costFmt } from '$lib/format.js';
+  import { kfmt } from '$lib/format.js';
   import type { UsageStatsResponse, ProjectInsightsResponse, DailyRow } from '$lib/types.js';
 
   interface Props {
@@ -58,7 +58,7 @@
           {#each dailyChrono as d (d.date)}
             {@const h = Math.max(2, Math.round((d.total / maxDailyTokens) * 130))}
             <div
-              title="{d.date} · {kfmt(d.total)} tokens · {costFmt(d.cost_usd, d.cost_usd > 0)}"
+              title="{d.date} · {kfmt(d.total)} tokens"
               style="width: 14px; flex-shrink: 0; background: var(--ad-claude); height: {h}px; opacity: 0.85; border-radius: 2px 2px 0 0;"
             ></div>
           {/each}
@@ -74,7 +74,7 @@
     <AgentMixDonut totals={mixTotals} />
   </div>
 
-  <!-- Top projects by spend -->
+  <!-- Top projects by tokens -->
   <div class="ad-card" style="padding: 0;">
     <div style="display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid var(--ad-border-soft);">
       <div class="ad-section-h">Top projects by tokens</div>

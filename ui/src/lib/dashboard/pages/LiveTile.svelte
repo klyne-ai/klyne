@@ -5,6 +5,7 @@
   import { relAgo, kfmt } from '$lib/format';
   import { isConversationalMessage } from '$lib/messageFilters';
   import { hiddenSessionIds, toggleHidden } from '$lib/hidden-sessions.svelte';
+  import ThreadPeekModal from './ThreadPeekModal.svelte';
   import type { CockpitThread, Message } from '$lib/types';
 
   interface Props {
@@ -14,6 +15,23 @@
     onFocus?: (id: string) => void;
   }
   const { thread, recent, tickMs, onFocus }: Props = $props();
+
+  let expandBtn = $state<HTMLButtonElement | null>(null);
+  let expandOpen = $state(false);
+  let expandOrigin = $state<{ x: number; y: number } | null>(null);
+  const conversational = $derived(recent.filter(isConversationalMessage));
+  const hiddenCount = $derived(Math.max(0, conversational.length - 3));
+
+  function openExpand(): void {
+    if (expandBtn) {
+      const r = expandBtn.getBoundingClientRect();
+      expandOrigin = {
+        x: ((r.left + r.width / 2) / window.innerWidth) * 100,
+        y: ((r.top + r.height / 2) / window.innerHeight) * 100,
+      };
+    }
+    expandOpen = true;
+  }
 
   const tail = $derived(recent.filter(isConversationalMessage).slice(-3));
   const lastAgo = $derived(relAgo(tickMs - thread.last_msg_at));
@@ -107,7 +125,19 @@
 
   <!-- Footer -->
   <footer class="tile-foot">
-    <span class="mono dim tile-state">{isLive ? 'streaming' : 'idle'} · last msg {lastAgo}</span>
+    <button
+      bind:this={expandBtn}
+      class="k-btn k-btn--ghost tile-expand-btn"
+      onclick={openExpand}
+      title="Expand thread"
+      aria-label="Expand thread"
+    >
+      <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+        <path d="M3 4h10M3 8h10M3 12h7"/>
+      </svg>
+      <span>expand{hiddenCount > 0 ? ` · +${hiddenCount}` : ''}</span>
+    </button>
+    <span class="mono dim tile-state">{isLive ? 'streaming' : 'idle'} · {lastAgo} ago</span>
     <div class="row" style:gap="6px">
       {#if onFocus}
         <button class="k-btn tile-focus-btn" onclick={openFocus}>focus</button>
@@ -116,6 +146,16 @@
     </div>
   </footer>
 </div>
+
+{#if expandOpen}
+  <ThreadPeekModal
+    thread={thread}
+    messages={recent}
+    origin={expandOrigin}
+    tickMs={tickMs}
+    onClose={() => (expandOpen = false)}
+  />
+{/if}
 
 <style>
   .live-tile {
@@ -237,7 +277,21 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    flex: 1;
+    text-align: center;
   }
+  .tile-expand-btn {
+    padding: 4px 8px;
+    color: var(--fg-muted);
+    border-color: transparent;
+    background: transparent;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+  }
+  .tile-expand-btn:hover { color: var(--fg); }
   .tile-open-btn {
     padding: 4px 10px;
     flex-shrink: 0;

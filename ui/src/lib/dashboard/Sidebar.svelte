@@ -1,5 +1,6 @@
 <script lang="ts">
   import Icon from './Icon.svelte';
+  import Logo from '$lib/ui/Logo.svelte';
   import { NAV, type NavId } from './nav';
   import { goto } from '$app/navigation';
 
@@ -17,7 +18,7 @@
   function meta(id: NavId): { text: string; kind: '' | 'live' | 'alert' } {
     switch (id) {
       case 'live': return liveCount > 0 ? { text: `${liveCount} live`, kind: 'live' } : { text: '', kind: '' };
-      case 'productivity': return { text: 'today', kind: '' };
+      case 'productivity': return { text: '', kind: '' };
       case 'projects': return { text: String(projectCount), kind: '' };
       case 'insights': return { text: '1d', kind: '' };
       case 'runbooks': return { text: '', kind: '' };
@@ -29,7 +30,7 @@
 
 <aside class="sidebar" class:collapsed>
   <div class="sidebar-brand">
-    <div class="mark">&gt;K</div>
+    <span class="mark"><Logo size={22} /></span>
     {#if !collapsed}<div class="name">klyne<em>·local</em></div>{/if}
     <button class="sidebar-toggle" onclick={onToggleCollapse} title={collapsed ? 'Expand' : 'Collapse'}>
       {collapsed ? '›' : '‹'}
@@ -38,16 +39,12 @@
 
   <button class="sidebar-search" onclick={onOpenSearch} title="Search messages…">
     <Icon name="search" />
-    {#if !collapsed}
-      <span>Search messages…</span>
-      <span class="key">⌘K</span>
-    {/if}
+    <span class="search-text">Search messages…</span>
+    <span class="key">⌘K</span>
   </button>
 
   {#each ['workspace', 'capture'] as section}
-    {#if !collapsed}
-      <div class="sidebar-section">{section === 'workspace' ? 'Workspace' : 'Capture'}</div>
-    {/if}
+    <div class="sidebar-section">{section === 'workspace' ? 'Workspace' : 'Capture'}</div>
     <nav class="sidebar-nav">
       {#each NAV.filter((n) => n.section === section) as item}
         {@const m = meta(item.id)}
@@ -60,7 +57,7 @@
           onclick={(e) => { e.preventDefault(); void goto(item.href); }}
         >
           <span class="icon"><Icon name={item.icon} /></span>
-          {#if !collapsed}<span class="label">{item.label}</span>{/if}
+          <span class="label">{item.label}</span>
           {#if m.text}
             <span class="meta" class:live={m.kind === 'live'} class:alert={m.kind === 'alert'} aria-hidden="true">{m.text}</span>
             <span class="vh">{item.label} · {m.text}</span>
@@ -72,13 +69,11 @@
 
   <div class="sidebar-foot">
     <div class="avatar">M</div>
-    {#if !collapsed}
-      <div class="who">
-        <div class="name">Local user</div>
-        <div class="sub">127.0.0.1:7878</div>
-      </div>
-      <div class="status" title="daemon running"></div>
-    {/if}
+    <div class="who">
+      <div class="name">Local user</div>
+      <div class="sub">127.0.0.1:7878</div>
+    </div>
+    <div class="status" title="daemon running"></div>
   </div>
 </aside>
 
@@ -98,6 +93,19 @@
   }
   .sidebar.collapsed .sidebar-brand { padding: 18px 14px 14px; justify-content: center; }
   .sidebar.collapsed .sidebar-brand .name { display: none; }
+  /* Hide labels via CSS (display: none) rather than removing them from the DOM
+     with {#if !collapsed}. Conditional render re-flows mid-transition and makes
+     the sidebar appear to jump. CSS-hidden labels keep the width animation
+     smooth and the surrounding nav rows perfectly stable. */
+  .sidebar.collapsed .sidebar-search .search-text,
+  .sidebar.collapsed .sidebar-search .key,
+  .sidebar.collapsed .sidebar-section,
+  .sidebar.collapsed .sidebar-nav-item .label,
+  .sidebar.collapsed .sidebar-nav-item .meta,
+  .sidebar.collapsed .sidebar-foot .who,
+  .sidebar.collapsed .sidebar-foot .status {
+    display: none;
+  }
   .sidebar-toggle {
     position: absolute;
     right: -10px; top: 22px;
@@ -113,11 +121,9 @@
   }
   .sidebar-toggle:hover { color: var(--fg); background: var(--bg-card); border-color: var(--border-soft); }
   .sidebar-brand .mark {
-    width: 24px; height: 24px; border-radius: 6px;
+    width: 24px; height: 24px;
     display: grid; place-items: center;
-    background: var(--accent); color: var(--bg);
-    font-family: var(--font-mono); font-weight: 600; font-size: 13px;
-    letter-spacing: -0.04em;
+    color: var(--fg);
   }
   .sidebar-brand .name { font-family: var(--font-mono); font-size: 14px; color: var(--fg); letter-spacing: -0.01em; }
   .sidebar-brand .name em { font-style: italic; color: var(--fg-soft); margin-left: 2px; }

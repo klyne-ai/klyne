@@ -62,7 +62,18 @@
   function detectRangeKey(s: number, u: number): typeof rangeKey {
     const day = 86_400_000;
     const span = Math.round((u - s + 1) / day);
-    if (span <= 1)  return 'yesterday';
+    if (span <= 1) {
+      // <=1 day window. Disambiguate today vs yesterday by snapping
+      // `since` to whichever local-midnight is closer. Without this,
+      // a fresh "today" load (since = today's midnight, until = now)
+      // was misclassified as "yesterday" because span ≤ 1 always
+      // returned that branch — the chip then showed yesterday selected
+      // while the body rendered today's data.
+      const now = new Date();
+      const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).getTime();
+      const yesterdayMidnight = todayMidnight - day;
+      return Math.abs(s - todayMidnight) <= Math.abs(s - yesterdayMidnight) ? 'today' : 'yesterday';
+    }
     if (span <= 7)  return '7d';
     if (span <= 14) return '14d';
     return '30d';
@@ -516,6 +527,8 @@
   }
 </script>
 
+<svelte:head><title>klyne — Productivity</title></svelte:head>
+
 <div class="page">
   <!-- ── 1. Top rail ───────────────────────────────────────────── -->
   <div class="rail">
@@ -534,6 +547,24 @@
     </div>
   </div>
 
+  <!-- Banners (independent of the body render). Show the small range-
+       switching status when we already have data, the full loader when
+       we don't, and the error banner inline above the body when an
+       error fires with stale data already on screen. -->
+  {#if loading && rep}
+    <div class="range-loading mono" role="status" aria-live="polite">
+      <span class="range-spinner"></span>
+      <span>Fetching {rangeKey}…</span>
+      <button class="btn-ghost-l" onclick={() => { inflight?.abort(); }}>Cancel</button>
+    </div>
+  {/if}
+  {#if error && rep}
+    <div class="state state-err state-soft" role="alert">
+      <span class="mono">Error: {error}</span>
+      <button class="btn-ghost-l" onclick={refresh}>Retry</button>
+    </div>
+  {/if}
+
   {#if loading && !rep}
     <div class="state state-loading">
       <span class="mono">Reading sessions from disk…</span>
@@ -543,14 +574,13 @@
         <button class="btn-ghost-l" onclick={refresh}>Retry</button>
       </div>
     </div>
-  {:else if error}
+  {:else if error && !rep}
     <div class="state state-err">
       <span class="mono">Error: {error}</span>
       <div class="state-actions">
         <button class="btn-ghost-l" onclick={refresh}>Retry</button>
       </div>
     </div>
-    <p class="state state-err">Error: {error}</p>
   {:else if visible}
     {@const v = visible}
     {@const dp = dayParts(v.day)}
@@ -897,6 +927,42 @@
   .state-loading { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; padding: 48px 28px; }
   .state-loading .mono { font-size: 12px; }
   .state-err { display: flex; flex-direction: column; gap: 8px; padding: 48px 28px; color: var(--alert); }
+  /* Soft variant: render in a slim banner inline above the still-visible
+     body so an error during a range refetch doesn't blank the page. */
+  .state-err.state-soft {
+    flex-direction: row;
+    align-items: center;
+    padding: 10px 16px;
+    margin: 8px 20px 0;
+    background: color-mix(in oklch, var(--alert) 8%, var(--bg-card));
+    border: 1px solid color-mix(in oklch, var(--alert) 30%, transparent);
+    border-radius: 8px;
+    gap: 12px;
+  }
+  /* Slim "Fetching <range>…" banner shown while a range-switch fetch is
+     in flight and we still have last range's data on screen. */
+  .range-loading {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 14px;
+    margin: 8px 20px 0;
+    background: color-mix(in oklch, var(--accent) 10%, var(--bg-card));
+    border: 1px solid color-mix(in oklch, var(--accent) 30%, transparent);
+    border-radius: 8px;
+    font-size: 12px;
+    color: var(--fg-soft);
+  }
+  .range-spinner {
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    border: 2px solid color-mix(in oklch, var(--accent) 40%, transparent);
+    border-top-color: var(--accent);
+    animation: range-spin 0.7s linear infinite;
+  }
+  @keyframes range-spin {
+    to { transform: rotate(360deg); }
+  }
   .state-actions { display: flex; gap: 8px; padding-top: 8px; }
   .btn-ghost-l { background: transparent; color: var(--fg); border: 1px solid var(--border); padding: 6px 14px; border-radius: 6px; cursor: pointer; font-family: var(--font-mono); font-size: 11px; }
   .btn-ghost-l:hover { background: var(--bg-card); }

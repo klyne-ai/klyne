@@ -1,4 +1,5 @@
 @import '$lib/styles/tokens.css';
+@import '$lib/styles/dashboard.css';
 
 @tailwind base;
 @tailwind components;

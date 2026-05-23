@@ -11,6 +11,7 @@ package worklog
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"time"
 
@@ -31,14 +32,22 @@ type PendingEntry struct {
 }
 
 // LoadPendingEntries returns the visible stop_summary entries written
-// for projectPath on `day` (local time) since the last reflection's
-// cursor for that day. Used by the propose_reflection MCP tool and
-// (in the future) by any non-Claude AI host that wants to synthesize.
+// for projectPath since the last reflection's cursor. Used by the
+// propose_reflection MCP tool and (in the future) by any non-Claude AI
+// host that wants to synthesize.
 //
-// `day` zero-value defaults to today (local). The window is a
-// [start-of-local-day, start-of-next-local-day) range in epoch-ms; the
-// cursor (docs/features/iterative-reflection.md) further restricts to
-// stop_summaries with ts > MaxReflectionCursorForDay(project, day).
+// Two modes, keyed off the `day` argument:
+//
+//  1. day == zero (the common case for /klyne:reflect with no `day` arg):
+//     return ALL visible pending entries since the global cursor across
+//     every day — the slash-command host then buckets them by UTC date
+//     and writes one reflection per bucket. The Worklog UI's
+//     pending_entries count uses the same "since-last-reflection-anywhere"
+//     definition, so this mode keeps the proposer aligned with the UI.
+//
+//  2. day != zero: backfill mode — restrict to the [day-start, day-end)
+//     window in `day`'s local zone, gated by that day's per-day cursor.
+//     Lets a host reflect a specific past day in isolation.
 //
 // The `reason` return is a short, human-readable string explaining WHY
 // the synthesis is being proposed now: either "importance-sum N ≥ T",
@@ -48,33 +57,55 @@ func LoadPendingEntries(ctx context.Context, db *store.DB, projectPath string, t
 	if threshold <= 0 {
 		threshold = 150
 	}
-	if day.IsZero() {
-		day = now
-	}
-	// Resolve the [day-start, day-end) window in the caller's local zone
-	// — matches how the dashboard buckets reflections (productivity API
-	// uses local-time date strings for its day key).
-	loc := day.Location()
-	dayStart := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, loc)
-	dayEnd := dayStart.Add(24 * time.Hour)
-	dayStr := dayStart.Format("2006-01-02")
-	dayStartMs := dayStart.UnixMilli()
-	dayEndMs := dayEnd.UnixMilli()
 
-	cursor, err := store.MaxReflectionCursorForDay(ctx, db, projectPath, dayStr)
-	if err != nil {
-		return nil, "", err
+	var (
+		cursor   int64
+		err      error
+		rows     *sql.Rows
+		dayBound bool
+	)
+	loc := now.Location()
+	if day.IsZero() {
+		// Cross-day mode: every visible pending entry since the global
+		// cursor, with no day window. Matches the UI's pending_entries
+		// definition so a card that says "N entries · no reflection yet"
+		// actually surfaces those N entries to /klyne:reflect.
+		cursor, err = store.MaxReflectionCursor(ctx, db, projectPath)
+		if err != nil {
+			return nil, "", err
+		}
+		rows, err = db.Read().QueryContext(ctx,
+			`SELECT session_id, cli, COALESCE(recap_topic,''), COALESCE(ai_drafted_summary,''),
+                    COALESCE(last_user,''), ts, importance
+             FROM stop_summaries
+             WHERE project_path = ?
+               AND recap_visible = 1
+               AND ts > ?
+             ORDER BY ts ASC LIMIT 100`,
+			projectPath, cursor)
+	} else {
+		// Per-day backfill mode.
+		loc = day.Location()
+		dayBound = true
+		dayStart := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, loc)
+		dayEnd := dayStart.Add(24 * time.Hour)
+		dayStr := dayStart.Format("2006-01-02")
+		cursor, err = store.MaxReflectionCursorForDay(ctx, db, projectPath, dayStr)
+		if err != nil {
+			return nil, "", err
+		}
+		rows, err = db.Read().QueryContext(ctx,
+			`SELECT session_id, cli, COALESCE(recap_topic,''), COALESCE(ai_drafted_summary,''),
+                    COALESCE(last_user,''), ts, importance
+             FROM stop_summaries
+             WHERE project_path = ?
+               AND recap_visible = 1
+               AND ts >= ? AND ts < ?
+               AND ts > ?
+             ORDER BY ts ASC LIMIT 100`,
+			projectPath, dayStart.UnixMilli(), dayEnd.UnixMilli(), cursor)
 	}
-	rows, err := db.Read().QueryContext(ctx,
-		`SELECT session_id, cli, COALESCE(recap_topic,''), COALESCE(ai_drafted_summary,''),
-                COALESCE(last_user,''), ts, importance
-         FROM stop_summaries
-         WHERE project_path = ?
-           AND recap_visible = 1
-           AND ts >= ? AND ts < ?
-           AND ts > ?
-         ORDER BY ts ASC LIMIT 100`,
-		projectPath, dayStartMs, dayEndMs, cursor)
+	_ = dayBound // reserved for future debug logging
 	if err != nil {
 		return nil, "", fmt.Errorf("worklog: load pending entries: %w", err)
 	}

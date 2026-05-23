@@ -11,7 +11,7 @@
 
   let filter = $state('');
   let cli = $state<'all' | 'claude' | 'codex'>('all');
-  let showIdle = $state(true);
+  let showIdle = $state(false);
   let focusSessionId = $state<string | null>(null);
 
   // Lazy-load tail messages per visible thread; cached by session_id.
@@ -54,10 +54,17 @@
       })
   );
 
-  const liveCount = $derived(
-    cockpitStore.threads.filter((t) => cockpitStore.tick - t.last_msg_at < ACTIVE_MS).length
+  // Header counts mirror what the grid actually shows: hidden sessions
+  // (via the eye-off toggle) are excluded from both buckets so "N live · M idle"
+  // stays consistent with the visible tile count. Without this, hiding the
+  // only live session left the header reading "1 live" over an empty grid.
+  const headerThreads = $derived(
+    cockpitStore.threads.filter((t) => !hiddenSessionIds().has(t.session_id))
   );
-  const idleCount = $derived(cockpitStore.threads.length - liveCount);
+  const liveCount = $derived(
+    headerThreads.filter((t) => cockpitStore.tick - t.last_msg_at < ACTIVE_MS).length
+  );
+  const idleCount = $derived(headerThreads.length - liveCount);
 
   const focusThread = $derived(
     focusSessionId
@@ -115,7 +122,7 @@
         <option value="codex">codex</option>
       </select>
     </div>
-    <label class="show-idle">
+    <label class="live-toolbar-check">
       <input type="checkbox" bind:checked={showIdle} />
       show idle
     </label>
@@ -190,15 +197,7 @@
     flex-direction: column;
   }
 
-  .show-idle {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    cursor: pointer;
-    padding: 6px 10px;
-    background: var(--bg-card);
-    border: 1px solid var(--border-hair);
-    border-radius: 8px;
-    font-size: 12px;
-  }
+  /* `.live-toolbar-check`, `.field`, `.lbl`, `.grow` are defined globally
+     in $lib/styles/dashboard.css so they reach the markup despite Svelte's
+     scoped styles. Keep page-only styles in this block. */
 </style>

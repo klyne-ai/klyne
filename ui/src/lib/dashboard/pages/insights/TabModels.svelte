@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { kfmt, costFmt } from '$lib/format.js';
+  import { kfmt } from '$lib/format.js';
   import type { UsageStatsResponse, ModelRow } from '$lib/types.js';
 
   interface Props {
@@ -35,7 +35,6 @@
           <th style="text-align: right; padding: 10px 12px; font-weight: 500; color: var(--ad-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;">Input</th>
           <th style="text-align: right; padding: 10px 12px; font-weight: 500; color: var(--ad-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;">Output</th>
           <th style="text-align: right; padding: 10px 12px; font-weight: 500; color: var(--ad-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;">Cache hit</th>
-          <th style="text-align: right; padding: 10px 12px; font-weight: 500; color: var(--ad-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;">Cost</th>
           <th style="text-align: right; padding: 10px 12px; font-weight: 500; color: var(--ad-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;">%</th>
         </tr>
       </thead>
@@ -52,7 +51,6 @@
             <td class="mono ad-tnum" style="padding: 10px 12px; text-align: right;">{kfmt(m.input)}</td>
             <td class="mono ad-tnum" style="padding: 10px 12px; text-align: right;">{kfmt(m.output)}</td>
             <td class="mono ad-tnum" style="padding: 10px 12px; text-align: right; color: {cacheHitPct(m) >= 80 ? 'var(--ad-live)' : cacheHitPct(m) >= 50 ? 'var(--ad-warn)' : 'var(--ad-faint)'};">{fmtPct(cacheHitPct(m))}</td>
-            <td class="mono ad-tnum" style="padding: 10px 12px; text-align: right; color: {m.cost_usd > 0 ? 'var(--ad-fg)' : 'var(--ad-faint)'};">{costFmt(m.cost_usd, m.cost_usd > 0)}</td>
             <td class="mono ad-tnum" style="padding: 10px 12px; text-align: right; color: var(--ad-faint);">{fmtPct(m.share_pct)}</td>
           </tr>
         {/each}
