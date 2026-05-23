@@ -48,3 +48,18 @@ export function liveCount(): number {
     (t) => cockpitStore.tick - t.last_msg_at < LIVE_THRESHOLD_MS
   ).length;
 }
+
+/**
+ * Stable derived shape consumed by the new Shell (Task 1+).
+ * Downstream tasks rely on these exact names — do not rename.
+ */
+export const cockpitDerived = {
+  /** Number of currently-live sessions (≤1 minute since last message). */
+  get liveCount(): number { return liveCount(); },
+  /**
+   * Human-readable daemon status string shown in the Topbar.
+   * Always returns a non-null string; actual daemon health tracking
+   * lands in Task 2 once the SSE status event is wired.
+   */
+  get daemonStatus(): string { return 'running · 127.0.0.1:7878'; },
+};

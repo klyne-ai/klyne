@@ -1,9 +1,6 @@
 <script lang="ts">
-  import { page } from '$app/stores';
-  import ProjectDetail from '$lib/ui/ProjectDetail.svelte';
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const projectName = $derived(decodeURIComponent(($page.params as any)['name'] ?? ''));
+  import Projects from '$lib/dashboard/pages/Projects.svelte';
 </script>
 
-<ProjectDetail {projectName} basePath="" backHref="/projects" />
+<svelte:head><title>klyne — Projects</title></svelte:head>
+<Projects />
