@@ -81,11 +81,11 @@
     };
   });
 
-  const CHIPS: { key: StateFilter; label: string; tone: 'warn' | 'ok' | null }[] = [
+  const CHIPS: { key: StateFilter; label: string; tone: 'warn' | 'ok' | 'muted' | null }[] = [
     { key: 'all',   label: 'all',   tone: null },
-    { key: 'stale', label: 'stale', tone: 'warn' },
-    { key: 'cold',  label: 'cold',  tone: null },
-    { key: 'fresh', label: 'fresh', tone: 'ok' },
+    { key: 'stale', label: 'stale', tone: 'warn'  },
+    { key: 'cold',  label: 'cold',  tone: 'muted' },
+    { key: 'fresh', label: 'fresh', tone: 'ok'    },
   ];
 </script>
 
@@ -108,17 +108,16 @@
   </header>
 
   <!-- Filter chips -->
-  <div class="chip-row">
+  <div class="chip-row" role="group" aria-label="Filter by reflection state">
     {#each CHIPS as chip}
       <button
         class="k-btn"
         class:k-btn--active={activeFilter === chip.key}
         onclick={() => setFilter(chip.key)}
+        aria-pressed={activeFilter === chip.key}
       >
-        {#if chip.tone === 'warn'}
-          <span class="dot dot-warn"></span>
-        {:else if chip.tone === 'ok'}
-          <span class="dot dot-ok"></span>
+        {#if chip.tone}
+          <span class="dot" class:dot-warn={chip.tone === 'warn'} class:dot-ok={chip.tone === 'ok'} class:dot-muted={chip.tone === 'muted'}></span>
         {/if}
         {chip.label}
         <span class="dim chip-count">{counts[chip.key]}</span>
@@ -208,8 +207,9 @@
     margin-right: 4px;
     vertical-align: middle;
   }
-  .dot-warn { background: var(--warn); }
-  .dot-ok   { background: var(--ok); }
+  .dot-warn  { background: var(--warn); }
+  .dot-ok    { background: var(--ok); }
+  .dot-muted { background: var(--fg-muted); }
 
   /* ── Card list ── */
   .card-list {
