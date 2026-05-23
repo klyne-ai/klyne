@@ -21,6 +21,12 @@
         cancel();
         void goto('/');
       }
+      if (to.url.pathname.startsWith('/insights/projects/')) {
+        const name = to.url.pathname.replace('/insights/projects/', '');
+        cancel();
+        void goto(`/projects/${name}`);
+        return;
+      }
     });
   }
 

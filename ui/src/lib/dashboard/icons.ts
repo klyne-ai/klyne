@@ -17,6 +17,8 @@ export const ICON_PATHS = {
   inbox:        '<path d="M2.5 9.5l1.5-6h8l1.5 6v3a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1Z"/><path d="M2.5 9.5h3l1 2h3l1-2h3"/>',
   flame:        '<path d="M8 13.5c2 0 3.5-1.5 3.5-3.5 0-2-2-2.5-2-5.5 0 1.5-2 2-2 4 0-1.5-1.5-2-1.5-1 0 1-1.5 1.5-1.5 3 0 2 1.5 3 3.5 3Z"/>',
   branch:       '<circle cx="4" cy="4" r="1.4"/><circle cx="4" cy="12" r="1.4"/><circle cx="12" cy="6" r="1.4"/><path d="M4 5.5v5M4.7 11.6c4-1 7.3-2.4 7.3-5"/>',
+  eye:          '<ellipse cx="8" cy="8" rx="5.5" ry="3.5"/><circle cx="8" cy="8" r="1.6"/>',
+  'eye-off':    '<path d="M2 2l12 12"/><path d="M6.7 6.8A3.5 3.5 0 0 0 8 11.5c1.9 0 3.5-1.5 3.5-3.5 0-.5-.1-.9-.3-1.3"/><path d="M3.8 4.2C2.6 5.1 1.8 6.5 1.5 8c.9 4 6 5 9 2.8"/><path d="M12.2 11.8C13.4 10.9 14.2 9.5 14.5 8c-.9-4-6-5-9-2.8"/>',
 } as const;
 
 export type IconName = keyof typeof ICON_PATHS;
