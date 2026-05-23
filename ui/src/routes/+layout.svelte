@@ -27,6 +27,11 @@
         void goto(`/projects/${name}`);
         return;
       }
+      if (to.url.pathname === '/stats') {
+        cancel();
+        void goto('/insights?tab=daily');
+        return;
+      }
     });
   }
 
