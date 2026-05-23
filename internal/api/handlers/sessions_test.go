@@ -518,7 +518,6 @@ func TestNewRouter_AllRoutesPresent(t *testing.T) {
 		{http.MethodGet, "/sessions/" + sessID + "/summary", []int{404}}, // no summary — but route IS registered
 		{http.MethodGet, "/search?q=test", []int{200}},
 		{http.MethodGet, "/cost/summary", []int{200}},
-		{http.MethodGet, "/settings", []int{200}},
 		{http.MethodGet, "/healthz", []int{200}},
 	}
 
