@@ -62,7 +62,18 @@
   function detectRangeKey(s: number, u: number): typeof rangeKey {
     const day = 86_400_000;
     const span = Math.round((u - s + 1) / day);
-    if (span <= 1)  return 'yesterday';
+    if (span <= 1) {
+      // <=1 day window. Disambiguate today vs yesterday by snapping
+      // `since` to whichever local-midnight is closer. Without this,
+      // a fresh "today" load (since = today's midnight, until = now)
+      // was misclassified as "yesterday" because span ≤ 1 always
+      // returned that branch — the chip then showed yesterday selected
+      // while the body rendered today's data.
+      const now = new Date();
+      const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).getTime();
+      const yesterdayMidnight = todayMidnight - day;
+      return Math.abs(s - todayMidnight) <= Math.abs(s - yesterdayMidnight) ? 'today' : 'yesterday';
+    }
     if (span <= 7)  return '7d';
     if (span <= 14) return '14d';
     return '30d';
