@@ -54,10 +54,17 @@
       })
   );
 
-  const liveCount = $derived(
-    cockpitStore.threads.filter((t) => cockpitStore.tick - t.last_msg_at < ACTIVE_MS).length
+  // Header counts mirror what the grid actually shows: hidden sessions
+  // (via the eye-off toggle) are excluded from both buckets so "N live · M idle"
+  // stays consistent with the visible tile count. Without this, hiding the
+  // only live session left the header reading "1 live" over an empty grid.
+  const headerThreads = $derived(
+    cockpitStore.threads.filter((t) => !hiddenSessionIds().has(t.session_id))
   );
-  const idleCount = $derived(cockpitStore.threads.length - liveCount);
+  const liveCount = $derived(
+    headerThreads.filter((t) => cockpitStore.tick - t.last_msg_at < ACTIVE_MS).length
+  );
+  const idleCount = $derived(headerThreads.length - liveCount);
 
   const focusThread = $derived(
     focusSessionId

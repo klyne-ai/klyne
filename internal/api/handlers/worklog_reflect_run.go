@@ -3,9 +3,11 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -136,10 +138,35 @@ func (h *WorklogReflectRunHandler) Run(w http.ResponseWriter, r *http.Request) {
 // cannot be reinterpreted as shell syntax. exec.Cmd.Dir sets the working
 // directory for the child process, replacing the previous `cd "$path" &&
 // claude …` pattern.
+//
+// `claude -p` (print/headless mode) does NOT auto-load user-level
+// MCP servers from ~/.claude.json — so even though the user has the
+// klyne MCP entry there for interactive sessions, the spawned child
+// would otherwise be unable to see klyne's propose_reflection /
+// record_reflection tools. We pass --mcp-config inline pointing at
+// THIS klyne binary (os.Executable) so the child always uses the same
+// build the daemon is running.
 func spawnClaudeReflect(ctx context.Context, projectPath string) ([]byte, error) {
+	klyneBin, err := os.Executable()
+	if err != nil {
+		return nil, fmt.Errorf("reflect-run: locate klyne binary: %w", err)
+	}
+	mcpConfig, err := json.Marshal(map[string]any{
+		"mcpServers": map[string]any{
+			"klyne": map[string]any{
+				"type":    "stdio",
+				"command": klyneBin,
+				"args":    []string{"mcp"},
+			},
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("reflect-run: build mcp-config: %w", err)
+	}
 	cmd := exec.CommandContext(ctx, "claude",
 		"-p",
 		"--permission-mode", "bypassPermissions",
+		"--mcp-config", string(mcpConfig),
 		"/klyne:reflect",
 	)
 	cmd.Dir = projectPath
