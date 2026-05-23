@@ -2,9 +2,9 @@ version: "2"
 
 run:
   timeout: 5m
-  # Match local Go toolchain version.
-  # CI runners use GOTOOLCHAIN=auto and download 1.23.
-  go: "1.21"
+  # Match go.mod's `go` directive. CI runners use GOTOOLCHAIN=auto to
+  # download the required toolchain on demand.
+  go: "1.25"
 
 linters:
   enable:
