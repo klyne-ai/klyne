@@ -29,7 +29,8 @@ export function navIdForPath(pathname: string): NavId {
 }
 
 export function crumbsForNavId(id: NavId): readonly string[] {
-  const section = NAV.find((n) => n.id === id)?.section ?? 'workspace';
-  const label = NAV.find((n) => n.id === id)?.label ?? 'Live';
+  const item = NAV.find((n) => n.id === id);
+  const section = item?.section ?? 'workspace';
+  const label = item?.label ?? 'Live';
   return [section === 'workspace' ? 'Workspace' : 'Capture', label];
 }

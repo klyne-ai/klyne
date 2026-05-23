@@ -56,6 +56,7 @@
           class="sidebar-nav-item"
           class:active={current === item.id}
           title={collapsed ? item.label : undefined}
+          aria-current={current === item.id ? 'page' : undefined}
           onclick={(e) => { e.preventDefault(); void goto(item.href); }}
         >
           <span class="icon"><Icon name={item.icon} /></span>

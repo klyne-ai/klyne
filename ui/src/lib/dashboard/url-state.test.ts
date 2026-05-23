@@ -24,4 +24,18 @@ describe('dashboard url-state', () => {
     const u = new URL('http://x/insights?session=abc&palette=1&tab=daily');
     expect(parseDashboardSearch(u)).toEqual({ session: 'abc', palette: true, tab: 'daily' });
   });
+
+  it('sessionUrl with id=null removes the param (drawer close)', () => {
+    expect(sessionUrl('/insights?session=abc&tab=daily', null)).toBe('/insights?tab=daily');
+    expect(sessionUrl('/insights?session=abc', null)).toBe('/insights');
+  });
+
+  it('parseDashboardSearch on a bare URL returns all-null/false', () => {
+    expect(parseDashboardSearch(new URL('http://x/'))).toEqual({ session: null, palette: false, tab: null });
+  });
+
+  it('tabUrl with tab=null deletes the param', () => {
+    expect(tabUrl('/insights?tab=daily', null)).toBe('/insights');
+    expect(tabUrl('/insights', null)).toBe('/insights');
+  });
 });

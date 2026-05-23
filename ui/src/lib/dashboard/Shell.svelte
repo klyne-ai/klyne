@@ -18,9 +18,9 @@
   const crumbs = $derived(crumbsForNavId(navId));
   const search = $derived(parseDashboardSearch($page.url));
 
-  // Auto-collapse on Live unless the user has manually toggled this session.
+  // Re-sync `collapsed` to the live-vs-other default on every nav change,
+  // unless the user has manually toggled this session.
   let userToggled = $state(false);
-  // Use $derived initially so Svelte can track navId reactively on mount.
   let collapsed = $state(false);
   $effect(() => { if (!userToggled) collapsed = navId === 'live'; });
 
@@ -82,6 +82,7 @@
     flex: 1;
     overflow: auto;
     background: var(--bg-inset);
+    /* 60px bottom padding keeps content above the topbar shadow on long pages */
     padding: 22px 26px 60px;
     min-width: 0;
   }

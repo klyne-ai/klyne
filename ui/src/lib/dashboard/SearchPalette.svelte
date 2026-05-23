@@ -6,7 +6,7 @@
 <svelte:window onkeydown={(e) => e.key === 'Escape' && onClose()} />
 
 <div class="palette-scrim" onclick={onClose} role="presentation">
-  <div class="palette" onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+  <div class="palette" onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Search">
     <input autofocus placeholder="Search messages, sessions, projects…" />
     <div class="group">
       <div class="group-label">Type to search</div>
