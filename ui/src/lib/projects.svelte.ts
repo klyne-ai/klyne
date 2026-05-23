@@ -140,6 +140,14 @@ export const projectsStore = $state<{
   error: null,
 });
 
+/**
+ * Stable derived shape for the new Shell (Task 1+).
+ * `projects` mirrors `projectsStore.items` — downstream tasks use this name.
+ */
+export const projectsDerived = {
+  get projects(): ProjectAggregate[] { return projectsStore.items; },
+};
+
 export async function refreshProjects(): Promise<void> {
   // Only show the loading skeleton on the very first fetch — subsequent
   // refreshes (driven by SSE) should keep stale data visible to avoid the

@@ -4,10 +4,14 @@
   import type { Snippet } from 'svelte';
   import TopNav from '$lib/ui/TopNav.svelte';
   import SearchOverlay from '$lib/ui/SearchOverlay.svelte';
+  import Shell from '$lib/dashboard/Shell.svelte';
+  import { env } from '$env/dynamic/public';
   import { subscribe } from '$lib/sse.js';
   import { refreshProjects } from '$lib/projects.svelte.js';
   import { cockpitStore, refreshCockpit } from '$lib/cockpit.svelte.js';
   import { onMsgNew } from '$lib/stores.svelte.js';
+
+  const useNewShell = env.PUBLIC_DASHBOARD_V2 === '1';
 
   interface Props {
     children: Snippet;
@@ -61,10 +65,13 @@
   <title>klyne</title>
 </svelte:head>
 
-<div style="height: 100vh; display: flex; flex-direction: column;">
-  <TopNav onsearch={() => (searchOpen = true)} />
-  <div style="flex: 1; min-height: 0; overflow: auto;">
-    {@render children()}
+{#if useNewShell}
+  <Shell>{@render children()}</Shell>
+{:else}
+  <!-- existing TopNav + children — UNCHANGED -->
+  <div style="height: 100vh; display: flex; flex-direction: column;">
+    <TopNav onsearch={() => (searchOpen = true)} />
+    <div style="flex: 1; min-height: 0; overflow: auto;">{@render children()}</div>
   </div>
-</div>
-<SearchOverlay open={searchOpen} onClose={() => (searchOpen = false)} />
+  <SearchOverlay open={searchOpen} onClose={() => (searchOpen = false)} />
+{/if}

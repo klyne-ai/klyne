@@ -1,0 +1,79 @@
+/* Shared design tokens — match existing klyne page vocabulary */
+:root {
+  /* surfaces — dark warm-neutral */
+  --bg:         oklch(0.155 0.005 80);
+  --bg-card:    oklch(0.195 0.005 80);
+  --bg-card-2: oklch(0.225 0.005 80);
+  --bg-inset:   oklch(0.13  0.005 80);
+
+  /* text */
+  --fg:         oklch(0.975 0.005 80);
+  --fg-soft:    oklch(0.82  0.005 80);
+  --fg-muted:   oklch(0.62  0.005 80);
+  --fg-dim:     oklch(0.46  0.005 80);
+
+  /* lines */
+  --border:       oklch(0.30 0.005 80);
+  --border-soft:  oklch(0.24 0.005 80);
+  --border-hair:  oklch(0.21 0.005 80);
+
+  /* status — share chroma ~0.13 */
+  --ok:    oklch(0.74 0.13 150);
+  --warn:  oklch(0.80 0.13 75);
+  --alert: oklch(0.70 0.16 27);
+  --info:  oklch(0.75 0.13 230);
+  --accent: oklch(0.78 0.13 80);     /* warm gold for kickers */
+
+  /* type */
+  --font-sans: "Geist", "Inter", system-ui, -apple-system, sans-serif;
+  --font-mono: "Geist Mono", "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+/* Reset only inside artboards */
+.k-artboard, .k-artboard *, .k-artboard *::before, .k-artboard *::after { box-sizing: border-box; }
+.k-artboard { background: var(--bg); color: var(--fg); font-family: var(--font-sans); font-size: 13px; line-height: 1.45; letter-spacing: 0; }
+
+.k-mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.k-tnum { font-variant-numeric: tabular-nums; }
+.k-kicker { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--fg-muted); }
+.k-kicker--accent { color: var(--accent); }
+
+.k-card { background: var(--bg-card); border: 1px solid var(--border-soft); border-radius: 10px; }
+.k-card--flat { background: transparent; border: 1px solid var(--border-soft); border-radius: 10px; }
+.k-card--inset { background: var(--bg-inset); border: 1px solid var(--border-hair); border-radius: 10px; }
+
+.k-pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border-radius: 999px; font-family: var(--font-mono); font-size: 11px; line-height: 1.4; border: 1px solid var(--border); color: var(--fg-soft); background: var(--bg-card-2); white-space: nowrap; }
+.k-pill--ok    { color: var(--ok);    border-color: color-mix(in oklch, var(--ok)    35%, transparent); background: color-mix(in oklch, var(--ok)    10%, var(--bg-card-2)); }
+.k-pill--warn  { color: var(--warn);  border-color: color-mix(in oklch, var(--warn)  35%, transparent); background: color-mix(in oklch, var(--warn)  10%, var(--bg-card-2)); }
+.k-pill--alert { color: var(--alert); border-color: color-mix(in oklch, var(--alert) 35%, transparent); background: color-mix(in oklch, var(--alert) 10%, var(--bg-card-2)); }
+.k-pill--info  { color: var(--info);  border-color: color-mix(in oklch, var(--info)  35%, transparent); background: color-mix(in oklch, var(--info)  10%, var(--bg-card-2)); }
+
+.k-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--fg-muted); flex-shrink: 0; }
+.k-dot--ok    { background: var(--ok); }
+.k-dot--warn  { background: var(--warn); }
+.k-dot--alert { background: var(--alert); }
+
+.k-hr { border: 0; border-top: 1px solid var(--border-hair); margin: 0; }
+.k-hr-vert { width: 1px; align-self: stretch; background: var(--border-hair); }
+
+.k-btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-card-2); color: var(--fg-soft); font-family: var(--font-mono); font-size: 11px; cursor: pointer; }
+.k-btn:hover { background: var(--bg-card); color: var(--fg); }
+.k-btn--ghost { background: transparent; }
+.k-btn--active { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+
+/* Faint repeating-stripe placeholder for missing imagery */
+.k-placeholder {
+  background-image: repeating-linear-gradient(135deg, var(--border-soft) 0 1px, transparent 1px 8px);
+  border: 1px dashed var(--border);
+  color: var(--fg-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  display: flex; align-items: center; justify-content: center;
+}
+
+/* number readouts */
+.k-readout { font-family: var(--font-mono); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; line-height: 1; }
+
+/* simple sparkbar */
+.k-bar { position: relative; height: 6px; border-radius: 3px; background: var(--bg-inset); overflow: hidden; }
+.k-bar-fill { position: absolute; inset: 0; transform-origin: left center; }
