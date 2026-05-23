@@ -6,6 +6,7 @@
   import { relTime } from '$lib/format.js';
   import { sessionUrl } from './url-state.js';
   import type { SearchHit } from '$lib/types.js';
+  import DOMPurify from 'dompurify';
 
   interface Props { onClose: () => void; }
   const { onClose }: Props = $props();
@@ -20,6 +21,7 @@
   let selectedIndex = $state(-1);
   let inputEl = $state<HTMLInputElement | null>(null);
   let listEl = $state<HTMLElement | null>(null);
+  let paletteEl = $state<HTMLElement | null>(null);
 
   // Filter state
   let filterCli = $state<'all' | 'claude' | 'codex'>('all');
@@ -50,6 +52,7 @@
     ...projectsStore.items.slice(0, 8).map((p) => p.name),
   ]);
 
+  // TODO(backend): collapse into msg/session/runbook groups once SearchHit carries a 'kind' field.
   const filteredHits = $derived(
     hits.filter((h) => {
       if (filterCli !== 'all' && h.cli !== filterCli) return false;
@@ -156,21 +159,39 @@
         return;
       }
     }
+
+    if (e.key === 'Tab') {
+      if (!paletteEl) return;
+      const focusables = paletteEl.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      );
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+      if (e.shiftKey && active === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && active === last) { e.preventDefault(); first.focus(); }
+    }
   }
 
   // ---------------------------------------------------------------------------
   // Snippet sanitization — only allow <mark> from FTS5 highlighting
   // ---------------------------------------------------------------------------
 
-  function renderSnippet(raw: string): string {
-    // Strip all tags except <mark>; replace mark with styled span
-    const stripped = raw
-      .replace(/<(?!\/?mark\b)[^>]*>/gi, '')
-      .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
-    return stripped.replace(
-      /<mark>/g,
-      '<mark style="background:var(--ad-claude-bg,#f0eeff);color:var(--ad-claude,#6d5aef);padding:0 2px;border-radius:2px;">'
-    );
+  function escapeRegExp(s: string): string {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  function renderSnippet(raw: string, query: string): string {
+    if (!raw) return '';
+    // Highlight every case-insensitive match of any query word.
+    const words = query.trim().split(/\s+/).filter((w) => w.length >= 2);
+    let highlighted = raw;
+    for (const w of words) {
+      const re = new RegExp(`(${escapeRegExp(w)})`, 'gi');
+      highlighted = highlighted.replace(re, '<mark>$1</mark>');
+    }
+    return DOMPurify.sanitize(highlighted, { ALLOWED_TAGS: ['mark'], ALLOWED_ATTR: [] });
   }
 
   function projectName(path: string): string {
@@ -186,6 +207,7 @@
 
 <div class="palette-scrim" onclick={onClose} role="presentation">
   <div
+    bind:this={paletteEl}
     class="palette"
     onclick={(e) => e.stopPropagation()}
     onkeydown={(e) => e.stopPropagation()}
@@ -335,7 +357,7 @@
               </span>
               <div class="result-body">
                 <div class="result-snippet">
-                  {@html renderSnippet(hit.snippet)}
+                  {@html renderSnippet(hit.snippet, q)}
                 </div>
                 <div class="result-meta">
                   <span class="meta-project">{projectName(hit.project_path)}</span>
