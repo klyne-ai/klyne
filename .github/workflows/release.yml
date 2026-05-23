@@ -43,7 +43,7 @@ jobs:
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           # Match the Go toolchain declared in go.mod (currently go 1.25).
           go-version-file: go.mod
