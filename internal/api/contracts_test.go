@@ -51,6 +51,7 @@ func TestAllRoutesContainsExpected(t *testing.T) {
 		RouteMemoryItem,
 		RouteWorklog,
 		RouteWorklogProject,
+		RouteWorklogReflectRun,
 		RouteInsightsProjects,
 		RouteProductivity,
 	}

@@ -117,6 +117,13 @@ func (m *Mounter) Mount(r chi.Router) {
 	r.Get(api.RouteWorklog, hWorklog.List)
 	r.Get(api.RouteWorklogProject, hWorklog.Project)
 
+	// POST /worklog/reflect/run — browser-initiated reflection. Spawns
+	// `claude -p '/klyne:reflect'` for a path already in the worklog
+	// rollup. Same-origin guarded; see worklog_reflect_run.go for the
+	// full threat model.
+	hReflectRun := NewWorklogReflectRunHandler(m.deps.DB)
+	r.Post(api.RouteWorklogReflectRun, hReflectRun.Run)
+
 	// /insights/projects — per-project rollup powering the Insights
 	// dashboard. Reads from sessions + messages + compact_events; no
 	// dollar figures (subscription users don't pay per-token).

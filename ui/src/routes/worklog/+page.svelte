@@ -15,7 +15,7 @@
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { fetchWorklog } from '$lib/api.js';
+  import { fetchWorklog, runReflect, type ReflectRunResponse } from '$lib/api.js';
   import type { Reflection, WorklogProjectRollup, WorklogResponse } from '$lib/types.js';
   import { relTime } from '$lib/format.js';
 
@@ -23,6 +23,21 @@
   let loading = $state(true);
   let error = $state<string | null>(null);
   let copied = $state<string | null>(null); // project_path of last-copied cmd
+  // Tracks the project currently running /klyne:reflect via the daemon
+  // subprocess endpoint. Used to disable the Run button + show a spinner.
+  let running = $state<string | null>(null);
+  // Per-project run results so the user can see the output inline without
+  // navigating away. Keyed by project_path; cleared on the next refresh.
+  let runResults = $state<Record<string, ReflectRunResponse>>({});
+  // Active AbortController for the in-flight run, if any. Stop button
+  // calls controller.abort() which terminates the fetch, which trips the
+  // server's request context, which causes exec.CommandContext to SIGKILL
+  // the spawned `claude` subprocess.
+  let abortController: AbortController | null = null;
+  // Elapsed seconds for the in-flight run, ticked once per second by a
+  // setInterval started when the run kicks off.
+  let elapsed = $state(0);
+  let elapsedTimer: ReturnType<typeof setInterval> | null = null;
 
   async function load(): Promise<void> {
     loading = true;
@@ -55,6 +70,52 @@
     } catch {
       // Clipboard may be denied — leave silently; the cmd is visible on screen.
     }
+  }
+
+  // runFromBrowser kicks off /klyne:reflect via the daemon's subprocess
+  // endpoint. Unlike copyCmd this actually spawns `claude -p` server-side.
+  // Output is rendered inline; on success we refresh the worklog so the
+  // newly-written reflection row appears in the card body.
+  //
+  // Single-flight: only one reflection runs at a time so the user always
+  // knows which subprocess the Stop button targets.
+  async function runFromBrowser(projectPath: string): Promise<void> {
+    if (running) return;
+    running = projectPath;
+    elapsed = 0;
+    elapsedTimer = setInterval(() => { elapsed += 1; }, 1000);
+    abortController = new AbortController();
+    try {
+      const r = await runReflect(projectPath, abortController.signal);
+      runResults = { ...runResults, [projectPath]: r };
+      if (r.status === 'ok') {
+        await load();
+      }
+    } catch (e: unknown) {
+      // AbortError is the user clicking Stop — render it as cancelled
+      // rather than a failure. DOMException with name='AbortError' is the
+      // standard fetch-cancel signal across browsers.
+      const aborted = e instanceof DOMException && e.name === 'AbortError';
+      runResults = {
+        ...runResults,
+        [projectPath]: {
+          project_path: projectPath,
+          status: aborted ? 'timeout' : 'error',
+          output: '',
+          duration_ms: elapsed * 1000,
+          error: aborted ? 'stopped by user — subprocess killed' : (e instanceof Error ? e.message : 'request failed'),
+        },
+      };
+    } finally {
+      running = null;
+      abortController = null;
+      if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
+    }
+  }
+
+  function stopRun(): void {
+    if (!abortController) return;
+    abortController.abort();
   }
 
   // Tier classification for badge text + color.
@@ -126,10 +187,58 @@
                 </p>
                 <div class="cmd-row">
                   <code class="cmd">{reflectCmd(p.project_path)}</code>
-                  <button class="copy" onclick={() => copyCmd(p.project_path)}>
+                  <button class="copy" onclick={() => copyCmd(p.project_path)} disabled={running === p.project_path}>
                     {copied === p.project_path ? '✓ copied' : 'copy'}
                   </button>
+                  {#if running === p.project_path}
+                    <button
+                      class="stop"
+                      onclick={stopRun}
+                      title="Abort the in-flight `claude` subprocess. The server SIGKILLs the child immediately."
+                    >
+                      ✖ stop
+                    </button>
+                  {:else}
+                    <button
+                      class="run"
+                      onclick={() => runFromBrowser(p.project_path)}
+                      disabled={running !== null}
+                      title="Spawn `claude -p '/klyne:reflect'` in this project. Uses your existing Claude subscription via the local CLI."
+                    >
+                      ▶ run
+                    </button>
+                  {/if}
                 </div>
+
+                {#if running === p.project_path}
+                  <div class="run-live">
+                    <p class="live-head">
+                      <span class="spinner" aria-hidden="true">⠋</span>
+                      <span>Running on the daemon · <span class="mono">{elapsed}s elapsed</span></span>
+                    </p>
+                    <p class="muted small live-cmd">
+                      <span class="kw">$</span> <span class="mono">{reflectCmd(p.project_path)}</span>
+                    </p>
+                    <p class="muted small">
+                      Hit <strong>✖ stop</strong> to kill the subprocess (SIGKILL via context cancel).
+                      A 5-minute server-side timeout also applies.
+                    </p>
+                  </div>
+                {/if}
+
+                {#if runResults[p.project_path] && running !== p.project_path}
+                  {@const rr = runResults[p.project_path]}
+                  <div class="run-result" class:ok={rr.status === 'ok'} class:err={rr.status !== 'ok'}>
+                    <p class="muted small">
+                      {rr.status === 'ok' ? '✓ reflected' : rr.status === 'timeout' ? '⏱ stopped' : '✗ failed'}
+                      · {(rr.duration_ms / 1000).toFixed(1)}s
+                      {#if rr.error}· <span class="err-msg">{rr.error}</span>{/if}
+                    </p>
+                    {#if rr.output}
+                      <pre class="output">{rr.output}</pre>
+                    {/if}
+                  </div>
+                {/if}
               </div>
             {/if}
           </article>
@@ -216,6 +325,72 @@
     font-size: 0.85em; white-space: nowrap;
   }
   .copy:hover { background: var(--border, #2a2a2a); }
+
+  .run {
+    padding: 0.4rem 0.85rem;
+    background: #2a3f5b;
+    border: 1px solid #3d5a82;
+    color: #cfe2ff; cursor: pointer; border-radius: 4px;
+    font-size: 0.85em; white-space: nowrap;
+    font-weight: 500;
+  }
+  .run:hover:not(:disabled) { background: #344a6b; }
+  .run:disabled { opacity: 0.55; cursor: progress; }
+
+  .stop {
+    padding: 0.4rem 0.85rem;
+    background: #5b2a2a; border: 1px solid #823d3d;
+    color: #ffd1cf; cursor: pointer; border-radius: 4px;
+    font-size: 0.85em; white-space: nowrap; font-weight: 500;
+  }
+  .stop:hover { background: #6b3434; }
+
+  .run-live {
+    margin-top: 0.6rem; padding: 0.6rem 0.85rem;
+    background: var(--surface-2, #0d0d0d);
+    border-left: 3px solid #d97a4a;
+    border-radius: 4px;
+  }
+  .run-live .live-head {
+    margin: 0 0 0.35rem; display: flex; align-items: center; gap: 0.4rem;
+    font-size: 0.9em; color: #e6a878;
+  }
+  .run-live .live-cmd {
+    margin: 0.25rem 0; padding: 0.4rem 0.65rem;
+    background: var(--surface, #1a1a1a);
+    border-radius: 3px; font-size: 0.8em;
+    word-break: break-all;
+  }
+  .run-live p { margin: 0.25rem 0; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .kw { color: #7a9d7a; font-weight: 600; }
+
+  .spinner {
+    display: inline-block; font-family: ui-monospace, monospace;
+    animation: spin 1s linear infinite;
+  }
+  @keyframes spin {
+    0%   { content: '⠋'; transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+
+  .run-result {
+    margin-top: 0.6rem; padding: 0.55rem 0.75rem;
+    border-radius: 4px; border-left: 3px solid var(--border, #2a2a2a);
+    background: var(--surface-2, #0d0d0d);
+  }
+  .run-result.ok  { border-left-color: #4a9d5b; }
+  .run-result.err { border-left-color: #c5524a; }
+  .run-result p { margin: 0 0 0.35rem; }
+  .err-msg { color: #e07a72; }
+  .output {
+    margin: 0.25rem 0 0; padding: 0.5rem 0.75rem;
+    background: var(--surface, #1a1a1a);
+    border-radius: 3px; font-size: 0.8em;
+    white-space: pre-wrap; word-break: break-word;
+    max-height: 320px; overflow-y: auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
 
   .drill-link {
     color: inherit;

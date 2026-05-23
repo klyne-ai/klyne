@@ -377,6 +377,52 @@ export async function fetchWorklogProject(path: string): Promise<WorklogProjectR
   return get<WorklogProjectResponse>('/worklog/items/project', { path });
 }
 
+/**
+ * Response shape from POST /worklog/reflect/run.
+ *
+ * status="ok" — subprocess exited 0; output holds the AI-written
+ *   reflection (the same blob the user would have seen in their terminal).
+ * status="error" — subprocess returned non-zero; error holds the exec
+ *   error string and output holds whatever the process printed to stdout/
+ *   stderr before failing.
+ * status="timeout" — the 5-minute budget elapsed; output is whatever
+ *   the subprocess produced before being killed.
+ */
+export interface ReflectRunResponse {
+  project_path: string;
+  status: 'ok' | 'error' | 'timeout';
+  output: string;
+  duration_ms: number;
+  error?: string;
+}
+
+/**
+ * POST /worklog/reflect/run — kick off `/klyne:reflect` via the local
+ * `claude` CLI for the given project path. The path MUST already exist
+ * in the worklog rollup; the server rejects unknown paths with 403.
+ *
+ * Pass `signal` to support cancellation from the UI. When aborted, the
+ * fetch is cancelled which terminates the HTTP request which trips the
+ * server-side request context. exec.CommandContext on the server then
+ * SIGKILLs the spawned `claude` process — no orphans.
+ */
+export async function runReflect(
+  projectPath: string,
+  signal?: AbortSignal,
+): Promise<ReflectRunResponse> {
+  const res = await fetch(`${API_BASE}/worklog/reflect/run`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project_path: projectPath }),
+    signal,
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new ApiError(res.status, text, `runReflect failed (${res.status})`);
+  }
+  return (await res.json()) as ReflectRunResponse;
+}
+
 // ---------------------------------------------------------------------------
 // /insights/projects
 // ---------------------------------------------------------------------------

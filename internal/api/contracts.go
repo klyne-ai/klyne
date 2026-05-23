@@ -60,6 +60,12 @@ const (
 	// returns the project's rollup PLUS its full daily-reflection list
 	// newest-first. Powers /worklog/project in the cockpit SPA.
 	RouteWorklogProject      = "/worklog/items/project"
+	// RouteWorklogReflectRun: POST endpoint that shells out to the
+	// local `claude` CLI to run `/klyne:reflect` for a project listed
+	// in the worklog rollup. Gated by same-origin + project-allowlist
+	// + 5m subprocess timeout. This is the ONLY route in the daemon
+	// that intentionally spawns the `claude` binary.
+	RouteWorklogReflectRun   = "/worklog/reflect/run"
 	// Insights: per-project rollup powering the Insights dashboard.
 	// Returns one rich record per project with agent split, cache hit %,
 	// efficiency, /compact pain signal, top sessions, daily sparkline,
@@ -103,6 +109,7 @@ func AllRoutes() []string {
 		RouteMemoryItem,
 		RouteWorklog,
 		RouteWorklogProject,
+		RouteWorklogReflectRun,
 		RouteInsightsProjects,
 		RouteProductivity,
 	}
