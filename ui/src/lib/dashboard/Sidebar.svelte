@@ -39,16 +39,12 @@
 
   <button class="sidebar-search" onclick={onOpenSearch} title="Search messages…">
     <Icon name="search" />
-    {#if !collapsed}
-      <span>Search messages…</span>
-      <span class="key">⌘K</span>
-    {/if}
+    <span class="search-text">Search messages…</span>
+    <span class="key">⌘K</span>
   </button>
 
   {#each ['workspace', 'capture'] as section}
-    {#if !collapsed}
-      <div class="sidebar-section">{section === 'workspace' ? 'Workspace' : 'Capture'}</div>
-    {/if}
+    <div class="sidebar-section">{section === 'workspace' ? 'Workspace' : 'Capture'}</div>
     <nav class="sidebar-nav">
       {#each NAV.filter((n) => n.section === section) as item}
         {@const m = meta(item.id)}
@@ -61,7 +57,7 @@
           onclick={(e) => { e.preventDefault(); void goto(item.href); }}
         >
           <span class="icon"><Icon name={item.icon} /></span>
-          {#if !collapsed}<span class="label">{item.label}</span>{/if}
+          <span class="label">{item.label}</span>
           {#if m.text}
             <span class="meta" class:live={m.kind === 'live'} class:alert={m.kind === 'alert'} aria-hidden="true">{m.text}</span>
             <span class="vh">{item.label} · {m.text}</span>
@@ -73,13 +69,11 @@
 
   <div class="sidebar-foot">
     <div class="avatar">M</div>
-    {#if !collapsed}
-      <div class="who">
-        <div class="name">Local user</div>
-        <div class="sub">127.0.0.1:7878</div>
-      </div>
-      <div class="status" title="daemon running"></div>
-    {/if}
+    <div class="who">
+      <div class="name">Local user</div>
+      <div class="sub">127.0.0.1:7878</div>
+    </div>
+    <div class="status" title="daemon running"></div>
   </div>
 </aside>
 
@@ -99,6 +93,19 @@
   }
   .sidebar.collapsed .sidebar-brand { padding: 18px 14px 14px; justify-content: center; }
   .sidebar.collapsed .sidebar-brand .name { display: none; }
+  /* Hide labels via CSS (display: none) rather than removing them from the DOM
+     with {#if !collapsed}. Conditional render re-flows mid-transition and makes
+     the sidebar appear to jump. CSS-hidden labels keep the width animation
+     smooth and the surrounding nav rows perfectly stable. */
+  .sidebar.collapsed .sidebar-search .search-text,
+  .sidebar.collapsed .sidebar-search .key,
+  .sidebar.collapsed .sidebar-section,
+  .sidebar.collapsed .sidebar-nav-item .label,
+  .sidebar.collapsed .sidebar-nav-item .meta,
+  .sidebar.collapsed .sidebar-foot .who,
+  .sidebar.collapsed .sidebar-foot .status {
+    display: none;
+  }
   .sidebar-toggle {
     position: absolute;
     right: -10px; top: 22px;
