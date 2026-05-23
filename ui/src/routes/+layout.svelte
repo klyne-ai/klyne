@@ -45,6 +45,11 @@
         void goto(`/insights?session=${encodeURIComponent(id)}`);
         return;
       }
+      if (to.url.pathname === '/search') {
+        cancel();
+        void goto('/?palette=1');
+        return;
+      }
     });
   }
 
