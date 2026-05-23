@@ -2,7 +2,9 @@ package productivity
 
 import (
 	"context"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -121,11 +123,38 @@ func TestDiscoverRepos_WorktreesShareOneCanonicalProjectPath(t *testing.T) {
 	}
 }
 
-func TestUserEmails_SeedSetAndGitConfig(t *testing.T) {
+func TestUserEmails_GitConfigOnlyByDefault(t *testing.T) {
+	SetUserEmailAliases(nil)
 	em := UserEmails()
-	for _, want := range []string{"mohitpatel9753@gmail.com", "coders@clinikk.com"} {
-		if !em[want] {
-			t.Errorf("seed email %q missing from UserEmails(); got %v", want, em)
+
+	// Compute the legitimate `git config user.email` (if any) so we can
+	// distinguish a leaked seed from the developer's own identity.
+	var localGit string
+	if out, err := exec.Command("git", "config", "user.email").Output(); err == nil {
+		localGit = strings.ToLower(strings.TrimSpace(string(out)))
+	}
+
+	// The set must be empty OR contain only the local git identity.
+	// Anything else means a hardcoded seed leaked back in.
+	for got := range em {
+		if got != localGit {
+			t.Errorf("UserEmails() returned %q, which is not the local git user.email %q — suggests a hardcoded seed leaked back into the binary", got, localGit)
 		}
+	}
+	if localGit != "" && !em[localGit] {
+		t.Errorf("git user.email %q missing from UserEmails(); got %v", localGit, em)
+	}
+}
+
+func TestUserEmails_AliasesAreAdditive(t *testing.T) {
+	SetUserEmailAliases([]string{"work@example.com", "  PERSONAL@example.com  "})
+	t.Cleanup(func() { SetUserEmailAliases(nil) })
+
+	em := UserEmails()
+	if !em["work@example.com"] {
+		t.Errorf("alias %q missing; got %v", "work@example.com", em)
+	}
+	if !em["personal@example.com"] {
+		t.Errorf("alias %q (after trim+lowercase) missing; got %v", "personal@example.com", em)
 	}
 }
