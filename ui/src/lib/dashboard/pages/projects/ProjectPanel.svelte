@@ -47,14 +47,16 @@
     return 'ad-dot ad-dot--idle';
   }
 
-  let cliCopied = $state(false);
+  let cliCopied = $state<'idle' | 'copied' | 'error'>('idle');
 
   function openInCli(): void {
     // No daemon endpoint yet — copy the resume command to clipboard.
-    void navigator.clipboard.writeText(`cd "${project.project_path}" && claude`).then(() => {
-      cliCopied = true;
-      setTimeout(() => { cliCopied = false; }, 2000);
-    });
+    void navigator.clipboard.writeText(`cd "${project.project_path}" && claude`)
+      .then(() => { cliCopied = 'copied'; })
+      .catch(() => { cliCopied = 'error'; })
+      .finally(() => {
+        setTimeout(() => { cliCopied = 'idle'; }, 2000);
+      });
   }
 </script>
 
@@ -95,7 +97,7 @@
         "
       >
         <Icon name="open" size={13} />
-        {cliCopied ? '✓ copied' : 'Open in CLI'}
+        {cliCopied === 'copied' ? '✓ copied' : cliCopied === 'error' ? '✕ copy failed' : 'Open in CLI'}
       </button>
     </div>
     <div class="ad-mono" style="font-size: 11px; color: var(--ad-faint); word-break: break-all;">

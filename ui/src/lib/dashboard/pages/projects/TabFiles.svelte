@@ -21,11 +21,10 @@
 
   // insight is available but files_top / tools_top are not part of the
   // frozen contract yet — render empty state and surface what we do have.
-  const hasInsight = $derived(insight !== null);
 </script>
 
 <div style="display: flex; flex-direction: column; gap: 14px;">
-  {#if hasInsight}
+  {#if insight}
     <!-- Show available insight stats while files/tools await backend support -->
     <div
       style="
@@ -42,19 +41,19 @@
         <div style="display: flex; flex-direction: column; gap: 2px;">
           <span style="font-size: 11px; color: var(--ad-faint);">Cache hit %</span>
           <span class="ad-mono" style="font-size: 18px; font-weight: 600; color: var(--ad-fg);">
-            {insight!.cache_hit_pct.toFixed(1)}%
+            {insight.cache_hit_pct.toFixed(1)}%
           </span>
         </div>
         <div style="display: flex; flex-direction: column; gap: 2px;">
           <span style="font-size: 11px; color: var(--ad-faint);">Compacts</span>
           <span class="ad-mono" style="font-size: 18px; font-weight: 600; color: var(--ad-fg);">
-            {insight!.compact_count}
+            {insight.compact_count}
           </span>
         </div>
         <div style="display: flex; flex-direction: column; gap: 2px;">
           <span style="font-size: 11px; color: var(--ad-faint);">Tokens / message</span>
           <span class="ad-mono" style="font-size: 18px; font-weight: 600; color: var(--ad-fg);">
-            {Math.round(insight!.tokens_per_message).toLocaleString()}
+            {Math.round(insight.tokens_per_message).toLocaleString()}
           </span>
         </div>
       </div>

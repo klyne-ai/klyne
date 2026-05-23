@@ -8,7 +8,6 @@
   import type { WorklogProjectResponse, Reflection } from '$lib/types.js';
   import { fetchWorklogProject } from '$lib/api.js';
   import { relAgo } from '$lib/format.js';
-  import { onMount } from 'svelte';
 
   interface Props {
     project: ProjectAggregate;
@@ -32,11 +31,7 @@
     }
   }
 
-  onMount(() => {
-    void load();
-  });
-
-  // Re-fetch when project changes
+  // Re-fetch when project changes (also runs once on mount)
   $effect(() => {
     void project.project_path;
     void load();

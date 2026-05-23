@@ -83,6 +83,7 @@
   <div style="overflow-y: auto; flex: 1;">
     {#each projects as p (p.project_path)}
       {@const isSelected = p.name === selectedName}
+      {@const state = reflectionState(p)}
       <button
         type="button"
         onclick={() => navigateTo(p)}
@@ -137,14 +138,14 @@
         </div>
 
         <!-- Row 3: stale/cold reflection pill (spec §5.3) -->
-        {#if reflectionState(p) !== 'fresh'}
+        {#if state !== 'fresh'}
           <div>
             <span
               class="pill"
-              class:warn={reflectionState(p) === 'stale'}
-              class:cold={reflectionState(p) === 'cold'}
+              class:warn={state === 'stale'}
+              class:cold={state === 'cold'}
             >
-              {reflectionState(p) === 'stale' ? stalePillLabel(p) : 'no reflection yet'}
+              {state === 'stale' ? stalePillLabel(p) : 'no reflection yet'}
             </span>
           </div>
         {/if}

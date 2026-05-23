@@ -42,8 +42,7 @@
   // --- Selected project ---
   // Prefer $page.params.name; fallback to first in sorted list.
   const selectedName = $derived.by((): string | null => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const paramName = ($page.params as Record<string, string>)['name'];
+    const paramName = $page.params.name as string | undefined;
     if (paramName) return decodeURIComponent(paramName);
     return sorted[0]?.name ?? null;
   });
@@ -97,14 +96,10 @@
     }
   }
 
-  // Load sessions when selected project changes
+  // Load sessions when selected project changes.
+  // loadSessions guards against duplicate calls via sessionsLoading / lastLoadedPath.
   $effect(() => {
-    if (selectedProject) {
-      if (lastLoadedPath !== selectedProject.project_path) {
-        lastLoadedPath = ''; // reset so loadSessions proceeds
-        void loadSessions(selectedProject.project_path);
-      }
-    }
+    if (selectedProject) void loadSessions(selectedProject.project_path);
   });
 
   onMount(() => {

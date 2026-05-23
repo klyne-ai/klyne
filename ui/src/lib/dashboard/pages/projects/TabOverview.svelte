@@ -11,7 +11,7 @@
   import AgentMixDonut from '$lib/ui/AgentMixDonut.svelte';
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
-  import { sessionUrl } from '$lib/dashboard/url-state.js';
+  import { sessionUrl, tabUrl } from '$lib/dashboard/url-state.js';
   import { hiddenSessionIds } from '$lib/hidden-sessions.svelte.js';
 
   interface Props {
@@ -75,6 +75,10 @@
 
   function openSession(id: string): void {
     void goto(sessionUrl($page.url.pathname + $page.url.search, id));
+  }
+
+  function goToSessions(): void {
+    void goto(tabUrl($page.url.pathname, 'sessions'));
   }
 </script>
 
@@ -144,9 +148,7 @@
         <span class="ad-mono" style="font-size: 11px; color: var(--ad-faint); text-transform: uppercase; letter-spacing: 0.06em;">Recent sessions · {recentSessions.length}</span>
         <button
           type="button"
-          onclick={() => {
-            void goto(`/projects/${encodeURIComponent(project.name)}?tab=sessions`);
-          }}
+          onclick={goToSessions}
           style="font-size: 11px; color: var(--ad-faint); background: none; border: none; cursor: pointer; padding: 0;"
         >see full →</button>
       </div>

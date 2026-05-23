@@ -106,28 +106,23 @@
       <div style="display: flex; flex-direction: column; gap: 4px;">
         {#each list as s}
           {@const hidden = hiddenSessionIds().has(s.id)}
-          <div
-            style="
-              display: grid;
-              grid-template-columns: 60px minmax(0, 1fr) 80px 70px 70px 16px;
-              gap: 10px;
-              align-items: center;
-              padding: 10px 12px;
-              border-radius: 8px;
-              background: {hidden ? 'var(--ad-bg-2)' : 'var(--ad-panel)'};
-              border: 1px solid var(--ad-border);
-              opacity: {hidden ? 0.5 : 1};
-            "
-          >
+          <div style="display: grid; grid-template-columns: minmax(0, 1fr) 16px; gap: 4px; align-items: center;">
             <button
               type="button"
               onclick={() => openSession(s.id)}
+              class="session-row"
               style="
-                display: contents;
+                display: grid;
+                grid-template-columns: 60px minmax(0, 1fr) 80px 70px 70px;
+                gap: 10px;
+                align-items: center;
+                padding: 10px 12px;
+                border-radius: 8px;
+                background: {hidden ? 'var(--ad-bg-2)' : 'var(--ad-panel)'};
+                border: 1px solid var(--ad-border);
+                opacity: {hidden ? 0.5 : 1};
                 cursor: pointer;
-                background: none;
-                border: none;
-                padding: 0;
+                width: 100%;
                 text-align: left;
               "
             >
