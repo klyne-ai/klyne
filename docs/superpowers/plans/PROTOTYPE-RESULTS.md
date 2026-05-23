@@ -6,7 +6,7 @@ Built overnight per the user's instruction ("a real working prototype by morning
 
 The user's live klyne daemon occupies `127.0.0.1:7878` — do **not** kill it. To see the prototype:
 
-1. From the worktree root `/Users/mohitpatel/Desktop/Project/klyne/.worktrees/productivity-dashboard`:
+1. From the worktree root `~/Desktop/Project/klyne/.worktrees/productivity-dashboard`:
    `GOTOOLCHAIN=go1.25.3 go build ./...` (toolchain must be pinned; `go1.21` on PATH is too old).
 2. Stop the live daemon OR run this build pointed at a free port (config `~/.klyne/config.toml` `addr`). Then open `/productivity` in the UI, or `curl 'localhost:<port>/productivity?since=<ms>&until=<ms>'`.
 3. `since`/`until` are epoch-ms; omit for "today". For the 2026-05-19 demo pass that day's local-midnight bounds.
@@ -20,7 +20,7 @@ Reproduce the exact verification: a throwaway read-only harness was used (`inter
 - Repo discovery canonicalizes: **7 real services**, worktrees grouped under one canonical repo, non-git parent dirs (`Desktop`/`Learning`/`Project`) excluded (was 28 bogus services — fixed, B2).
 - `klyne` = one service with `init` (pushed, ahead 9, 699 session-min) + `feat/productivity-dashboard` worktree branch under it.
 - The day's real work surfaces with **session-anchored minutes**: consultation-service `feat/labstack-integration` 15 commits / 141 min (+ `master` 55 min), oms-service `feat/CLI-1397-labstack-auto-refund` 207 min, operations-app `feature/CLI-1325-labstack-integration` 104 min, product-service `feature/cli-1336-labstack-test-id`.
-- Identity filter works: user commits (`mohit-clinikk <mohit@clinikk.com>`, `mohitpatel9753@gmail.com`) included; **Ravi Ranjan and Jenkins correctly excluded**.
+- Identity filter works: user commits (`user <user@example.com>`, `user@example.com`) included; **Ravi Ranjan and Jenkins correctly excluded**.
 - Ship-state machine, `unpushed` / `done-uncommitted` risk signals populate.
 - Narratives are git-grounded: contain short SHAs, **zero `"PR #"`** substrings (anti-hallucination guard holds — directly fixes the original "PR #57" failure).
 - Reflection layer: when no 2026-05-19 reflection existed the report returned `reflection_status:"missing"` + nudge; after reflections were recorded for that date a later run returned `"current"` with empty nudge — **both Layer-3 paths proven**.
@@ -38,7 +38,7 @@ Reproduce the exact verification: a throwaway read-only harness was used (`inter
 
 1. **Ship-states read `pushed-to-remote`, not `committed-local-only`** for the labstack repos. The original spec success-criterion 1 expected consultation-service CLI-1396 as committed-local; it is now the next day and that work has since been pushed — the dashboard correctly reports *current* truth. Data drift, not a defect; the committed-local path is exercised by unit tests and the klyne feature branches.
 2. **Two `klyne-showcase-*` temp repos under `os.TempDir()` still appear as services.** Left intentionally (filtering by tempdir prefix risked excluding legitimate repos); cosmetic noise only.
-3. **Identity seed is hardcoded** (`mohitpatel9753@gmail.com`, `coders@clinikk.com`, `mohit@clinikk.com`). Config-wiring is a documented follow-up; the seed is the placeholder.
+3. **Identity seed is hardcoded** (`user@example.com`, `team@example.com`, `user@example.com`). Config-wiring is a documented follow-up; the seed is the placeholder.
 4. **klyne's own feature branches show ~67 commits each with identical narratives** — `feat/pd-snapshot`/`feat/pd-worklog`/`feat/productivity-dashboard` share most history, so per-branch dedup of shared commits is a refinement worth doing.
 
 ## Stubbed — remaining follow-up (spec §11)

@@ -1399,7 +1399,7 @@ to confirm the database is intact (no schema breakage from adding the new helper
 Restart Claude Code so it re-handshakes with the rebuilt klyne MCP server (the user can do this from their session), then:
 
 1. Run `/klyne:bootstrap`.
-2. Expect: a "Claude auto-memory (files on disk)" section listing the 5 files at `~/.claude/projects/-Users-mohitpatel-Desktop-Project-klyne/memory/`.
+2. Expect: a "Claude auto-memory (files on disk)" section listing the 5 files at `~/.claude/projects/-Users-user-Desktop-Project-klyne/memory/`.
 3. Ask Claude: "what was I working on in session a0506355-3914-470c-9152-1c6c535db50f?"
 4. Expect: Claude invokes `mcp__klyne__summarize_session` (NOT bash + jq) and synthesises an answer from the structured response.
 

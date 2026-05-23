@@ -43,3 +43,17 @@ export function renderMarkdown(input: string | null | undefined): string {
     ADD_ATTR: ['target', 'rel'],
   });
 }
+
+/**
+ * Sanitize an FTS5 snippet that contains <mark>...</mark> highlights for
+ * matched tokens. Only the <mark> tag is allowed through; everything else
+ * (including event-handler attributes) is stripped, so untrusted message
+ * bodies cannot inject script payloads via the snippet pipeline.
+ *
+ * Used by both SearchOverlay and the /search route so both surfaces share
+ * the same allowlist.
+ */
+export function sanitizeSnippet(html: string): string {
+  if (!html) return '';
+  return DOMPurify.sanitize(html, { ALLOWED_TAGS: ['mark'], ALLOWED_ATTR: [] });
+}

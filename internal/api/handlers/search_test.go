@@ -176,6 +176,7 @@ func TestSearch_LoopbackMiddleware(t *testing.T) {
 	// Loopback IP should pass through.
 	req2 := httptest.NewRequest(http.MethodGet, "/search?q=test", nil)
 	req2.RemoteAddr = "127.0.0.1:4321"
+	req2.Host = "127.0.0.1:7878" // sameOriginOnly also checks the Host header
 
 	w2 := httptest.NewRecorder()
 	router.ServeHTTP(w2, req2)

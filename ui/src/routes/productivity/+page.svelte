@@ -242,7 +242,7 @@
   //
   // Falls back to the deterministic per-session list when there's no
   // reflection markdown.
-  export interface ReflectionBullet {
+  interface ReflectionBullet {
     chip: 'SHIPPED'|'RISK'|'FLAG'|'MERGED'|'NOTE';
     title: string;
     body: string;

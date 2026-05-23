@@ -1,0 +1,45 @@
+# Dependabot keeps Go modules, npm deps (inside ui/), and pinned
+# GitHub Actions versions current. Grouped weekly so we don't drown in
+# PR noise on quiet weeks.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      go-deps:
+        patterns:
+          - "*"
+
+  - package-ecosystem: npm
+    directory: /ui
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      svelte:
+        patterns:
+          - "svelte"
+          - "@sveltejs/*"
+      vite:
+        patterns:
+          - "vite"
+          - "@vitest/*"
+          - "vitest"
+      other:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "svelte"
+          - "@sveltejs/*"
+          - "vite"
+          - "@vitest/*"
+          - "vitest"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5

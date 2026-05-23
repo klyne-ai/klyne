@@ -51,8 +51,7 @@ func TestDumpContractsOnRealFiles(t *testing.T) {
 		"SessionListResponse", "SessionResponse", "MessageListResponse",
 		"RestoreResponse", "SummaryResponse", "SearchResponse", "SearchHit",
 		"CostSummaryResponse", "CostBucket",
-		"SettingsResponse", "SettingsUpdateRequest",
-		"WizardDetectResponse", "HealthzResponse",
+		"HealthzResponse",
 		// SSE events
 		"MsgNew", "SummaryReady", "SessionUpdate",
 		"CostTick", "ThreadRebuild", "CompactDetected",

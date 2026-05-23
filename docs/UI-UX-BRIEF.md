@@ -43,7 +43,7 @@ Top 10 projects by recency:
 | trinity | 1 | 68 | 33K | $0 (opus-4-7) | 1h ago |
 | ai-for-bharat-hackathon | 7 | 1,149 | 611K | $0 (opus-4-7) | yesterday |
 | trackIt | 39 | 4,361 | 2.3M | $0 (opus-4-7) | yesterday |
-| mohitpatel | 6 | 960 | 459K | $0.28 | yesterday |
+| user | 6 | 960 | 459K | $0.28 | yesterday |
 | partner-service | 6 | 359 | 82K | $0.34 | yesterday |
 | consultation-service | 10 | 879 | 350K | $0.09 | yesterday |
 | operations-app | 35 | 2,344 | 687K | $5.45 | yesterday |
@@ -68,7 +68,7 @@ Models in use:
 interface Session {
   id:            string  // UUID from CLI
   cli:           'claude' | 'codex'
-  project_path:  string  // e.g. /Users/mohitpatel/Desktop/Project/klyne
+  project_path:  string  // e.g. ~/Desktop/Project/klyne
   encoded_cwd:   string  // path-encoded form (for Claude only)
   started_at:    number  // epoch-ms
   last_msg_at:   number  // epoch-ms
@@ -271,7 +271,7 @@ Click row → project detail.
 │  ‹ projects                                                          │
 │                                                                      │
 │  trackIt                                                             │
-│  /Users/mohitpatel/Desktop/Project/trackIt                           │
+│  ~/Desktop/Project/trackIt                           │
 │  39 sessions · 4,361 msgs · 2.3M out tokens · $0.00 (claude-opus-4-7)│
 │                                                                      │
 │  [search within this project...] [filter: all CLIs ▾]                │

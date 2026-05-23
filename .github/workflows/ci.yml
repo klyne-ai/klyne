@@ -1,0 +1,103 @@
+# CI workflow.
+#
+# Runs on every push to `main` and every pull request targeting `main`.
+# Provides the test/lint signal that's missing from a public OSS-Go-CLI
+# repo by default — release.yml handles tagging only.
+#
+# Jobs:
+#   - go    — go vet + go test -race + golangci-lint on Ubuntu 24.04
+#   - ui    — svelte-check + vitest + production build on Ubuntu 24.04
+#   - drift — contract-drift guard: run go dump-contracts then compare to
+#             the UI's typed expectations (scripts/check-contracts.ts).
+#
+# Concurrency: keyed on workflow + ref so a fast follow-up push cancels
+# in-flight runs on the same branch. The release workflow uses its own
+# concurrency key so this never cancels a release.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    name: go test + vet + lint
+    runs-on: ubuntu-24.04
+    env:
+      GOTOOLCHAIN: auto
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      # The embed.FS at module root needs ui/build/ to exist before any
+      # Go compile step. Create an empty stub so go vet/test compile.
+      # Real builds (release.yml) replace this with the actual UI bundle.
+      - name: stub ui/build for embed
+        run: mkdir -p ui/build && echo '<!doctype html>' > ui/build/index.html
+      - name: go vet
+        run: go vet ./...
+      - name: go test -race
+        run: go test -race ./...
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.62.2
+
+  ui:
+    name: ui check + test + build
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: npm ci
+        run: npm ci
+      - name: svelte-check
+        run: npx svelte-check --tsconfig ./tsconfig.json
+      - name: vitest
+        run: npm test
+      - name: production build
+        run: npm run build
+
+  drift:
+    name: contract drift
+    needs: [go, ui]
+    runs-on: ubuntu-24.04
+    env:
+      GOTOOLCHAIN: auto
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: install ui deps
+        working-directory: ui
+        run: npm ci
+      - name: dump go contracts
+        run: CGO_ENABLED=0 go run ./tools/dump-contracts > /tmp/contract-dump.json
+      - name: compare to ui expectations
+        working-directory: ui
+        run: npx tsx scripts/check-contracts.ts

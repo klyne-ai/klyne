@@ -36,12 +36,12 @@ $ ./bin/klyne doctor
   "ok": true,
   "version": "5934de4-dirty",
   "schema_version": 9,
-  "config_path": "/Users/mohitpatel/.klyne/config.toml",
-  "db_path": "/Users/mohitpatel/.klyne/klyne.db",
+  "config_path": "~/.klyne/config.toml",
+  "db_path": "~/.klyne/klyne.db",
   "db_size_bytes": 183320576,
   "connectors": {
-    "claude": {"enabled": true, "root": "/Users/mohitpatel/.claude/projects", "exists": true},
-    "codex":  {"enabled": true, "root": "/Users/mohitpatel/.codex/sessions",  "exists": true}
+    "claude": {"enabled": true, "root": "~/.claude/projects", "exists": true},
+    "codex":  {"enabled": true, "root": "~/.codex/sessions",  "exists": true}
   },
   "providers": {"anthropic": false, "gemini": false, "ollama": true, "openai": false}
 }
@@ -97,7 +97,7 @@ Top projects by token usage:
 ```json
 $ mcp__klyne__list_sessions
 {
-  "cwd": "/Users/mohitpatel/Desktop/Project/klyne",
+  "cwd": "~/Desktop/Project/klyne",
   "candidates": [
     {
       "session_id": "336f4d9b-6f69-48c4-9d87-2247b42c7b35",
@@ -166,7 +166,7 @@ $ mcp__klyne__generate_handoff session_id="336f4d9b-…"
 ```markdown
 # Handoff from session `336f4d9b`
 
-We are working in `/Users/mohitpatel/Desktop/Project/klyne`.
+We are working in `~/Desktop/Project/klyne`.
 
 ## Recent task
 
@@ -176,24 +176,24 @@ actions we have a prepare…
 
 ## Files touched
 
-- `/Users/mohitpatel/Desktop/Project/klyne/Makefile`
-- `/Users/mohitpatel/Desktop/Project/klyne/README.md`
-- `/Users/mohitpatel/Desktop/Project/klyne/cmd/klyne/main.go`
-- `/Users/mohitpatel/Desktop/Project/klyne/cmd/klyne/mcp.go`
-- `/Users/mohitpatel/Desktop/Project/klyne/cmd/klyne/roast.go`
-- `/Users/mohitpatel/Desktop/Project/klyne/docs/UI-UX-BRIEF.md`
-- `/Users/mohitpatel/Desktop/Project/klyne/docs/cli-review-2026-05-10.md`
-- `/Users/mohitpatel/Desktop/Project/klyne/docs/features/analytics-commands.md`
-- `/Users/mohitpatel/Desktop/Project/klyne/docs/features/proactive-session-advisor.md`
-- `/Users/mohitpatel/Desktop/Project/klyne/docs/features/v2-statusline-files-decisions-subagents-otel.md`
-- `/Users/mohitpatel/Desktop/Project/klyne/docs/features/v3-stats-dashboard.md`
-- `/Users/mohitpatel/Desktop/Project/klyne/docs/proof/01-compact-recovery/claim.md`
-- `/Users/mohitpatel/Desktop/Project/klyne/internal/mcpserver/slashcommands.go`
-- `/Users/mohitpatel/Desktop/Project/klyne/internal/mcpserver/slashcommands/handoff.md`
-- `/Users/mohitpatel/Desktop/Project/klyne/internal/mcpserver/slashcommands/health.md`
-- `/Users/mohitpatel/Desktop/Project/klyne/internal/mcpserver/slashcommands/tokens.md`
-- `/Users/mohitpatel/Desktop/Project/klyne/internal/mcpserver/tool_code_review_context.go`
-- `/Users/mohitpatel/Desktop/Project/klyne/ui/src/routes/cockpit/+page.svelte`
+- `~/Desktop/Project/klyne/Makefile`
+- `~/Desktop/Project/klyne/README.md`
+- `~/Desktop/Project/klyne/cmd/klyne/main.go`
+- `~/Desktop/Project/klyne/cmd/klyne/mcp.go`
+- `~/Desktop/Project/klyne/cmd/klyne/roast.go`
+- `~/Desktop/Project/klyne/docs/UI-UX-BRIEF.md`
+- `~/Desktop/Project/klyne/docs/cli-review-2026-05-10.md`
+- `~/Desktop/Project/klyne/docs/features/analytics-commands.md`
+- `~/Desktop/Project/klyne/docs/features/proactive-session-advisor.md`
+- `~/Desktop/Project/klyne/docs/features/v2-statusline-files-decisions-subagents-otel.md`
+- `~/Desktop/Project/klyne/docs/features/v3-stats-dashboard.md`
+- `~/Desktop/Project/klyne/docs/proof/01-compact-recovery/claim.md`
+- `~/Desktop/Project/klyne/internal/mcpserver/slashcommands.go`
+- `~/Desktop/Project/klyne/internal/mcpserver/slashcommands/handoff.md`
+- `~/Desktop/Project/klyne/internal/mcpserver/slashcommands/health.md`
+- `~/Desktop/Project/klyne/internal/mcpserver/slashcommands/tokens.md`
+- `~/Desktop/Project/klyne/internal/mcpserver/tool_code_review_context.go`
+- `~/Desktop/Project/klyne/ui/src/routes/cockpit/+page.svelte`
 
 ## Commands run
 
@@ -233,7 +233,7 @@ $ mcp__klyne__get_pre_compact_context session_id="15009012-…" limit=8
   "trigger": "manual",
   "pre_tokens": 793401,
   "session_id": "15009012-8c13-4a5d-88d9-2f1f6894ecaa",
-  "path": "/Users/mohitpatel/.claude/projects/-Users-mohitpatel-Desktop-Learning-oms-service/15009012-8c13-4a5d-88d9-2f1f6894ecaa.jsonl"
+  "path": "~/.claude/projects/-Users-user-Desktop-Learning-oms-service/15009012-8c13-4a5d-88d9-2f1f6894ecaa.jsonl"
 }
 ```
 
@@ -399,7 +399,7 @@ The agent-side equivalent of "what was I working on?". One call synthesises four
 ```json
 $ mcp__klyne__bootstrap
 {
-  "cwd": "/Users/mohitpatel/Desktop/Project/klyne",
+  "cwd": "~/Desktop/Project/klyne",
   "sessions": [
     {"session_id": "336f4d9b-…", "is_active": true,  "mod_time": "2026-05-15T08:05:53Z", "msg_count": 159, "preview": "I want to create a video for 5 min describing…"},
     {"session_id": "1f50cf33-…", "is_active": false, "mod_time": "2026-05-15T06:58:39Z", "msg_count": 1266, "preview": "https://github.com/DeibyGS/claudestat can you…"},
@@ -482,7 +482,7 @@ Scope: `all` (default — both lists), `project`, or `global`. Optional `tag` fi
 **Real call** I ran against this session:
 
 ```bash
-$ echo '{"cwd":"/Users/mohitpatel/Desktop/Project/klyne"}' | ./bin/klyne advise
+$ echo '{"cwd":"~/Desktop/Project/klyne"}' | ./bin/klyne advise
 # (empty stdout, exit 0)
 ```
 
@@ -587,7 +587,7 @@ JSON form for piping (`klyne patterns --kind=tight_loop --json`):
       "kind": "tight_loop",
       "severity": "alert",
       "session_id": "019e038a-…",
-      "project_path": "/Users/mohitpatel/Desktop/Kim/lava",
+      "project_path": "~/Desktop/Kim/lava",
       "message": "84 consecutive shell calls — possible loop",
       "metric": 84,
       "threshold": 5
@@ -629,7 +629,7 @@ klyne roast — 280 sessions
 Real output for trackIt (your most-touched project, scoped to last 720h):
 
 ```text
-$ klyne files --project=/Users/mohitpatel/Desktop/Learning/trackIt --since=720h --mutated-only
+$ klyne files --project=~/Desktop/Learning/trackIt --since=720h --mutated-only
 
 | Rank | File                                                                  | Reads | Edits | Writes | Sessions | Last touched |
 |---:|---|---:|---:|---:|---:|---|
@@ -866,7 +866,7 @@ wrote 3047 spans to /tmp/klyne-demo/spans.jsonl
     "gen_ai.usage.output_tokens": 511,
     "gen_ai.cost.usd": 1.50895875,
     "klyne.cli": "claude",
-    "klyne.project_path": "/Users/mohitpatel/Desktop/Learning/operations-app",
+    "klyne.project_path": "~/Desktop/Learning/operations-app",
     "klyne.session_id": "b888da42-9c9f-4add-950f-d5dca43f72ff"
   },
   "resource": {"service.name": "klyne", "service.namespace": "ai-coding-cli"},
@@ -924,10 +924,10 @@ For the video, the expected install output is:
 
 ```text
 $ klyne mcp install
-claude: updated — /Users/mohitpatel/.claude.json
-codex:  updated — /Users/mohitpatel/.codex/config.toml
-advisor: updated — /Users/mohitpatel/.claude/settings.json
-slash commands: updated — 6 files in /Users/mohitpatel/.claude/commands/klyne
+claude: updated — ~/.claude.json
+codex:  updated — ~/.codex/config.toml
+advisor: updated — ~/.claude/settings.json
+slash commands: updated — 6 files in ~/.claude/commands/klyne
 klyne: advisor active — you'll see inline warnings in Claude Code when sessions drift,
        accelerate, or approach your 5-hour cap.
 To enable the 5-hour-window advisor, run: klyne config set plan <pro|max-5x|max-20x|team>
@@ -1035,7 +1035,7 @@ $ curl http://127.0.0.1:7878/usage/stats?cli=claude&days=30
   {
     "id": "336f4d9b-…",
     "cli": "claude",
-    "project_path": "/Users/mohitpatel/Desktop/Project/klyne",
+    "project_path": "~/Desktop/Project/klyne",
     "msg_count": 150,
     "tokens_in": 10343819,
     "tokens_out": 113377,
@@ -1047,7 +1047,7 @@ $ curl http://127.0.0.1:7878/usage/stats?cli=claude&days=30
   {
     "id": "081215ee-…",
     "cli": "claude",
-    "project_path": "/Users/mohitpatel/Desktop/Learning/consultation-service",
+    "project_path": "~/Desktop/Learning/consultation-service",
     "msg_count": 465,
     "tokens_in": 45270782,
     "tokens_out": 372594,
@@ -1093,10 +1093,10 @@ $ curl http://127.0.0.1:7878/usage/stats?cli=claude&days=30
 
 | Step | Action | Verify |
 |---|---|---|
-| G1 | Open a terminal in `/Users/mohitpatel/Desktop/Project/klyne` | `pwd` returns that path |
+| G1 | Open a terminal in `~/Desktop/Project/klyne` | `pwd` returns that path |
 | G2 | Run `./bin/klyne` (or `./bin/klyne start`) | Output line `INFO klyne listening addr=127.0.0.1:7878` |
 | G3 | Open browser tab to `http://127.0.0.1:7878` | Page renders, top nav shows Work / Runbooks / Worklog / Insights |
-| G4 | Open Claude Code and start a new chat inside `/Users/mohitpatel/Desktop/Project/klyne` (use `cd` first, then `claude`) | Claude Code prompt visible at the bottom of the terminal |
+| G4 | Open Claude Code and start a new chat inside `~/Desktop/Project/klyne` (use `cd` first, then `claude`) | Claude Code prompt visible at the bottom of the terminal |
 | G5 | In another terminal pane, confirm MCP wiring exists: `cat ~/.claude.json \| grep -A2 klyne` | Returns a non-empty `mcpServers.klyne` block |
 
 If any precondition fails, **stop and tell the human** — the rest of the playbook assumes them.
@@ -1162,7 +1162,7 @@ If any precondition fails, **stop and tell the human** — the rest of the playb
 
 **Canonical path — invoke from Claude Code chat in the oms-service repo:**
 
-1. In a fresh terminal: `cd /Users/mohitpatel/Desktop/Learning/oms-service && claude`
+1. In a fresh terminal: `cd ~/Desktop/Learning/oms-service && claude`
 2. Wait for Claude Code prompt.
 3. Click into chat input.
 4. Type: `/klyne:precompact`
@@ -1194,7 +1194,7 @@ If any precondition fails, **stop and tell the human** — the rest of the playb
 
 **Exact steps to force a trigger:**
 
-1. Open a terminal in `/Users/mohitpatel/Desktop/Project/klyne`.
+1. Open a terminal in `~/Desktop/Project/klyne`.
 2. Temporarily lower the plan cap to make the 5-hour-window trigger fire:
    ```
    ./bin/klyne config set plan custom --cap=1000000
@@ -1229,16 +1229,16 @@ Confirm with `./bin/klyne config get plan` → `plan: max-5x (estimated cap ~220
 
 **Exact steps:**
 
-1. Open a terminal in `/Users/mohitpatel/Desktop/Project/klyne`.
+1. Open a terminal in `~/Desktop/Project/klyne`.
 2. Run literally: `./bin/klyne mcp install`
 3. Wait < 2 seconds.
 
 **Success signal.** Stdout contains 4 lines, in order:
 ```
-claude: <action> — /Users/mohitpatel/.claude.json
-codex:  <action> — /Users/mohitpatel/.codex/config.toml
-advisor: <action> — /Users/mohitpatel/.claude/settings.json
-slash commands: <action> — 6 files in /Users/mohitpatel/.claude/commands/klyne
+claude: <action> — ~/.claude.json
+codex:  <action> — ~/.codex/config.toml
+advisor: <action> — ~/.claude/settings.json
+slash commands: <action> — 6 files in ~/.claude/commands/klyne
 klyne: advisor active — you'll see inline warnings in Claude Code when sessions drift,
        accelerate, or approach your 5-hour cap.
 ```
@@ -1328,7 +1328,7 @@ Pick the row with the highest `msg_count`.
 
 **Exact steps:**
 
-1. Open a terminal in `/Users/mohitpatel/Desktop/Project/klyne`.
+1. Open a terminal in `~/Desktop/Project/klyne`.
 2. Run literally: `./bin/klyne audit-sessions --limit 20`
 3. Wait 2-4 seconds.
 
