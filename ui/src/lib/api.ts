@@ -377,6 +377,44 @@ export async function fetchWorklogProject(path: string): Promise<WorklogProjectR
   return get<WorklogProjectResponse>('/worklog/items/project', { path });
 }
 
+// ---------------------------------------------------------------------------
+// /api/projects — DELETE for project-wide wipe
+// ---------------------------------------------------------------------------
+
+/** Per-table row counts surfaced by the project-wide delete endpoint. */
+export interface ProjectDeleteCounts {
+  stop_summaries: number;
+  worklog_reflections: number;
+  decisions: number;
+  runbook_dismissals: number;
+  work_spans: number;
+  git_session_snapshots: number;
+  total: number;
+}
+
+/** Response from DELETE /api/projects. `deleted=false` for dry-run. */
+export interface ProjectDeleteResponse {
+  deleted: boolean;
+  counts: ProjectDeleteCounts;
+}
+
+/**
+ * DELETE /api/projects — preview (dry_run=true) or execute the wipe of every
+ * project-scoped row across the worklog/decision/runbook/work-span/git-snapshot
+ * tables. Sessions and messages are intentionally preserved.
+ */
+export async function deleteProjectData(
+  projectPath: string,
+  opts: { dryRun?: boolean } = {}
+): Promise<ProjectDeleteResponse> {
+  const url = buildUrl('/api/projects', {
+    path: projectPath,
+    dry_run: opts.dryRun ? 'true' : undefined,
+  });
+  const res = await fetch(url, { method: 'DELETE' });
+  return handleResponse<ProjectDeleteResponse>(res);
+}
+
 /**
  * Response shape from POST /worklog/reflect/run.
  *

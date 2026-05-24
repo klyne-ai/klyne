@@ -81,6 +81,12 @@ const (
 	// grabs the path first and the dashboard never renders in the
 	// embedded build.
 	RouteProductivity        = "/api/productivity"
+	// RouteProjectDelete: DELETE /api/projects?path=<abs>&dry_run=true|false.
+	// Wipes (or counts, in dry-run mode) every project-scoped row across
+	// stop_summaries, worklog_reflections, decisions, runbook_dismissals,
+	// work_spans, and git_session_snapshots. Sessions/messages are
+	// intentionally preserved — see store.DeleteProjectScopedRows.
+	RouteProjectDelete       = "/api/projects"
 )
 
 // AllRoutes returns the canonical, ordered list of every HTTP path
@@ -112,7 +118,20 @@ func AllRoutes() []string {
 		RouteWorklogReflectRun,
 		RouteInsightsProjects,
 		RouteProductivity,
+		RouteProjectDelete,
 	}
+}
+
+// ---------------------------------------------------------------------------
+// /api/projects
+// ---------------------------------------------------------------------------
+
+// ProjectDeleteResponse is DELETE /api/projects?path=…[&dry_run=true]. When
+// dry_run=true the counts represent what WOULD be deleted; when false they
+// are what WAS deleted. `deleted` distinguishes the two states.
+type ProjectDeleteResponse struct {
+	Deleted bool                       `json:"deleted"`
+	Counts  store.ProjectDeleteCounts  `json:"counts"`
 }
 
 // ---------------------------------------------------------------------------
@@ -514,7 +533,7 @@ type CockpitThreadsResponse struct {
 }
 
 // ---------------------------------------------------------------------------
-// /advisories
+// /sessions/{id}/advisor-detail
 // ---------------------------------------------------------------------------
 
 // AdvisoryKind names which klyne advisor trigger produced the row.

@@ -11,9 +11,9 @@
     name: string;
     path: string;
     refreshCmd: string;
-    onReflected?: () => void;
+    onChanged?: () => void;
   }
-  const { name, path, refreshCmd, onReflected }: Props = $props();
+  const { name, path, refreshCmd, onChanged }: Props = $props();
 
   let copied = $state(false);
   let running = $state(false);
@@ -44,7 +44,7 @@
       const r = await runReflect(path, abortController.signal);
       runResult = r;
       if (r.status === 'ok') {
-        onReflected?.();
+        onChanged?.();
       }
     } catch (e: unknown) {
       const aborted = e instanceof DOMException && e.name === 'AbortError';

@@ -136,4 +136,10 @@ func (m *Mounter) Mount(r chi.Router) {
 	// render (spec §7.1 determinism boundary).
 	hProductivity := NewProductivityHandler(m.deps.DB)
 	r.Get(api.RouteProductivity, hProductivity.Get)
+
+	// DELETE /api/projects — project-wide wipe of the worklog/decision/
+	// runbook/work-span/git-snapshot tables for a given project_path.
+	// Sessions and messages (the transcript layer) are preserved.
+	hProjectDelete := NewProjectDeleteHandler(m.deps.DB)
+	r.Delete(api.RouteProjectDelete, hProjectDelete.Delete)
 }

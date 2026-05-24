@@ -11,13 +11,19 @@
   import type { WorklogProjectRollup, Reflection } from '$lib/types.js';
   import { relTime } from '$lib/format.js';
   import RunStrip from './RunStrip.svelte';
+  import KebabMenu from '$lib/dashboard/KebabMenu.svelte';
+  import ConfirmDeleteProjectModal from './ConfirmDeleteProjectModal.svelte';
 
   interface Props {
     w: WorklogProjectRollup;
-    onReflected?: () => void; // called after a successful reflect so parent can refresh
+    // Called after a successful reflect or project-data delete so the parent
+    // can refresh the rollup list.
+    onChanged?: () => void;
   }
 
-  const { w, onReflected }: Props = $props();
+  const { w, onChanged }: Props = $props();
+
+  let confirmDeleteOpen = $state(false);
 
   // --- State colour ---
   const tone = $derived(
@@ -108,6 +114,20 @@
       </div>
       <div class="path mono">{w.project_path}</div>
     </div>
+    <div class="wcard-head-right">
+      <KebabMenu label={`Actions for ${w.name}`}>
+        {#snippet children({ close })}
+          <button
+            type="button"
+            role="menuitem"
+            class="km-item km-item--danger"
+            onclick={() => { confirmDeleteOpen = true; close(); }}
+          >
+            Delete project data…
+          </button>
+        {/snippet}
+      </KebabMenu>
+    </div>
   </div>
 
   <!-- Latest reflection body -->
@@ -163,7 +183,7 @@
       <div class="kicker strip-kicker">
         {cardState === 'cold' ? 'Generate the first reflection:' : 'Refresh with the latest entries:'}
       </div>
-      <RunStrip name={w.name} path={w.project_path} refreshCmd={cmd} {onReflected} />
+      <RunStrip name={w.name} path={w.project_path} refreshCmd={cmd} {onChanged} />
     </div>
   {/if}
 
@@ -174,6 +194,15 @@
     </a>
   </div>
 </div>
+
+{#if confirmDeleteOpen}
+  <ConfirmDeleteProjectModal
+    projectName={w.name}
+    projectPath={w.project_path}
+    onClose={() => { confirmDeleteOpen = false; }}
+    onDeleted={() => { onChanged?.(); }}
+  />
+{/if}
 
 <style>
   .wcard {
@@ -197,7 +226,12 @@
   .wcard-head.has-body {
     border-bottom: 1px solid var(--border-hair);
   }
-  .wcard-head-left { min-width: 0; }
+  .wcard-head-left { min-width: 0; flex: 1; }
+  .wcard-head-right {
+    flex-shrink: 0;
+    margin-top: -4px;
+    margin-right: -4px;
+  }
 
   .name-row {
     display: flex;

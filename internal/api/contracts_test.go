@@ -54,6 +54,7 @@ func TestAllRoutesContainsExpected(t *testing.T) {
 		RouteWorklogReflectRun,
 		RouteInsightsProjects,
 		RouteProductivity,
+		RouteProjectDelete,
 	}
 	got := AllRoutes()
 	if len(got) != len(expected) {

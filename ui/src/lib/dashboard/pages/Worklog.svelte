@@ -142,7 +142,7 @@
     {:else}
       <div class="card-list">
         {#each filtered as w (w.project_path)}
-          <WorklogCard {w} onReflected={load} />
+          <WorklogCard {w} onChanged={load} />
         {/each}
       </div>
     {/if}
