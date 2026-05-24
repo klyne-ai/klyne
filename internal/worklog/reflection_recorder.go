@@ -19,8 +19,10 @@ package worklog
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -199,7 +201,48 @@ func recordReflection(ctx context.Context, db *store.DB, projectPath string, day
 	if err := store.InsertReflection(ctx, db, refl); err != nil {
 		return store.Reflection{}, fmt.Errorf("worklog: persist reflection: %w", err)
 	}
+
+	// Authoritative per-day snapshot for the productivity dashboard
+	// (migration 021). Only runs on the substrate-aware path because the
+	// plain RecordReflection caller doesn't have a Report to serialize.
+	// Snapshot failure is logged-but-not-fatal: the reflection row is
+	// already committed and the dashboard's lazy-backfill path will
+	// reconstruct the day on next read if this one fails.
+	if rep != nil {
+		if err := writeProductivitySnapshot(ctx, db, projectPath, day, *rep); err != nil {
+			log.Printf("worklog: snapshot write failed for %s %s: %v", projectPath, day.Local().Format("2006-01-02"), err)
+		}
+	}
 	return refl, nil
+}
+
+// writeProductivitySnapshot persists the productivity Report for one
+// (project, day) as a daily_productivity_snapshot row so the dashboard
+// can render that day deterministically on reload. Source is fixed
+// "reflection" — this is the authoritative write path; the handler's
+// lazy backfill writes "live" rows that this call will overwrite.
+//
+// The Report's Day field is forced to the local-day string for day so
+// the persisted payload matches the row's day column (defensive — the
+// substrate builder uses a UTC-bucketed window but the dashboard reads
+// in local zone).
+func writeProductivitySnapshot(ctx context.Context, db *store.DB, projectPath string, day time.Time, rep productivity.Report) error {
+	dayStr := day.Local().Format("2006-01-02")
+	rep.Day = dayStr
+	payload, err := json.Marshal(rep)
+	if err != nil {
+		return fmt.Errorf("marshal report: %w", err)
+	}
+	now := time.Now().UnixMilli()
+	return store.UpsertDailyProductivitySnapshot(ctx, db, store.DailyProductivitySnapshot{
+		ProjectPath:        projectPath,
+		Day:                dayStr,
+		PayloadJSON:        string(payload),
+		TotalActiveMinutes: rep.TotalActiveMinutes,
+		Source:             "reflection",
+		CreatedAt:          now,
+		UpdatedAt:          now,
+	})
 }
 
 // stopSummaryCursorForCitations returns MAX(stop_summaries.ts) for the
