@@ -40,9 +40,14 @@ dist/
 .worktrees/
 .playwright-mcp/
 
+# Local scratch launcher — throwaway runner for the rich-worklog pipeline.
+cmd/protoserve/
+
 # Internal pre-v0.1 workstream docs (not for public release)
 HANDOFF.md
 docs/handoffs/
 docs/plan/
 docs/research/
 docs/marketing/
+
+screenshots/
