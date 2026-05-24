@@ -2,7 +2,9 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os/exec"
 	"strings"
@@ -23,10 +25,12 @@ import (
 // The reflection layer only enriches (L2) — its absence surfaces a nudge
 // (L3), it never gates or destabilizes the deterministic data (D8).
 //
-// PROTOTYPE STUB (spec §11): live-scan-only — the git_session_snapshots
-// capture half of D6 (historical "uncommitted-at-11:30" reconstruction)
-// and dashboard_cache memoization are documented follow-ups. This
-// endpoint computes everything live each request.
+// Snapshot-backed determinism (migration 021): past-day data is read
+// from daily_productivity_snapshot rows so a reload at 4:01pm shows
+// the same numbers as the same reload at 4:00pm. The reflection writer
+// is the authoritative source ("reflection" rows); the handler lazily
+// backfills "live" rows for past days the user has not yet reflected.
+// Today is always live-computed — today is not "past" until it ends.
 type ProductivityHandler struct {
 	db *store.DB
 }
@@ -47,6 +51,13 @@ const productivityIdleCapMin = 10
 // Query params:
 //   - since int64  epoch-ms lower bound (default = today local 00:00)
 //   - until int64  epoch-ms upper bound (default = now)
+//   - refresh "1"  force live recompute + overwrite snapshot rows
+//
+// Behaviour: the window is split into local-day buckets. Past days
+// prefer the per-project snapshot rows in daily_productivity_snapshot
+// (written by the reflection recorder, or lazy-backfilled on first
+// read). Today is always live. The composite response is the
+// sweep-line union of every per-day Report (productivity.AggregateReports).
 func (h *ProductivityHandler) Get(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 
@@ -64,31 +75,106 @@ func (h *ProductivityHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 	since := time.UnixMilli(sinceMs)
 	until := time.UnixMilli(untilMs)
-	// `?refresh=1` is the user's explicit "I want fresh data NOW"
-	// signal — it bypasses both the merged-PR cache TTL and the
-	// FETCH_HEAD staleness gate so we re-query gh and run `git fetch`
-	// regardless of when we last did. Absent → normal TTL behaviour.
 	force := r.URL.Query().Get("refresh") == "1"
 	ctx := r.Context()
 
+	days := localDaysInRange(since, until)
+	todayStr := now.Local().Format("2006-01-02")
+
+	perDay := make([]productivity.Report, 0, len(days))
+	for _, dayStart := range days {
+		dayStr := dayStart.Format("2006-01-02")
+		dayEnd := dayStart.Add(24 * time.Hour).Add(-time.Millisecond)
+		// Clamp the per-day window to the caller's requested bounds so a
+		// request like "today since 10am" doesn't fold midnight→10am
+		// minutes the user didn't ask for. Today's tail is clamped to
+		// now so the live scan doesn't query the future.
+		winStart := dayStart
+		if winStart.Before(since) {
+			winStart = since
+		}
+		winEnd := dayEnd
+		if winEnd.After(until) {
+			winEnd = until
+		}
+		if dayStr == todayStr && winEnd.After(now) {
+			winEnd = now
+		}
+		if !winStart.Before(winEnd) {
+			// Empty intersection (e.g. dayStart > until) — skip.
+			continue
+		}
+
+		isToday := dayStr == todayStr
+
+		// Past days: snapshot-preferred. Today: always live.
+		if !isToday && !force {
+			if rep, ok, err := h.tryReadSnapshotDay(ctx, dayStr); err == nil && ok {
+				perDay = append(perDay, rep)
+				continue
+			} else if err != nil {
+				log.Printf("productivity: snapshot read for %s failed: %v", dayStr, err)
+				// fall through to live compute
+			}
+		}
+
+		rep, err := h.computeLiveReport(ctx, winStart, winEnd, force)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		// Force the per-day Report's Day field to this day's local date —
+		// computeLiveReport uses the WINDOW's start which is the same
+		// here, but pinning it makes the snapshot we write below
+		// unambiguously a "this day's snapshot."
+		rep.Day = dayStr
+
+		// Persist a per-project snapshot for every past day. Today is
+		// never persisted — it's not done yet, and persisting now would
+		// let a same-day reload read a stale row instead of recomputing.
+		if !isToday {
+			h.persistSnapshotsForDay(ctx, rep, dayStr, "live")
+		}
+
+		perDay = append(perDay, rep)
+	}
+
+	// Compose the window. Single-day request → return the day's report
+	// directly so the response shape is identical to the legacy single-
+	// day path (Day = the local date string). Multi-day → aggregate.
+	var composite productivity.Report
+	if len(perDay) == 1 {
+		composite = perDay[0]
+	} else {
+		composite = productivity.AggregateReports(perDay, since.Local().Format("2006-01-02"))
+	}
+
+	writeJSON(w, http.StatusOK, composite)
+}
+
+// computeLiveReport runs the full live-scan pipeline for one (since,
+// until) window — repo discovery, git scan, session activity, time
+// attribution, BuildReport, and the Layer-2 enrichments
+// (merged-PR + git_fetched_at). Used for today (always) and for past
+// days that have no snapshot yet (lazy backfill).
+func (h *ProductivityHandler) computeLiveReport(
+	ctx context.Context, since, until time.Time, force bool,
+) (productivity.Report, error) {
+	now := time.Now()
+
 	// §6.1 / D5: discover the repos to scan from the session
 	// project_paths in the window (+ sibling worktrees). Discovery
-	// failures degrade gracefully to an empty report rather than 500 —
-	// the dashboard must stay stable (D8).
+	// failures degrade gracefully to an empty report rather than 500.
 	lister := &sessionPathLister{db: h.db}
 	targets, err := productivity.DiscoverRepos(ctx, lister, since, until)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
+		return productivity.Report{}, err
 	}
 
 	userEmails := productivity.UserEmails()
 
 	// Refresh stale origin/* refs BEFORE scanning so ahead/behind and
-	// ship-state read current GitHub state, not a stale mirror. Same
-	// TTL as the merged-PR cache; best-effort, bounded by an overall
-	// timeout. The fetch failure mode is harmless — the scan just sees
-	// whatever the local mirror has.
+	// ship-state read current GitHub state, not a stale mirror.
 	dirs := make([]string, 0, len(targets))
 	for _, t := range targets {
 		dirs = append(dirs, t.Dir)
@@ -100,29 +186,20 @@ func (h *ProductivityHandler) Get(w http.ResponseWriter, r *http.Request) {
 	projectPaths := map[string]string{}
 	dirtyRepos := map[string]productivity.DirtyState{}
 
-	// Latest session end (last_msg_at) per project_path, used as the
-	// done-uncommitted anchor (§6.5).
 	sessionEnds, err := h.sessionEnds(ctx, since, until)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
+		return productivity.Report{}, err
 	}
 
 	for _, t := range targets {
 		sc, err := productivity.ScanRepo(t.Dir, since, until, userEmails)
 		if err != nil {
-			// A repo that won't scan (e.g. not a git dir / shallow) is
-			// skipped, not fatal — keeps the dashboard deterministic and
-			// stable across a heterogeneous repo set.
 			continue
 		}
 		scans = append(scans, sc)
 		commitCounts[sc.Dir] = len(sc.Commits)
 		projectPaths[sc.Dir] = t.ProjectPath
 
-		// PROTOTYPE STUB (spec §11): current dirty state only, no
-		// historical snapshot. The D6 session-end snapshot capture is a
-		// documented follow-up; here we read the live working tree.
 		dirtyCount, dirtyFiles := dirtyStatus(t.Dir)
 		dirtyRepos[sc.Dir] = productivity.DirtyState{
 			DirtyFileCount: dirtyCount,
@@ -131,59 +208,168 @@ func (h *ProductivityHandler) Get(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// §6.4 / D1: session-anchored time attribution. Build SessionActivity
-	// from per-message timestamps in the window.
 	sessions, err := h.sessionActivity(ctx, since, until)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
+		return productivity.Report{}, err
 	}
 	attribution := productivity.AttributeMinutes(sessions, commitCounts, productivityIdleCapMin)
 
 	in := productivity.ReportInput{
-		// B1: Day must reflect the WINDOW's start (the resolved `since`
-		// after defaulting), not today. When `since` is absent it
-		// defaults to local-midnight-today (defStart), so the
-		// default-when-absent behaviour is preserved; when an explicit
-		// window is passed Day tracks that window.
-		Day:          time.UnixMilli(sinceMs).Local().Format("2006-01-02"),
+		Day:          since.Local().Format("2006-01-02"),
 		Now:          now,
 		Scans:        scans,
 		Attribution:  attribution,
 		ProjectPaths: projectPaths,
 		DirtyRepos:   dirtyRepos,
-		// Sessions drives the report-level GLOBAL interval union
-		// (TotalActiveMinutes / per-CLI MinutesByCLI — Change 1) and the
-		// per-session SessionStat proof-of-work list (Change 2).
-		Sessions: sessions,
+		Sessions:     sessions,
 	}
 
 	rep, err := productivity.BuildReport(ctx, in, &reflectionLookup{db: h.db})
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
+		return productivity.Report{}, err
 	}
 
-	// Report-level "What was done" is now driven entirely by the
-	// deterministic body BuildReport assigned (event tags + importance
-	// + per-session sessions list). The rich-entry merge path was
-	// removed when daemon-side AI synthesis was retired — the
-	// reflectionLookup below still falls back to the legacy
-	// worklog_reflections row for historical days.
-
-	// Layer-2 GitHub enrichment: attach merged PRs per Service via the
-	// TTL-cached `gh pr list` (productivity_github.go). Best-effort —
-	// never fails the request; the deterministic report stands alone.
+	// Layer-2 GitHub enrichment + git_fetched_at — runs inside the live
+	// compute so a backfilled snapshot row already carries the
+	// enrichments (a later read skips this step entirely).
 	h.enrichMergedPRs(ctx, &rep, since, until, force)
-
-	// Per-Service "git as of N ago" — reads FETCH_HEAD mtime that the
-	// refreshStaleRemotes step (or an earlier user-run git fetch) just
-	// updated. Zero when no fetch has ever run here.
 	for i := range rep.Services {
 		rep.Services[i].GitFetchedAt = gitFetchedAt(rep.Services[i].ProjectPath)
 	}
+	return rep, nil
+}
 
-	writeJSON(w, http.StatusOK, rep)
+// tryReadSnapshotDay loads every per-project snapshot row for one
+// local day and aggregates them into one multi-project Report
+// (productivity.AggregateReports with a single-day input). Returns
+// ok=false when no rows exist for the day — the caller falls through
+// to live compute + backfill.
+func (h *ProductivityHandler) tryReadSnapshotDay(
+	ctx context.Context, dayStr string,
+) (productivity.Report, bool, error) {
+	rows, err := store.ListDailyProductivitySnapshotsForDay(ctx, h.db, dayStr)
+	if err != nil {
+		return productivity.Report{}, false, err
+	}
+	if len(rows) == 0 {
+		return productivity.Report{}, false, nil
+	}
+	perProject := make([]productivity.Report, 0, len(rows))
+	for _, row := range rows {
+		var rep productivity.Report
+		if err := json.Unmarshal([]byte(row.PayloadJSON), &rep); err != nil {
+			log.Printf("productivity: skip corrupt snapshot %s/%s: %v", row.ProjectPath, row.Day, err)
+			continue
+		}
+		perProject = append(perProject, rep)
+	}
+	if len(perProject) == 0 {
+		return productivity.Report{}, false, nil
+	}
+	// Aggregating per-project single-day Reports yields one multi-project
+	// single-day Report — same shape as the live path would produce.
+	day := productivity.AggregateReports(perProject, dayStr)
+	day.Day = dayStr
+	return day, true, nil
+}
+
+// persistSnapshotsForDay writes one daily_productivity_snapshot row per
+// Service in the multi-project Report. Source is the caller's tag
+// ("live" for handler backfill; reflection-recorder writes its own
+// rows with source="reflection" via worklog.writeProductivitySnapshot).
+//
+// Errors per-row are logged-but-not-fatal: a snapshot is a perf/UX
+// optimisation, not load-bearing.
+func (h *ProductivityHandler) persistSnapshotsForDay(
+	ctx context.Context, rep productivity.Report, dayStr, source string,
+) {
+	now := time.Now().UnixMilli()
+	for _, svc := range rep.Services {
+		single := singleProjectReport(rep, svc, dayStr)
+		payload, err := json.Marshal(single)
+		if err != nil {
+			log.Printf("productivity: marshal snapshot %s/%s: %v", svc.ProjectPath, dayStr, err)
+			continue
+		}
+		if err := store.UpsertDailyProductivitySnapshot(ctx, h.db, store.DailyProductivitySnapshot{
+			ProjectPath:        svc.ProjectPath,
+			Day:                dayStr,
+			PayloadJSON:        string(payload),
+			TotalActiveMinutes: single.TotalActiveMinutes,
+			Source:             source,
+			CreatedAt:          now,
+			UpdatedAt:          now,
+		}); err != nil {
+			log.Printf("productivity: upsert snapshot %s/%s: %v", svc.ProjectPath, dayStr, err)
+		}
+	}
+}
+
+// singleProjectReport carves out the slice of a multi-project Report
+// that belongs to one Service so it can be persisted as a per-project
+// snapshot. Sessions are filtered by Service.Repo; the report-level
+// TotalActiveMinutes / MinutesByCLI are derived from those sessions'
+// ActiveIntervals (sweep-line union) so the persisted single-project
+// payload is internally consistent — re-aggregating N per-project
+// payloads via AggregateReports reproduces the original multi-project
+// numbers within rounding.
+func singleProjectReport(rep productivity.Report, svc productivity.Service, dayStr string) productivity.Report {
+	out := productivity.Report{
+		Day:              dayStr,
+		Services:         []productivity.Service{svc},
+		ReflectionStatus: rep.ReflectionStatus,
+		Nudge:            rep.Nudge,
+		MinutesByCLI:     map[string]int{},
+		Sessions:         []productivity.SessionStat{},
+		ReflectionGroups: svc.ReflectionGroups,
+	}
+	if rep.ReflectionMarkdown != "" && len(rep.Services) == 1 {
+		out.ReflectionMarkdown = rep.ReflectionMarkdown
+	}
+	allIntervals := make([]productivity.ActiveInterval, 0)
+	cliIntervals := map[string][]productivity.ActiveInterval{}
+	for _, s := range rep.Sessions {
+		if s.Repo != svc.Repo {
+			continue
+		}
+		out.Sessions = append(out.Sessions, s)
+		for _, iv := range s.ActiveIntervals {
+			allIntervals = append(allIntervals, iv)
+			cliIntervals[s.CLI] = append(cliIntervals[s.CLI], iv)
+		}
+	}
+	out.TotalActiveMinutes = productivity.UnionMinutes(allIntervals)
+	for cli, ivs := range cliIntervals {
+		m := productivity.UnionMinutes(ivs)
+		if m > 0 {
+			out.MinutesByCLI[cli] = m
+		}
+	}
+	return out
+}
+
+// localDaysInRange returns one time.Time per local-midnight in
+// [since, until] inclusive, capped at 31 days to defensively bound the
+// per-day loop (a request for a 5-year range would otherwise fan out
+// to ~1800 snapshot lookups). Empty result when until < since.
+func localDaysInRange(since, until time.Time) []time.Time {
+	loc := since.Location()
+	if loc == nil {
+		loc = time.Local
+	}
+	if until.Before(since) {
+		return nil
+	}
+	startMid := time.Date(since.Year(), since.Month(), since.Day(), 0, 0, 0, 0, loc)
+	endMid := time.Date(until.Year(), until.Month(), until.Day(), 0, 0, 0, 0, loc)
+	out := make([]time.Time, 0, 8)
+	for d := startMid; !d.After(endMid); d = d.Add(24 * time.Hour) {
+		out = append(out, d)
+		if len(out) >= 31 {
+			break
+		}
+	}
+	return out
 }
 
 // sessionEnds returns the latest last_msg_at (as time.Time) per
@@ -220,16 +406,7 @@ GROUP BY project_path`
 // sessionActivity loads one SessionActivity per session with at least one
 // message in the window, carrying every in-window message timestamp so
 // the substrate can compute the active-span (§6.4) and the session's CLI
-// ("claude" | "codex") so AI time can be broken down per CLI. Repos is
-// left empty: the prototype attributes a session wholly to its
-// ProjectPath (the multi-repo split is exercised by the substrate's own
-// tests; a cwd-switch heuristic from message events is a documented
-// follow-up).
-//
-// The query selects exactly the columns the §6.4 attribution + the
-// Change 2 SessionStat evidence list need — session id, project_path,
-// cli, and one row per in-window message timestamp. MessageCount is the
-// count of those rows per session (the proof-of-work message count).
+// ("claude" | "codex") so AI time can be broken down per CLI.
 func (h *ProductivityHandler) sessionActivity(
 	ctx context.Context, since, until time.Time,
 ) ([]productivity.SessionActivity, error) {
@@ -261,8 +438,6 @@ ORDER BY s.id, m.ts ASC`
 			order = append(order, id)
 		}
 		sa.MessageTimes = append(sa.MessageTimes, time.UnixMilli(ts))
-		// One row per in-window message → the count is the proof-of-work
-		// message count surfaced in SessionStat (Change 2).
 		sa.MessageCount++
 	}
 	if err := rows.Err(); err != nil {
@@ -277,8 +452,6 @@ ORDER BY s.id, m.ts ASC`
 }
 
 // sessionPathLister adapts *store.DB to productivity.SessionPathLister.
-// It runs the distinct-project_path-in-window query the substrate's
-// DiscoverRepos (D5/§6.1) expects.
 type sessionPathLister struct {
 	db *store.DB
 }
@@ -310,10 +483,7 @@ WHERE last_msg_at >= ? AND last_msg_at <= ?`
 
 // reflectionLookup adapts *store.DB to productivity.ReflectionLookup
 // by reading every worklog_reflections row for (project, day) — the
-// iterative-reflection workflow's T1/T2/T3 history
-// (docs/features/iterative-reflection.md). The dashboard renders each
-// row as a separate group; concat for legacy consumers happens upstream
-// in productivity.BuildReport.
+// iterative-reflection workflow's T1/T2/T3 history.
 type reflectionLookup struct {
 	db *store.DB
 }
@@ -347,20 +517,11 @@ func (l *reflectionLookup) LoadReflections(
 
 	// Tier 2: deterministic fallback. When no reflection has been
 	// authored yet, synthesize a "what was done" body from the day's
-	// stop_summaries rows — but only the IMPORTANT ones (importance ≥
-	// 7). importance is the deterministic event-tag score
-	// (internal/worklog/importance.go): a base of 5 plus weighted
-	// contributions for commit_landed, pr_opened, decision_recorded,
-	// migration_or_schema_change, security_relevant_change, etc. The
-	// threshold of 7 admits rows that have at least one moderate
-	// event tag and drops read-only / lint-only / tiny sessions so
-	// the section stays short.
+	// stop_summaries rows — but only the IMPORTANT ones (importance ≥ 7).
 	body := buildDeterministicWhatWasDone(ctx, l.db, projectPath, day)
 	if body == "" {
 		return nil, nil
 	}
-	// One synthetic group representing the deterministic fallback; ts
-	// is the end of the day so it sorts after any real T1/T2/T3 rows.
 	return []productivity.ReflectionGroup{{
 		ID:     "deterministic-" + dayStr,
 		TS:     day.UnixMilli(),
@@ -377,9 +538,7 @@ func (l *reflectionLookup) LoadReflections(
 const importanceThreshold = 7
 
 // buildDeterministicWhatWasDone renders a bullet list of important
-// sessions for projectPath on the local day. Each bullet shows the
-// assistant's KLYNE_SUMMARY (when present) or falls back to the
-// session's last_user line. Pure SQLite read; NO LM call.
+// sessions for projectPath on the local day. Pure SQLite read; NO LM call.
 func buildDeterministicWhatWasDone(
 	ctx context.Context, db *store.DB, projectPath string, day time.Time,
 ) string {
@@ -408,8 +567,6 @@ LIMIT 50`
 		if err := rows.Scan(&aiSummary, &lastUser); err != nil {
 			continue
 		}
-		// Prefer the assistant's per-turn summary; fall back to the
-		// user's last prompt so a row always renders something useful.
 		text := strings.TrimSpace(aiSummary)
 		if text == "" {
 			text = strings.TrimSpace(lastUser)
@@ -431,22 +588,13 @@ LIMIT 50`
 const dirtyFileCap = 25
 
 // dirtyStatus returns the count AND the (capped) list of uncommitted /
-// untracked paths for the working tree at dir — porcelain short status,
-// so the done-uncommitted risk can show WHICH files are dirty. Errors
-// map to (0, nil): a repo we can't stat is treated as clean rather than
-// failing the whole dashboard.
-//
-// PROTOTYPE STUB (spec §11): current dirty state only, no historical
-// snapshot (the D6 session-end snapshot half is a documented follow-up).
+// untracked paths for the working tree at dir.
 func dirtyStatus(dir string) (int, []string) {
 	cmd := exec.Command("git", "-C", dir, "status", "--porcelain")
 	out, err := cmd.Output()
 	if err != nil {
 		return 0, nil
 	}
-	// Trim only TRAILING newlines — leading whitespace must be preserved
-	// because porcelain v1 starts modified-not-staged lines with " M ..."
-	// (X=' ', Y='M'), and stripping it shifts every path by one char.
 	s := strings.TrimRight(string(out), "\r\n")
 	if s == "" {
 		return 0, nil
@@ -457,8 +605,6 @@ func dirtyStatus(dir string) (int, []string) {
 		if i >= dirtyFileCap {
 			break
 		}
-		// Porcelain v1 lines are "XY <path>" — XY at 0..1, space at 2,
-		// path from index 3 onward. Skip lines too short to carry a path.
 		if len(ln) > 3 {
 			files = append(files, ln[3:])
 		}
