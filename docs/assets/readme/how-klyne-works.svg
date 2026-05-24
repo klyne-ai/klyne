@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 920" role="img" aria-labelledby="title desc">
+  <title id="title">How klyne works</title>
+  <desc id="desc">Claude Code and Codex write local JSONL transcripts. klyne hooks ask for summaries, extract deterministic signals, store them in SQLite, and show a local dashboard and MCP tools.</desc>
+  <defs>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#0f172a" flood-opacity="0.16"/>
+    </filter>
+    <style>
+      .bg { fill: #fbfbf7; }
+      .title { font: 800 62px ui-rounded, "SF Pro Rounded", "Segoe UI", sans-serif; fill: #111827; }
+      .subtitle { font: 600 24px ui-rounded, "SF Pro Rounded", "Segoe UI", sans-serif; fill: #4b5563; }
+      .label { font: 800 31px ui-rounded, "SF Pro Rounded", "Segoe UI", sans-serif; fill: #111827; }
+      .body { font: 650 21px ui-rounded, "SF Pro Rounded", "Segoe UI", sans-serif; fill: #374151; }
+      .small { font: 700 17px ui-monospace, "SF Mono", monospace; fill: #6b7280; }
+      .tiny { font: 700 15px ui-monospace, "SF Mono", monospace; fill: #6b7280; }
+      .card { fill: #ffffff; stroke: #111827; stroke-width: 4; rx: 24; filter: url(#shadow); }
+      .blue { fill: #dbeafe; stroke: #2563eb; stroke-width: 5; rx: 22; }
+      .purple { fill: #ede9fe; stroke: #7c3aed; stroke-width: 5; rx: 22; }
+      .amber { fill: #fef3c7; stroke: #f97316; stroke-width: 5; rx: 22; }
+      .green { fill: #dcfce7; stroke: #16a34a; stroke-width: 5; rx: 22; }
+      .red { fill: #fee2e2; stroke: #ef4444; stroke-width: 5; rx: 22; }
+      .gray { fill: #f8fafc; stroke: #94a3b8; stroke-width: 4; rx: 18; }
+      .stroke { stroke: #111827; stroke-width: 6; stroke-linecap: round; stroke-linejoin: round; fill: none; }
+      .thin { stroke: #6b7280; stroke-width: 4; stroke-linecap: round; fill: none; }
+      .blueText { fill: #2563eb; }
+      .purpleText { fill: #7c3aed; }
+      .amberText { fill: #f97316; }
+      .greenText { fill: #16a34a; }
+      .redText { fill: #ef4444; }
+    </style>
+    <marker id="arrow" markerWidth="16" markerHeight="16" refX="11" refY="8" orient="auto">
+      <path d="M2,2 L14,8 L2,14 Z" fill="#111827"/>
+    </marker>
+    <marker id="arrow-green" markerWidth="16" markerHeight="16" refX="11" refY="8" orient="auto">
+      <path d="M2,2 L14,8 L2,14 Z" fill="#16a34a"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" width="1600" height="920"/>
+  <text x="800" y="84" text-anchor="middle" class="title">How klyne turns AI sessions into a worklog</text>
+  <text x="800" y="126" text-anchor="middle" class="subtitle">No proxy. No telemetry. No daemon-side model calls.</text>
+
+  <rect x="130" y="200" width="360" height="96" class="blue"/>
+  <text x="310" y="241" text-anchor="middle" class="label blueText">Claude + Codex</text>
+  <text x="310" y="274" text-anchor="middle" class="body">your normal AI coding chats</text>
+
+  <path d="M310 305 L310 370" class="stroke" marker-end="url(#arrow)"/>
+  <rect x="130" y="385" width="360" height="96" class="purple"/>
+  <text x="310" y="426" text-anchor="middle" class="label purpleText">Hooks</text>
+  <text x="310" y="459" text-anchor="middle" class="body">ask for KLYNE_SUMMARY</text>
+
+  <path d="M310 490 L310 555" class="stroke" marker-end="url(#arrow)"/>
+  <rect x="130" y="570" width="360" height="96" class="amber"/>
+  <text x="310" y="611" text-anchor="middle" class="label amberText">JSONL</text>
+  <text x="310" y="644" text-anchor="middle" class="body">local transcripts already on disk</text>
+
+  <path d="M505 620 C600 620 640 620 730 620" class="stroke" marker-end="url(#arrow)"/>
+  <rect x="750" y="510" width="390" height="220" class="card"/>
+  <text x="945" y="558" text-anchor="middle" class="label">klyne engine</text>
+  <rect x="795" y="590" width="300" height="42" class="gray"/>
+  <text x="945" y="617" text-anchor="middle" class="small">extract summary</text>
+  <rect x="795" y="646" width="300" height="42" class="gray"/>
+  <text x="945" y="673" text-anchor="middle" class="small">tag events + score importance</text>
+  <text x="945" y="708" text-anchor="middle" class="body">deterministic local processing</text>
+
+  <path d="M945 500 L945 430" class="stroke" marker-end="url(#arrow)"/>
+  <rect x="755" y="310" width="380" height="100" class="green"/>
+  <text x="945" y="351" text-anchor="middle" class="label greenText">SQLite</text>
+  <text x="945" y="384" text-anchor="middle" class="body">~/.klyne/klyne.db</text>
+
+  <path d="M1148 570 C1225 520 1265 475 1320 405" class="stroke" marker-end="url(#arrow-green)"/>
+  <rect x="1190" y="220" width="320" height="122" class="green"/>
+  <text x="1350" y="263" text-anchor="middle" class="label greenText">Dashboard</text>
+  <text x="1350" y="296" text-anchor="middle" class="body">worklog, productivity, insights</text>
+  <text x="1350" y="322" text-anchor="middle" class="tiny">127.0.0.1:7878</text>
+
+  <path d="M1148 670 C1225 720 1265 760 1320 815" class="stroke" marker-end="url(#arrow-green)"/>
+  <rect x="1190" y="745" width="320" height="118" class="green"/>
+  <text x="1350" y="788" text-anchor="middle" class="label greenText">MCP tools</text>
+  <text x="1350" y="821" text-anchor="middle" class="body">reflect, handoff, precompact</text>
+  <text x="1350" y="847" text-anchor="middle" class="tiny">used inside your active chat</text>
+
+  <rect x="500" y="200" width="260" height="96" class="red"/>
+  <text x="630" y="239" text-anchor="middle" class="label redText">No cloud</text>
+  <text x="630" y="272" text-anchor="middle" class="body">localhost only</text>
+  <path d="M500 248 C455 248 455 248 490 248" class="thin"/>
+
+  <rect x="845" y="200" width="260" height="96" class="red"/>
+  <text x="975" y="239" text-anchor="middle" class="label redText">No extra AI</text>
+  <text x="975" y="272" text-anchor="middle" class="body">same chat writes summary</text>
+
+  <rect x="170" y="770" width="760" height="64" class="card"/>
+  <text x="550" y="811" text-anchor="middle" class="body">Result: searchable sessions, weekly reflection, real cost attribution, and recovery when context disappears.</text>
+</svg>
