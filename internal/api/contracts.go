@@ -42,7 +42,6 @@ const (
 	RouteUsage               = "/usage"
 	RouteUsageStats          = "/usage/stats"
 	RouteCockpitThreads      = "/cockpit/threads"
-	RouteAdvisories          = "/advisories"
 	RouteSessionAdvisorDetail = "/sessions/{id}/advisor-detail"
 	RouteEvents              = "/events"
 	RouteHealthz             = "/healthz"
@@ -106,7 +105,6 @@ func AllRoutes() []string {
 		RouteUsage,
 		RouteUsageStats,
 		RouteCockpitThreads,
-		RouteAdvisories,
 		RouteSessionAdvisorDetail,
 		RouteEvents,
 		RouteHealthz,
@@ -563,10 +561,10 @@ const (
 	AdvisoryKindUnknown AdvisoryKind = "unknown"
 )
 
-// AdvisoryRow is one rendered advisory across any klyne-monitored
-// session. The Markdown content is exactly what the hook injected
-// into chat — preserving punctuation, percentages, file names — so
-// the cockpit can render it verbatim.
+// AdvisoryRow is one rendered advisory for a session. The Markdown
+// content is exactly what the hook injected into chat — preserving
+// punctuation, percentages, file names — so the cockpit can render
+// it verbatim.
 type AdvisoryRow struct {
 	MessageID   string       `json:"message_id"`
 	SessionID   string       `json:"session_id"`
@@ -575,12 +573,6 @@ type AdvisoryRow struct {
 	Kind        AdvisoryKind `json:"kind"`
 	Content     string       `json:"content"`
 	TS          int64        `json:"ts"`
-}
-
-// AdvisoryListResponse is GET /advisories — the cockpit's "every
-// advisory klyne has ever fired" feed. Newest first.
-type AdvisoryListResponse struct {
-	Advisories []AdvisoryRow `json:"advisories"`
 }
 
 // FileRelevanceProof is one file's contribution to the loaded

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -14,6 +15,33 @@ import (
 	"github.com/klyne-ai/klyne/internal/store"
 	"github.com/klyne-ai/klyne/internal/usage"
 )
+
+// ClassifyAdvisory inspects the advisory body and returns the
+// matching kind. Order matters: each trigger's most distinctive
+// substring is checked before the more generic "5-hour window"
+// phrase, because the acceleration advisory ALSO mentions
+// "5-hour window" in its "you'll burn through it faster" tail.
+// Returns AdvisoryKindUnknown on no match — never errors, so the
+// feed stays robust to copy refreshes.
+func ClassifyAdvisory(content string) api.AdvisoryKind {
+	c := strings.ToLower(content)
+	switch {
+	case strings.Contains(c, "per-turn cost has roughly doubled"):
+		return api.AdvisoryKindAcceleration
+	case strings.Contains(c, "next turn's prefix will keep growing"):
+		return api.AdvisoryKindHardCeiling
+	case strings.Contains(c, "shifted topic since the session opened"):
+		return api.AdvisoryKindTopicShift
+	case strings.Contains(c, "stale relative to your current direction"):
+		return api.AdvisoryKindStale
+	case strings.Contains(c, "cheapest next step is /klyne:handoff"):
+		return api.AdvisoryKindFiveHourUrgent
+	case strings.Contains(c, "5-hour window") || strings.Contains(c, "dominant consumer"):
+		return api.AdvisoryKindFiveHourWarn
+	default:
+		return api.AdvisoryKindUnknown
+	}
+}
 
 // AdvisorDetailHandler serves GET /sessions/{id}/advisor-detail.
 //

@@ -6,7 +6,6 @@
   import { subscribe } from '$lib/sse.js';
   import { refreshProjects } from '$lib/projects.svelte.js';
   import { cockpitStore, refreshCockpit } from '$lib/cockpit.svelte.js';
-  import { refreshAdvisors } from '$lib/advisors.svelte.js';
   import { onMsgNew } from '$lib/stores.svelte.js';
   import { beforeNavigate, goto } from '$app/navigation';
 
@@ -16,6 +15,11 @@
     if (to.url.pathname === '/cockpit') {
       cancel();
       void goto('/');
+    }
+    if (to.url.pathname === '/advisors' || to.url.pathname.startsWith('/advisors/')) {
+      cancel();
+      void goto('/');
+      return;
     }
     if (to.url.pathname.startsWith('/insights/projects/')) {
       const name = to.url.pathname.replace('/insights/projects/', '');
@@ -55,18 +59,15 @@
   let unsubscribeSSE: (() => void) | null = null;
   let tickHandle: ReturnType<typeof setInterval> | null = null;
   let cockpitRefreshHandle: ReturnType<typeof setInterval> | null = null;
-  let advisorRefreshHandle: ReturnType<typeof setInterval> | null = null;
 
   onMount(() => {
     void refreshProjects();
     void refreshCockpit();
-    void refreshAdvisors();
     // Tick drives liveCount recomputation in the nav without refetching.
     tickHandle = setInterval(() => { cockpitStore.tick = Date.now(); }, 5_000);
     // Periodic safety refresh — catches sessions started in other terminals
     // that never fire SSE during this page's lifetime.
     cockpitRefreshHandle = setInterval(() => { void refreshCockpit(); }, 60_000);
-    advisorRefreshHandle = setInterval(() => { void refreshAdvisors(); }, 60_000);
     unsubscribeSSE = subscribe({
       onMsgNew: (payload) => {
         onMsgNew(payload);
@@ -85,7 +86,6 @@
     unsubscribeSSE = null;
     if (tickHandle !== null) clearInterval(tickHandle);
     if (cockpitRefreshHandle !== null) clearInterval(cockpitRefreshHandle);
-    if (advisorRefreshHandle !== null) clearInterval(advisorRefreshHandle);
   });
 </script>
 

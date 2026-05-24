@@ -328,7 +328,7 @@ export interface SearchResponse {
   took_ms: number;
 }
 
-// --- /advisories ---
+// --- /sessions/{id}/advisor-detail ---
 
 /** AdvisoryKind identifies which klyne advisor trigger fired. */
 export type AdvisoryKind =
@@ -340,7 +340,7 @@ export type AdvisoryKind =
   | 'topic_shift'
   | 'unknown';
 
-/** AdvisoryRow is one rendered advisory across all klyne-monitored sessions. */
+/** AdvisoryRow is one rendered advisory for a session. */
 export interface AdvisoryRow {
   message_id: string;
   session_id: string;
@@ -349,11 +349,6 @@ export interface AdvisoryRow {
   kind: AdvisoryKind;
   content: string;
   ts: number;
-}
-
-/** AdvisoryListResponse is GET /advisories. */
-export interface AdvisoryListResponse {
-  advisories: AdvisoryRow[];
 }
 
 /** FileRelevanceProof is one file's per-file relevance row. */

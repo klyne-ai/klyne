@@ -13,7 +13,7 @@
     - A typical session emits ~50–500 points; a small SVG renderer
       is more than enough and adds zero dependency weight.
     - Matches the inline-style convention already used across the
-      sibling components (TokenSavings, AdvisorModal, UsageBadge).
+      sibling components (TokenSavings, UsageBadge).
     - Keeps the bundle small for a daemon UI that ships alongside the
       Go binary.
 

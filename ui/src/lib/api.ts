@@ -7,8 +7,6 @@
 
 import type {
   AdvisorDetailResponse,
-  AdvisoryKind,
-  AdvisoryListResponse,
   BreakAdviceResponse,
   CockpitThreadsResponse,
   CostSummaryQuery,
@@ -249,23 +247,8 @@ export async function search(q: string, limit?: number, sort: SearchSort = 'rece
 }
 
 // ---------------------------------------------------------------------------
-// /advisories
+// /sessions/{id}/advisor-detail
 // ---------------------------------------------------------------------------
-
-/** Optional filter for fetchAdvisories — by trigger kind. */
-export interface AdvisoriesQuery {
-  limit?: number;
-  kind?: AdvisoryKind;
-}
-
-/** GET /advisories — every klyne advisor message ingested into the index,
- * newest first. Pass `kind` to filter by trigger type. */
-export async function fetchAdvisories(opts: AdvisoriesQuery = {}): Promise<AdvisoryListResponse> {
-  return get<AdvisoryListResponse>('/advisories', {
-    limit: opts.limit,
-    kind: opts.kind
-  });
-}
 
 /** GET /sessions/{id}/advisor-detail — per-session advisories + proof
  * data the cockpit modal renders alongside each advisory. */

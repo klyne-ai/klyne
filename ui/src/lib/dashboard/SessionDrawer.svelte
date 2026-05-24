@@ -5,11 +5,11 @@
     fetchSession,
     fetchMessages,
     fetchSummary,
+    fetchAdvisorDetail,
   } from '$lib/api.js';
   import { kfmt, relAgo, costFmt } from '$lib/format.js';
   import { isConversationalMessage } from '$lib/messageFilters.js';
-  import { advisorsStore } from '$lib/advisors.svelte.js';
-  import type { Session, Message, SummaryResponse } from '$lib/types.js';
+  import type { Session, Message, SummaryResponse, AdvisoryRow } from '$lib/types.js';
   import Icon from './Icon.svelte';
   import TokenTimelineChart from '$lib/components/TokenTimelineChart.svelte';
   import RestoreContext from '$lib/components/RestoreContext.svelte';
@@ -27,6 +27,7 @@
   let session = $state<Session | null>(null);
   let messages = $state<Message[]>([]);
   let summary = $state<SummaryResponse | null>(null);
+  let sessionAdvisories = $state<AdvisoryRow[]>([]);
   let loadError = $state<string | null>(null);
   let copied = $state(false);
   let showRestore = $state(false);
@@ -45,11 +46,6 @@
 
   const visibleMessages = $derived(messages.filter(isConversationalMessage));
   const hiddenCount = $derived(messages.length - visibleMessages.length);
-
-  /** Advisories that fired in this session */
-  const sessionAdvisories = $derived(
-    advisorsStore.advisories.filter((a) => a.session_id === sessionId)
-  );
 
   const cachedRead = $derived(session?.cached_read_tokens ?? 0);
   const cachedWrite = $derived(session?.cached_write_tokens ?? 0);
@@ -129,6 +125,14 @@
       } catch {
         summary = null;
       }
+
+      // Per-session advisor detail (non-fatal — empty array on error).
+      try {
+        const r = await fetchAdvisorDetail(id);
+        sessionAdvisories = r.advisories ?? [];
+      } catch {
+        sessionAdvisories = [];
+      }
     } catch (e) {
       loadError = e instanceof Error ? e.message : 'Failed to load session';
     }
@@ -174,6 +178,7 @@
     session = null;
     messages = [];
     summary = null;
+    sessionAdvisories = [];
     loadError = null;
     if (id) void loadData(id);
   });

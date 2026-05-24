@@ -8,12 +8,11 @@
     current: NavId;
     collapsed: boolean;
     liveCount: number;
-    advisorCount: number;
     projectCount: number;
     onToggleCollapse: () => void;
     onOpenSearch: () => void;
   }
-  const { current, collapsed, liveCount, advisorCount, projectCount, onToggleCollapse, onOpenSearch }: Props = $props();
+  const { current, collapsed, liveCount, projectCount, onToggleCollapse, onOpenSearch }: Props = $props();
 
   function meta(id: NavId): { text: string; kind: '' | 'live' | 'alert' } {
     switch (id) {
@@ -22,7 +21,6 @@
       case 'projects': return { text: String(projectCount), kind: '' };
       case 'insights': return { text: '1d', kind: '' };
       case 'runbooks': return { text: '', kind: '' };
-      case 'advisors': return { text: String(advisorCount), kind: advisorCount > 0 ? 'alert' : '' };
       case 'worklog': return { text: '', kind: '' };
     }
   }
