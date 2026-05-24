@@ -24,7 +24,7 @@
   import { relAgo, relTime, kfmt } from '$lib/format';
   import { isConversationalMessage } from '$lib/messageFilters';
   import { portal } from '$lib/dashboard/portal';
-  import { fetchSession, fetchAdvisorDetail } from '$lib/api';
+  import { fetchSession, fetchAdvisorDetail, fetchMessages } from '$lib/api';
   import type {
     CockpitThread,
     Message,
@@ -39,12 +39,17 @@
 
   interface Props {
     thread: CockpitThread;
+    /**
+     * Initial messages from the cockpit feed (latest few). On open we
+     * fetch the full page via fetchMessages so the user sees the whole
+     * recent conversation, not just the cockpit's truncated tail.
+     */
     messages: Message[];
     origin: { x: number; y: number } | null;
     tickMs: number;
     onClose: () => void;
   }
-  const { thread, messages, origin, tickMs, onClose }: Props = $props();
+  const { thread, messages: initialMessages, origin, tickMs, onClose }: Props = $props();
 
   type Tab = 'messages' | 'context' | 'files';
   type FileFilter = 'all' | 'stale' | 'useful';
@@ -59,11 +64,55 @@
   let loadingDetail = $state(true);
   let detailError = $state<string | null>(null);
 
+  // ── Messages — start with the cockpit feed snapshot, then replace
+  //    with a 100-newest fetch on mount; paginate older via cursor.
+  //    Seeded on the first $effect tick to avoid Svelte's
+  //    state_referenced_locally warning on prop capture. ──
+  let messages = $state<Message[]>([]);
+  let seeded = false;
+  let olderCursor = $state<number | null>(null);
+  let loadingOlder = $state(false);
+  let messagesError = $state<string | null>(null);
+
   // ── Expanded state for collapsible advisory groups ──
   let advisoryOpenKinds = $state<Set<AdvisoryKind>>(new Set());
 
   const visible = $derived(messages.filter(isConversationalMessage));
   const isLive = $derived(tickMs - thread.last_msg_at < 60_000);
+
+  function sortMessages(list: Message[]): Message[] {
+    return [...list].sort((a, b) => (a.ts - b.ts) || a.id.localeCompare(b.id));
+  }
+
+  async function fetchInitialMessages(): Promise<void> {
+    try {
+      const r = await fetchMessages(thread.session_id, { limit: 100, order: 'desc' });
+      // API returns newest-first; we display chronological so flip.
+      messages = sortMessages(r.messages);
+      olderCursor = r.next_before > 0 ? r.next_before : null;
+      messagesError = null;
+    } catch (e) {
+      messagesError = e instanceof Error ? e.message : 'failed to load messages';
+    }
+  }
+
+  async function loadOlderMessages(): Promise<void> {
+    if (olderCursor === null || loadingOlder) return;
+    loadingOlder = true;
+    try {
+      const r = await fetchMessages(thread.session_id, {
+        limit: 100,
+        before: olderCursor,
+        order: 'desc',
+      });
+      messages = sortMessages([...r.messages, ...messages]);
+      olderCursor = r.next_before > 0 ? r.next_before : null;
+    } catch {
+      // non-fatal — user can click again
+    } finally {
+      loadingOlder = false;
+    }
+  }
 
   function close(): void {
     closing = true;
@@ -103,10 +152,15 @@
 
   let prevOverflow = '';
   onMount(() => {
+    if (!seeded) {
+      messages = initialMessages;
+      seeded = true;
+    }
     window.addEventListener('keydown', onKey);
     prevOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     void loadDetail();
+    void fetchInitialMessages();
   });
   onDestroy(() => {
     window.removeEventListener('keydown', onKey);
@@ -329,6 +383,17 @@
 
   <div class="thread-modal__body tpm-body">
     {#if activeTab === 'messages'}
+      {#if olderCursor !== null}
+        <button
+          type="button"
+          class="tpm-load-older"
+          onclick={loadOlderMessages}
+          disabled={loadingOlder}
+          aria-busy={loadingOlder}
+        >
+          {loadingOlder ? 'Loading older messages…' : '↑ Load older messages'}
+        </button>
+      {/if}
       {#each visible as m, i (m.id)}
         <div class="msg" style:animation-delay="{i * 55}ms">
           <div class="role">{m.role}</div>
@@ -336,7 +401,11 @@
         </div>
       {/each}
       {#if visible.length === 0}
-        <p class="mono dim">no conversational turns captured yet</p>
+        {#if messagesError}
+          <p class="mono dim">Couldn't load messages — {messagesError}</p>
+        {:else}
+          <p class="mono dim">no conversational turns captured yet</p>
+        {/if}
       {/if}
     {:else if activeTab === 'context'}
       {#if loadingDetail && !advisor}
@@ -611,6 +680,29 @@
   /* ── Body adjustments ── */
   .tpm-body {
     gap: 14px;
+  }
+
+  /* "Load older" button at the top of the messages tab. */
+  .tpm-load-older {
+    align-self: center;
+    padding: 5px 12px;
+    border-radius: 999px;
+    border: 1px solid var(--border-hair);
+    background: var(--bg-card-2);
+    color: var(--fg-soft);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    cursor: pointer;
+    transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+  }
+  .tpm-load-older:not(:disabled):hover {
+    background: var(--bg-card);
+    color: var(--fg);
+    border-color: var(--border);
+  }
+  .tpm-load-older:disabled {
+    opacity: 0.6;
+    cursor: progress;
   }
 
   /* ── Context-tab cards ── */

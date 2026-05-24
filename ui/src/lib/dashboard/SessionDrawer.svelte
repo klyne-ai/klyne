@@ -9,7 +9,7 @@
   } from '$lib/api.js';
   import { kfmt, relAgo, costFmt } from '$lib/format.js';
   import { isConversationalMessage } from '$lib/messageFilters.js';
-  import type { Session, Message, SummaryResponse, AdvisoryRow } from '$lib/types.js';
+  import type { Session, Message, SummaryResponse, AdvisoryRow, AdvisorDetailResponse } from '$lib/types.js';
   import Icon from './Icon.svelte';
   import TokenTimelineChart from '$lib/components/TokenTimelineChart.svelte';
   import RestoreContext from '$lib/components/RestoreContext.svelte';
@@ -28,6 +28,7 @@
   let messages = $state<Message[]>([]);
   let summary = $state<SummaryResponse | null>(null);
   let sessionAdvisories = $state<AdvisoryRow[]>([]);
+  let advisorDetail = $state<AdvisorDetailResponse | null>(null);
   let loadError = $state<string | null>(null);
   let copied = $state(false);
   let showRestore = $state(false);
@@ -63,9 +64,40 @@
     return 200_000;
   }
 
-  function pctOfContext(s: typeof session): number {
-    if (!s || s.tokens_in <= 0) return 0;
-    return Math.round((s.tokens_in / modelContextLimit(s.model)) * 100);
+  // Context-window fill = LATEST per-turn input (what the next API call
+  // would send), NOT the cumulative tokens_in sum. tokens_in adds every
+  // call's input — including cached re-reads — so on a long session it
+  // exceeds the per-call limit by orders of magnitude (e.g. 1.7M / 400K =
+  // 422% for a 149-turn session). The advisor pipeline already computes
+  // the right thing in ContextWindowProof; if it's loaded we prefer that.
+  // Falls back to the cumulative figure only when advisor data is absent,
+  // for sessions the daemon hasn't classified yet.
+  function ctxFill(s: typeof session, ad: AdvisorDetailResponse | null): {
+    pct: number;
+    used: number;
+    limit: number;
+    source: 'latest' | 'fallback';
+  } | null {
+    if (!s) return null;
+    if (ad && ad.context_window.context_window > 0) {
+      return {
+        pct: Math.round(ad.context_window.fill_pct),
+        used: ad.context_window.latest_input,
+        limit: ad.context_window.context_window,
+        source: 'latest',
+      };
+    }
+    // Fallback: cumulative-tokens-in / per-call limit. Wrong for long
+    // sessions; we clamp the display to 100% and tag it as "cumulative"
+    // so the reader knows the number is approximate.
+    if (s.tokens_in <= 0) return null;
+    const limit = modelContextLimit(s.model);
+    return {
+      pct: Math.min(100, Math.round((s.tokens_in / limit) * 100)),
+      used: s.tokens_in,
+      limit,
+      source: 'fallback',
+    };
   }
 
   function resumeCommand(): string {
@@ -118,6 +150,7 @@
       ]);
       session = sr.session;
       messages = newestPageInDisplayOrder(mr.messages);
+      olderCursor = mr.next_before > 0 ? mr.next_before : null;
 
       // Load summary non-fatally
       try {
@@ -127,14 +160,46 @@
       }
 
       // Per-session advisor detail (non-fatal — empty array on error).
+      // The ContextWindowProof in advisorDetail is what ctxFill() uses
+      // for the "% full" header bar so we don't show a meaningless
+      // cumulative-tokens-divided-by-per-call-limit number.
       try {
         const r = await fetchAdvisorDetail(id);
+        advisorDetail = r;
         sessionAdvisories = r.advisories ?? [];
       } catch {
+        advisorDetail = null;
         sessionAdvisories = [];
       }
     } catch (e) {
       loadError = e instanceof Error ? e.message : 'Failed to load session';
+    }
+  }
+
+  // Older-page cursor returned by the most recent fetchMessages call;
+  // null when we've reached the start of the conversation.
+  let olderCursor = $state<number | null>(null);
+  let loadingOlder = $state(false);
+
+  async function loadOlderMessages(): Promise<void> {
+    if (!sessionId || olderCursor === null || loadingOlder) return;
+    loadingOlder = true;
+    try {
+      const res = await fetchMessages(sessionId, {
+        limit: 100,
+        before: olderCursor,
+        order: 'desc',
+      });
+      // Prepend in chronological order so the existing display order
+      // (oldest at top, newest at bottom) holds.
+      const older = newestPageInDisplayOrder(res.messages);
+      const merged = [...older, ...messages];
+      messages = sortMessagesForDisplay(merged);
+      olderCursor = res.next_before > 0 ? res.next_before : null;
+    } catch {
+      // non-fatal; user can click again
+    } finally {
+      loadingOlder = false;
     }
   }
 
@@ -179,6 +244,9 @@
     messages = [];
     summary = null;
     sessionAdvisories = [];
+    advisorDetail = null;
+    olderCursor = null;
+    loadingOlder = false;
     loadError = null;
     if (id) void loadData(id);
   });
@@ -263,25 +331,38 @@
         </div>
       </div>
 
-      <!-- 2. Context % bar -->
-      {#if session.tokens_in > 0}
-        {@const pct = pctOfContext(session)}
+      <!-- 2. Context % bar — measures the LATEST per-turn input vs the
+           model's per-call context window (sourced from the advisor's
+           ContextWindowProof). The `tokens_in` value on `session` is
+           cumulative and unsuitable for this measurement; see ctxFill(). -->
+      {@const cf = ctxFill(session, advisorDetail)}
+      {#if cf}
         <section class="card ctx-card">
           <header class="ctx-head">
-            <span class="mono soft">Session {pct}% full</span>
+            <span class="mono soft">Session {cf.pct}% full</span>
             <span class="mono dim">
-              {kfmt(session.tokens_in)} of {kfmt(modelContextLimit(session.model))} · {session.model}
+              {kfmt(cf.used)} of {kfmt(cf.limit)} · {session.model}
+              {#if cf.source === 'fallback'} (cumulative){/if}
             </span>
           </header>
           <div class="hbar">
             <div
               class="fill"
-              class:alert={pct > 70}
-              class:warn={pct > 50 && pct <= 70}
-              class:ok={pct <= 50}
-              style:transform={`scaleX(${Math.min(pct, 100) / 100})`}
+              class:alert={cf.pct > 70}
+              class:warn={cf.pct > 50 && cf.pct <= 70}
+              class:ok={cf.pct <= 50}
+              style:transform={`scaleX(${Math.min(cf.pct, 100) / 100})`}
             ></div>
           </div>
+          <!-- Sub-line: the cumulative numbers are still useful as
+               cost/usage context, just not as "session fill". -->
+          {#if session.tokens_in > 0}
+            <div class="ctx-sub mono dim">
+              cumulative: {kfmt(session.tokens_in)} input
+              {#if cachedRead + cachedWrite > 0} · {cachedPct}% cached{/if}
+              · {kfmt(session.tokens_out)} output
+            </div>
+          {/if}
         </section>
       {/if}
 
@@ -348,6 +429,17 @@
           </div>
         </header>
         <div class="msg-stream">
+          {#if olderCursor !== null}
+            <button
+              type="button"
+              class="load-older"
+              onclick={loadOlderMessages}
+              disabled={loadingOlder}
+              aria-busy={loadingOlder}
+            >
+              {loadingOlder ? 'Loading older messages…' : '↑ Load older messages'}
+            </button>
+          {/if}
           {#each messages as m (m.id)}
             {#if m.tool_calls && m.tool_calls.length > 0}
               {#each m.tool_calls as tc (tc.id)}
@@ -533,6 +625,7 @@
   /* ── Context % bar ──────────────────────────────────────────────────── */
   .ctx-card { padding: 14px 16px; }
   .ctx-head { display: flex; justify-content: space-between; margin-bottom: 6px; }
+  .ctx-sub  { margin-top: 6px; font-size: 11px; }
   .soft { color: var(--fg-soft, var(--fg-muted)); font-size: 12px; }
   .dim  { color: var(--fg-muted); font-size: 11px; }
   .hbar {
@@ -625,6 +718,28 @@
   /* ── Message stream ──────────────────────────────────────────────────── */
   .msg-stream {
     display: flex; flex-direction: column; gap: 1px;
+  }
+  .load-older {
+    align-self: center;
+    margin: 8px auto;
+    padding: 6px 12px;
+    border-radius: 999px;
+    border: 1px solid var(--border-hair);
+    background: var(--bg-card-2);
+    color: var(--fg-soft);
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    cursor: pointer;
+    transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+  }
+  .load-older:not(:disabled):hover {
+    background: var(--bg-card);
+    color: var(--fg);
+    border-color: var(--border);
+  }
+  .load-older:disabled {
+    opacity: 0.6;
+    cursor: progress;
   }
   .msg-row {
     padding: 10px 14px;
