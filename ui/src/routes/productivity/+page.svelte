@@ -36,7 +36,20 @@
   let since = $state<number>(0);
   let until = $state<number>(0);
   let copied = $state(false);
-  let rangeKey = $state<'today'|'yesterday'|'7d'|'14d'|'30d'>('yesterday');
+  // Four preset windows only. The dashboard is snapshot-backed
+  // (daily_productivity_snapshot, migration 021) so past-day rendering
+  // is deterministic across reloads; arbitrary multi-day ranges are no
+  // longer offered. Default opens on today so the user sees their
+  // in-progress work first.
+  type RangeKey = 'today' | 'yesterday' | 'this_week' | 'last_week';
+  const RANGE_KEYS: readonly RangeKey[] = ['today', 'yesterday', 'this_week', 'last_week'] as const;
+  const RANGE_LABELS: Record<RangeKey, string> = {
+    today: 'today',
+    yesterday: 'yesterday',
+    this_week: 'this week',
+    last_week: 'last week',
+  };
+  let rangeKey = $state<RangeKey>('today');
 
   interface CachedReport { since: number; until: number; loadedAt: number; rep: ProductivityReport; }
   function loadCached(): CachedReport | null {
@@ -47,36 +60,53 @@
   function saveRange(s: number, u: number) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ since: s, until: u })); } catch {} }
   function loadSaved(): {since:number;until:number}|null { try { const raw=localStorage.getItem(STORAGE_KEY); if(!raw) return null; const p=JSON.parse(raw); if(typeof p?.since==='number'&&typeof p?.until==='number') return {since:p.since,until:p.until}; } catch {} return null; }
 
-  function rangeFor(key: typeof rangeKey): { since: number; until: number } {
+  // Week boundaries use Monday as the first day of the week (ISO 8601).
+  // "This week" = Mon 00:00 of the current week → now.
+  // "Last week" = Mon 00:00 of the previous week → Sun 23:59:59.999.
+  function startOfWeek(at: Date): Date {
+    const d = new Date(at.getFullYear(), at.getMonth(), at.getDate(), 0, 0, 0, 0);
+    // getDay(): Sun=0, Mon=1, ..., Sat=6. Days back to Monday:
+    //   Mon→0, Tue→1, ..., Sun→6.
+    const back = (d.getDay() + 6) % 7;
+    d.setDate(d.getDate() - back);
+    return d;
+  }
+  function rangeFor(key: RangeKey): { since: number; until: number } {
     const now = new Date();
     const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).getTime();
     const day = 24*60*60*1000;
     switch (key) {
       case 'today':     return { since: midnight, until: Date.now() };
       case 'yesterday': return { since: midnight - day, until: midnight - 1 };
-      case '7d':        return { since: midnight - 7*day, until: midnight - 1 };
-      case '14d':       return { since: midnight - 14*day, until: midnight - 1 };
-      case '30d':       return { since: midnight - 30*day, until: midnight - 1 };
+      case 'this_week': {
+        const weekStart = startOfWeek(now).getTime();
+        return { since: weekStart, until: Date.now() };
+      }
+      case 'last_week': {
+        const thisWeekStart = startOfWeek(now).getTime();
+        return { since: thisWeekStart - 7*day, until: thisWeekStart - 1 };
+      }
     }
   }
-  function detectRangeKey(s: number, u: number): typeof rangeKey {
+  function detectRangeKey(s: number, u: number): RangeKey {
+    // Compare against the four preset windows by snapping each to its
+    // day-resolution start. Multi-day windows match against the week
+    // presets by date-equality of the start day. Anything that doesn't
+    // match falls back to 'today' — the dashboard now only offers the
+    // four presets, so a mismatched (since,until) is a stale URL or
+    // localStorage value from a previous version.
+    const now = new Date();
+    const todayMid = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).getTime();
     const day = 86_400_000;
-    const span = Math.round((u - s + 1) / day);
-    if (span <= 1) {
-      // <=1 day window. Disambiguate today vs yesterday by snapping
-      // `since` to whichever local-midnight is closer. Without this,
-      // a fresh "today" load (since = today's midnight, until = now)
-      // was misclassified as "yesterday" because span ≤ 1 always
-      // returned that branch — the chip then showed yesterday selected
-      // while the body rendered today's data.
-      const now = new Date();
-      const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).getTime();
-      const yesterdayMidnight = todayMidnight - day;
-      return Math.abs(s - todayMidnight) <= Math.abs(s - yesterdayMidnight) ? 'today' : 'yesterday';
-    }
-    if (span <= 7)  return '7d';
-    if (span <= 14) return '14d';
-    return '30d';
+    const thisWeekStart = startOfWeek(now).getTime();
+    const lastWeekStart = thisWeekStart - 7*day;
+
+    const sameMidnight = (a: number, b: number) => Math.abs(a - b) < 1000;
+    if (sameMidnight(s, todayMid)) return 'today';
+    if (sameMidnight(s, todayMid - day)) return 'yesterday';
+    if (sameMidnight(s, thisWeekStart)) return 'this_week';
+    if (sameMidnight(s, lastWeekStart)) return 'last_week';
+    return 'today';
   }
   function syncUrl(s: number, u: number) {
     const q = new URLSearchParams(window.location.search);
@@ -116,7 +146,7 @@
       loading = false;
     }
   }
-  function pickRange(k: typeof rangeKey) {
+  function pickRange(k: RangeKey) {
     if (rangeKey === k) return;
     rangeKey = k;
     const r = rangeFor(k);
@@ -131,7 +161,7 @@
     const qs = Number(q.get('since')), qu = Number(q.get('until'));
     let init: { since: number; until: number };
     if (Number.isFinite(qs) && qs > 0 && Number.isFinite(qu) && qu > 0) init = { since: qs, until: qu };
-    else init = loadSaved() ?? rangeFor('yesterday');
+    else init = loadSaved() ?? rangeFor('today');
     since = init.since; until = init.until;
     rangeKey = detectRangeKey(since, until);
     saveRange(since, until); syncUrl(since, until);
@@ -537,8 +567,8 @@
       <span class="rail-app">productivity</span>
     </div>
     <div class="seg">
-      {#each (['today','yesterday','7d','14d','30d'] as const) as k (k)}
-        <button class="seg-btn" class:on={rangeKey === k} onclick={() => pickRange(k)}>{k}</button>
+      {#each RANGE_KEYS as k (k)}
+        <button class="seg-btn" class:on={rangeKey === k} onclick={() => pickRange(k)}>{RANGE_LABELS[k]}</button>
       {/each}
     </div>
     <div class="rail-right">
@@ -554,7 +584,7 @@
   {#if loading && rep}
     <div class="range-loading mono" role="status" aria-live="polite">
       <span class="range-spinner"></span>
-      <span>Fetching {rangeKey}…</span>
+      <span>Fetching {RANGE_LABELS[rangeKey]}…</span>
       <button class="btn-ghost-l" onclick={() => { inflight?.abort(); }}>Cancel</button>
     </div>
   {/if}
