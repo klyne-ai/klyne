@@ -22,7 +22,7 @@
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { fetchProductivity, type ProductivityReport, type ProductivityService, type ProductivitySessionStat } from '$lib/api.js';
+  import type { ProductivityReport, ProductivityService, ProductivitySessionStat } from '$lib/api.js';
   import { applyHiddenFilter, hiddenSessionIds, hideMany, clearHidden } from '$lib/hidden-sessions.svelte';
   import ConcurrencyTimeline from '$lib/components/productivity/ConcurrencyTimeline.svelte';
 
@@ -509,31 +509,52 @@
         repo:  s.repo,
       }));
   }
-  function topAlerts(svcs: ProductivityService[]): { level:'alert'|'warn'; rank:string; kicker:string; title:string; body:string; meta:string; actions:string[] }[] {
-    const items: { level:'alert'|'warn'; weight:number; kicker:string; title:string; body:string; meta:string; actions:string[] }[] = [];
+  // Risk kind → human kicker. Centralised so the masthead pill and the
+  // triage card use the same wording (and so the masthead can't mislabel
+  // a done-uncommitted alert as "credential flag" the way it used to).
+  const ALERT_KICKER: Record<string, string> = {
+    'done-uncommitted': 'Uncommitted work',
+    'unpushed':         'Unpushed commits',
+  };
+  function topAlerts(svcs: ProductivityService[]): { level:'alert'|'warn'; rank:string; kicker:string; title:string; body:string; meta:string }[] {
+    const items: { level:'alert'|'warn'; weight:number; kicker:string; title:string; body:string; meta:string }[] = [];
     for (const svc of svcs ?? []) for (const r of svc.risks ?? []) {
       if (r.kind === 'done-uncommitted') {
         items.push({
           level: 'alert', weight: 90 + r.age_minutes/60,
-          kicker: 'Uncommitted work',
+          kicker: ALERT_KICKER['done-uncommitted'],
           title:  r.detail || `Uncommitted edits in ${svc.repo}`,
           body:   r.files?.length ? `${r.files.length} file${r.files.length===1?'':'s'}: ${r.files.slice(0,3).join(', ')}` : `branch ${r.branch || 'main'}`,
           meta:   `${svc.repo} · ${r.branch || 'main'} · ${fmtMinutes(r.age_minutes)} old`,
-          actions: ['Stage changes', 'Snapshot'],
         });
       } else if (r.kind === 'unpushed') {
         items.push({
           level: 'warn', weight: 50 + (r.commits?.length ?? 0)*5,
-          kicker: 'Unpushed commits',
+          kicker: ALERT_KICKER['unpushed'],
           title:  r.detail || `${r.commits?.length ?? 0} commit(s) ahead, not on origin`,
           body:   r.commits?.length ? r.commits.slice(0,3).map(c => `${shortId(c.sha,7)} · ${c.subject}`).join('  ·  ') : `branch ${r.branch}`,
           meta:   `${svc.repo} · ${r.branch || 'main'}`,
-          actions: ['Push branch', 'Inspect'],
         });
       }
     }
     items.sort((a,b) => b.weight - a.weight);
     return items.slice(0,2).map((it,i) => ({ ...it, rank: (i+1).toString().padStart(2,'0') }));
+  }
+  // pluralise — masthead pill copy ("1 alert" vs "2 alerts").
+  function plural(n: number, s: string, p?: string): string {
+    return `${n} ${n === 1 ? s : (p ?? s + 's')}`;
+  }
+  // Reflection status enum → display label. The handler emits
+  // 'missing' | 'stale' | 'current'; anything else (including ''/null
+  // for a single-day report that never set it) renders as a generic
+  // "no data" label rather than echoing the raw string verbatim.
+  const REFLECTION_LABEL: Record<string, string> = {
+    current: 'reflection current',
+    stale:   'reflection stale',
+    missing: 'no reflection',
+  };
+  function reflectionLabel(status: string | undefined): string {
+    return REFLECTION_LABEL[String(status || '')] ?? 'no reflection';
   }
 
   async function copyForStandup() {
@@ -638,9 +659,9 @@
         </div>
         <div class="mast-m">
           <div class="mast-pills">
-            <span class="pill pill-ok"><span class="dot dot-ok"></span>reflection {v.reflection_status || 'unknown'}</span>
+            <span class="pill pill-ok"><span class="dot dot-ok"></span>{reflectionLabel(v.reflection_status)}</span>
             {#if alerts.length > 0}
-              <span class="pill pill-alert"><span class="dot dot-alert"></span>{alerts.length} {alerts[0].level === 'alert' ? 'credential flag' : 'flag'}{alerts.length===1?'':'s'} · review before EOD</span>
+              <span class="pill pill-alert"><span class="dot dot-alert"></span>{plural(alerts.length, 'open alert')} · review before EOD</span>
             {/if}
           </div>
           <span class="mast-sub">{realSessions.length} worklog entries pending · next /klyne:reflect when window resets</span>
@@ -665,11 +686,6 @@
             </div>
             <h3 class="tc-title">{a.title}</h3>
             <p class="tc-body">{a.body}</p>
-            <div class="tc-actions">
-              {#each a.actions as ax, i}
-                <button class="btn" class:btn-fill={i===0}>{ax}</button>
-              {/each}
-            </div>
           </article>
         {/each}
         {#if alerts.length === 0}

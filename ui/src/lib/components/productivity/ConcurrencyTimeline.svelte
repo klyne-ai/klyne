@@ -28,14 +28,20 @@
   }
   let { sessions, since, until }: Props = $props();
 
-  // Stable known-name colors — matches the V4 mock's legend.
+  // Stable per-repo color from a small palette. Hashes the repo name so
+  // the same repo always lands on the same color across reloads without
+  // hardcoding any project's names (OSS — the old fallback to
+  // `--fg-dim` rendered every unrecognised repo as low-contrast grey,
+  // which is the only experience anyone outside our team would have).
+  const REPO_PALETTE = ['--ok', '--info', '--warn', '--accent', '--ad-claude', '--ad-codex'] as const;
   function repoColor(repo: string): string {
     const r = (repo || '').toLowerCase();
-    if (r.includes('operations') || r.includes('app'))     return 'var(--ok)';
-    if (r === 'klyne')                                      return 'var(--info)';
-    if (r.includes('oms')   || r.includes('order'))         return 'var(--warn)';
-    if (r.includes('doc')   || r.includes('docs'))          return 'var(--accent)';
-    return 'var(--fg-dim)';
+    if (!r) return 'var(--fg-dim)';
+    // djb2 — small, stable, decent distribution for short strings.
+    let h = 5381;
+    for (let i = 0; i < r.length; i++) h = (((h << 5) + h) + r.charCodeAt(i)) | 0;
+    const idx = Math.abs(h) % REPO_PALETTE.length;
+    return `var(${REPO_PALETTE[idx]})`;
   }
 
   // Lane layout: 7 lanes, each 11px tall (6 + 5 gap), session-index modulo.
