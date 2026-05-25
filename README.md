@@ -38,10 +38,19 @@ klyne runs at `http://127.0.0.1:7878` and stays local to your machine.
 
 | Tab | Snapshot |
 |---|---|
-| **Productivity** | Standup digest, uncommitted work, credential/risk flags, and "what was done" bullets. |
+| **Productivity** | Standup digest, uncommitted work, risk flags, and "what was done" bullets. URL: `/productivity`. |
 | **Worklog** | Important sessions from Claude and Codex, interleaved by time. |
 | **Insights** | Token economics, model mix, project ranking, activity rhythm, and cache behavior. |
 | **Runbooks** | Project/global memories the AI can recall before risky commands. |
+
+### Productivity dashboard — what's deterministic
+
+The productivity tab offers four ranges: **Today**, **Yesterday**, **This Week** (Mon→now, ISO week), **Last Week** (Mon→Sun prior). Past days are snapshot-backed so reloads show the same numbers; today is recomputed live since the day isn't done yet.
+
+- Daily snapshots are written either by `/klyne:reflect` (authoritative — your blessed summary) or by the dashboard handler on first read of a past day (lazy backfill). Reflection snapshots beat live snapshots; running `/klyne:reflect` again refreshes the day.
+- Merged-PR data comes from `gh pr list` and is TTL-cached; you don't need `gh` installed, but the PR column will be empty without it.
+- Hit the **Refresh** button (or `?refresh=1`) to force a recompute that bypasses both snapshots and the PR cache.
+- All productivity numbers are computed locally from your sessions/messages and `git log` — **no LLM is called** in the dashboard's data path. LLM use is quarantined to `/klyne:reflect`, which only runs when you invoke it.
 
 <details>
 <summary>What a captured worklog row contains</summary>
