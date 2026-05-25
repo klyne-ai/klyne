@@ -34,6 +34,18 @@ type DailyProductivitySnapshot struct {
 // (project_path, day). Idempotent under the PK; the row's created_at is
 // preserved on update so the "first time we saw this day" timestamp
 // stays stable.
+//
+// Source precedence: a "reflection" row is authoritative and will NOT be
+// overwritten by a subsequent "live" upsert (the WHERE clause on the
+// ON CONFLICT enforces this at the SQL layer). A "reflection" upsert
+// always wins — re-running /klyne:reflect for a day produces a fresh
+// authoritative snapshot. Two "live" upserts: last-writer-wins, fine.
+//
+// The clobber-prevention matters because the handler's lazy backfill
+// races a /klyne:reflect that lands during the same request — without
+// the guard, the live recompute would silently replace the user's
+// reflection-time payload (which carries ReflectionMarkdown the
+// recompute doesn't reproduce).
 func UpsertDailyProductivitySnapshot(ctx context.Context, db *DB, s DailyProductivitySnapshot) error {
 	if s.ProjectPath == "" {
 		return errors.New("store: daily productivity snapshot: project_path required")
@@ -59,7 +71,9 @@ ON CONFLICT(project_path, day) DO UPDATE SET
     payload_json         = excluded.payload_json,
     total_active_minutes = excluded.total_active_minutes,
     source               = excluded.source,
-    updated_at           = excluded.updated_at`,
+    updated_at           = excluded.updated_at
+WHERE daily_productivity_snapshot.source != 'reflection'
+   OR excluded.source = 'reflection'`,
 		s.ProjectPath, s.Day, s.PayloadJSON, s.TotalActiveMinutes,
 		s.Source, s.CreatedAt, s.UpdatedAt)
 	if err != nil {
