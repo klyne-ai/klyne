@@ -149,6 +149,18 @@ func (h *ProductivityHandler) Get(w http.ResponseWriter, r *http.Request) {
 		composite = productivity.AggregateReports(perDay, since.Local().Format("2006-01-02"))
 	}
 
+	// Layer-2 enrichments — applied ONCE per request against the union
+	// window (not per-day, the previous code path). Merged-PR data is
+	// TTL-cached via github_pr_cache so a hot reload is a no-op; the
+	// per-day loop previously hit 7 cache keys for a 7-day window and
+	// triggered 7 cold `gh pr list` invocations on a miss. GitFetchedAt
+	// is the current local FETCH_HEAD mtime — a "live state" fact
+	// that should never have been persisted in per-day snapshots.
+	h.enrichMergedPRs(ctx, &composite, since, until, force)
+	for i := range composite.Services {
+		composite.Services[i].GitFetchedAt = gitFetchedAt(composite.Services[i].ProjectPath)
+	}
+
 	writeJSON(w, http.StatusOK, composite)
 }
 
@@ -229,13 +241,13 @@ func (h *ProductivityHandler) computeLiveReport(
 		return productivity.Report{}, err
 	}
 
-	// Layer-2 GitHub enrichment + git_fetched_at — runs inside the live
-	// compute so a backfilled snapshot row already carries the
-	// enrichments (a later read skips this step entirely).
-	h.enrichMergedPRs(ctx, &rep, since, until, force)
-	for i := range rep.Services {
-		rep.Services[i].GitFetchedAt = gitFetchedAt(rep.Services[i].ProjectPath)
-	}
+	// NOTE: Layer-2 GitHub enrichment (merged_prs) and the current
+	// FETCH_HEAD mtime (git_fetched_at) are NOT applied here. They are
+	// derived once at the end of Get() against the union window so a
+	// 7-day "Last Week" cold backfill triggers ONE `gh` call per slug
+	// instead of 7. Keeping them out of computeLiveReport also keeps
+	// snapshots free of external/time-derived data — a snapshot stores
+	// only what is locally deterministic for the day.
 	return rep, nil
 }
 
@@ -278,42 +290,119 @@ func (h *ProductivityHandler) tryReadSnapshotDay(
 // ("live" for handler backfill; reflection-recorder writes its own
 // rows with source="reflection" via worklog.writeProductivitySnapshot).
 //
+// Orphan-session attribution: sessions whose Repo doesn't match any
+// Service (ran outside any discovered git repo, or in a repo whose
+// scan failed) would otherwise be dropped from every per-project
+// slice — the re-aggregation invariant promised by singleProjectReport
+// would silently under-count. We attach all such orphans to the FIRST
+// service's snapshot (alphabetical ProjectPath order is stable across
+// runs), so re-aggregating N per-project payloads still recovers
+// every session's minutes. When the report has zero services but
+// non-empty Sessions, we write one sentinel row keyed by
+// "__orphan_sessions__" to preserve the orphan minutes.
+//
 // Errors per-row are logged-but-not-fatal: a snapshot is a perf/UX
 // optimisation, not load-bearing.
 func (h *ProductivityHandler) persistSnapshotsForDay(
 	ctx context.Context, rep productivity.Report, dayStr, source string,
 ) {
 	now := time.Now().UnixMilli()
+	knownRepos := map[string]struct{}{}
 	for _, svc := range rep.Services {
-		single := singleProjectReport(rep, svc, dayStr)
-		payload, err := json.Marshal(single)
-		if err != nil {
-			log.Printf("productivity: marshal snapshot %s/%s: %v", svc.ProjectPath, dayStr, err)
-			continue
-		}
-		if err := store.UpsertDailyProductivitySnapshot(ctx, h.db, store.DailyProductivitySnapshot{
-			ProjectPath:        svc.ProjectPath,
-			Day:                dayStr,
-			PayloadJSON:        string(payload),
-			TotalActiveMinutes: single.TotalActiveMinutes,
-			Source:             source,
-			CreatedAt:          now,
-			UpdatedAt:          now,
-		}); err != nil {
-			log.Printf("productivity: upsert snapshot %s/%s: %v", svc.ProjectPath, dayStr, err)
+		knownRepos[svc.Repo] = struct{}{}
+	}
+	var orphans []productivity.SessionStat
+	for _, s := range rep.Sessions {
+		if _, ok := knownRepos[s.Repo]; !ok {
+			orphans = append(orphans, s)
 		}
 	}
+
+	if len(rep.Services) == 0 && len(orphans) > 0 {
+		// No services to carry the orphans — write one sentinel row so
+		// the day's minutes are preserved across reloads.
+		h.upsertSnapshot(ctx, "__orphan_sessions__", dayStr, source,
+			orphanOnlyReport(rep, orphans, dayStr), now)
+		return
+	}
+	for i, svc := range rep.Services {
+		var attach []productivity.SessionStat
+		if i == 0 {
+			attach = orphans
+		}
+		single := singleProjectReport(rep, svc, dayStr, attach)
+		h.upsertSnapshot(ctx, svc.ProjectPath, dayStr, source, single, now)
+	}
+}
+
+// upsertSnapshot is the marshal-and-log wrapper for one snapshot row.
+// Extracted so persistSnapshotsForDay's orphan and per-service paths
+// share the same error handling.
+func (h *ProductivityHandler) upsertSnapshot(
+	ctx context.Context, projectPath, dayStr, source string,
+	rep productivity.Report, now int64,
+) {
+	payload, err := json.Marshal(rep)
+	if err != nil {
+		log.Printf("productivity: marshal snapshot %s/%s: %v", projectPath, dayStr, err)
+		return
+	}
+	if err := store.UpsertDailyProductivitySnapshot(ctx, h.db, store.DailyProductivitySnapshot{
+		ProjectPath:        projectPath,
+		Day:                dayStr,
+		PayloadJSON:        string(payload),
+		TotalActiveMinutes: rep.TotalActiveMinutes,
+		Source:             source,
+		CreatedAt:          now,
+		UpdatedAt:          now,
+	}); err != nil {
+		log.Printf("productivity: upsert snapshot %s/%s: %v", projectPath, dayStr, err)
+	}
+}
+
+// orphanOnlyReport builds a sentinel-project snapshot payload carrying
+// only the orphan sessions for a day. Services is empty by definition
+// (these sessions didn't attribute to any repo). TotalActiveMinutes is
+// the union of the orphans' active intervals so re-aggregation lines up.
+func orphanOnlyReport(rep productivity.Report, orphans []productivity.SessionStat, dayStr string) productivity.Report {
+	out := productivity.Report{
+		Day:              dayStr,
+		Services:         []productivity.Service{},
+		MinutesByCLI:     map[string]int{},
+		Sessions:         append([]productivity.SessionStat(nil), orphans...),
+		ReflectionStatus: rep.ReflectionStatus,
+	}
+	allIntervals := make([]productivity.ActiveInterval, 0)
+	cliIntervals := map[string][]productivity.ActiveInterval{}
+	for _, s := range orphans {
+		for _, iv := range s.ActiveIntervals {
+			allIntervals = append(allIntervals, iv)
+			cliIntervals[s.CLI] = append(cliIntervals[s.CLI], iv)
+		}
+	}
+	out.TotalActiveMinutes = productivity.UnionMinutes(allIntervals)
+	for cli, ivs := range cliIntervals {
+		if m := productivity.UnionMinutes(ivs); m > 0 {
+			out.MinutesByCLI[cli] = m
+		}
+	}
+	return out
 }
 
 // singleProjectReport carves out the slice of a multi-project Report
 // that belongs to one Service so it can be persisted as a per-project
-// snapshot. Sessions are filtered by Service.Repo; the report-level
-// TotalActiveMinutes / MinutesByCLI are derived from those sessions'
-// ActiveIntervals (sweep-line union) so the persisted single-project
-// payload is internally consistent — re-aggregating N per-project
-// payloads via AggregateReports reproduces the original multi-project
-// numbers within rounding.
-func singleProjectReport(rep productivity.Report, svc productivity.Service, dayStr string) productivity.Report {
+// snapshot. Sessions are filtered by Service.Repo; extraSessions is
+// the orphan-attribution slot (see persistSnapshotsForDay) — sessions
+// that didn't attribute to any service get folded into one chosen
+// carrier service so re-aggregating N per-project payloads still
+// recovers every session's minutes. The report-level
+// TotalActiveMinutes / MinutesByCLI are derived from the union of all
+// included sessions' ActiveIntervals (sweep-line) so the persisted
+// single-project payload is internally consistent.
+func singleProjectReport(
+	rep productivity.Report, svc productivity.Service, dayStr string,
+	extraSessions []productivity.SessionStat,
+) productivity.Report {
 	out := productivity.Report{
 		Day:              dayStr,
 		Services:         []productivity.Service{svc},
@@ -328,15 +417,20 @@ func singleProjectReport(rep productivity.Report, svc productivity.Service, dayS
 	}
 	allIntervals := make([]productivity.ActiveInterval, 0)
 	cliIntervals := map[string][]productivity.ActiveInterval{}
-	for _, s := range rep.Sessions {
-		if s.Repo != svc.Repo {
-			continue
-		}
+	include := func(s productivity.SessionStat) {
 		out.Sessions = append(out.Sessions, s)
 		for _, iv := range s.ActiveIntervals {
 			allIntervals = append(allIntervals, iv)
 			cliIntervals[s.CLI] = append(cliIntervals[s.CLI], iv)
 		}
+	}
+	for _, s := range rep.Sessions {
+		if s.Repo == svc.Repo {
+			include(s)
+		}
+	}
+	for _, s := range extraSessions {
+		include(s)
 	}
 	out.TotalActiveMinutes = productivity.UnionMinutes(allIntervals)
 	for cli, ivs := range cliIntervals {
@@ -352,6 +446,13 @@ func singleProjectReport(rep productivity.Report, svc productivity.Service, dayS
 // [since, until] inclusive, capped at 31 days to defensively bound the
 // per-day loop (a request for a 5-year range would otherwise fan out
 // to ~1800 snapshot lookups). Empty result when until < since.
+//
+// DST safety: we advance by (year, month, day+1) — NOT +24h. On a
+// spring-forward day +24h actually moves to the day-after-tomorrow's
+// 01:00, which silently skipped a calendar day in the previous
+// implementation. time.Date with a day-arithmetic argument handles the
+// 23h or 25h variants correctly because the constructor normalises
+// against the location.
 func localDaysInRange(since, until time.Time) []time.Time {
 	loc := since.Location()
 	if loc == nil {
@@ -363,7 +464,7 @@ func localDaysInRange(since, until time.Time) []time.Time {
 	startMid := time.Date(since.Year(), since.Month(), since.Day(), 0, 0, 0, 0, loc)
 	endMid := time.Date(until.Year(), until.Month(), until.Day(), 0, 0, 0, 0, loc)
 	out := make([]time.Time, 0, 8)
-	for d := startMid; !d.After(endMid); d = d.Add(24 * time.Hour) {
+	for d := startMid; !d.After(endMid); d = time.Date(d.Year(), d.Month(), d.Day()+1, 0, 0, 0, 0, loc) {
 		out = append(out, d)
 		if len(out) >= 31 {
 			break
