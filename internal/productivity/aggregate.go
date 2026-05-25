@@ -65,19 +65,44 @@ func AggregateReports(reports []Report, day string) Report {
 		Sessions:     []SessionStat{},
 	}
 
-	// ---- Sessions: dedupe by SessionID, last writer wins ----------------
-	// Same session can appear in multiple days only if it spanned midnight
-	// (uncommon); when it does, the per-day SessionStat already carries
-	// only that day's slice of intervals. We keep the LAST occurrence to
-	// match the dashboard's "most recent observation" expectation.
-	sessionByID := map[string]SessionStat{}
+	// ---- Sessions: union per SessionID across days ----------------------
+	// A session that spans midnight appears in multiple per-day Reports,
+	// each carrying only that day's slice of intervals. The previous
+	// last-wins dedupe silently dropped the earlier day's intervals, so
+	// the headline TotalActiveMinutes under-counted by that morning. The
+	// fix is to merge: concat every day's intervals + extend
+	// StartedAt/EndedAt to the outer envelope + sum MessageCount + sum
+	// ActiveMinutes (then trust the sweep-line union below to recompute
+	// the global headline correctly).
+	sessionByID := map[string]*SessionStat{}
+	sessionOrder := []string{}
 	for _, r := range reports {
 		for _, s := range r.Sessions {
-			sessionByID[s.SessionID] = s
+			existing, ok := sessionByID[s.SessionID]
+			if !ok {
+				dup := s
+				dup.ActiveIntervals = append([]ActiveInterval(nil), s.ActiveIntervals...)
+				sessionByID[s.SessionID] = &dup
+				sessionOrder = append(sessionOrder, s.SessionID)
+				continue
+			}
+			existing.ActiveIntervals = append(existing.ActiveIntervals, s.ActiveIntervals...)
+			existing.MessageCount += s.MessageCount
+			if s.StartedAt.Before(existing.StartedAt) || existing.StartedAt.IsZero() {
+				existing.StartedAt = s.StartedAt
+			}
+			if s.EndedAt.After(existing.EndedAt) {
+				existing.EndedAt = s.EndedAt
+			}
 		}
 	}
-	for _, s := range sessionByID {
-		out.Sessions = append(out.Sessions, s)
+	for _, id := range sessionOrder {
+		s := sessionByID[id]
+		// Per-session ActiveMinutes is the union of its (now merged)
+		// intervals — keeps the invariant that interval lengths sum to
+		// SessionActiveMinutes, even after a cross-day merge.
+		s.ActiveMinutes = UnionMinutes(s.ActiveIntervals)
+		out.Sessions = append(out.Sessions, *s)
 	}
 	sort.Slice(out.Sessions, func(i, j int) bool {
 		return out.Sessions[i].StartedAt.Before(out.Sessions[j].StartedAt)
