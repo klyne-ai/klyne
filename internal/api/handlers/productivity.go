@@ -31,9 +31,58 @@ type ProductivityHandler struct {
 	db *store.DB
 }
 
+// ProductivityDatesResponse is the small index the UI uses to bound the
+// explicit calendar picker. Days are local calendar dates with at least one
+// session row ending on that day.
+type ProductivityDatesResponse struct {
+	Days   []string `json:"days"`
+	MinDay string   `json:"min_day,omitempty"`
+	MaxDay string   `json:"max_day,omitempty"`
+}
+
 // NewProductivityHandler constructs a ProductivityHandler.
 func NewProductivityHandler(db *store.DB) *ProductivityHandler {
 	return &ProductivityHandler{db: db}
+}
+
+// Dates handles GET /api/productivity/dates.
+func (h *ProductivityHandler) Dates(w http.ResponseWriter, r *http.Request) {
+	const q = `
+SELECT date(last_msg_at / 1000, 'unixepoch', 'localtime') AS day
+FROM sessions
+WHERE last_msg_at > 0
+GROUP BY day
+ORDER BY day ASC`
+
+	rows, err := h.db.Read().QueryContext(r.Context(), q)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close() //nolint:errcheck
+
+	resp := ProductivityDatesResponse{}
+	for rows.Next() {
+		var day string
+		if err := rows.Scan(&day); err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if day == "" {
+			continue
+		}
+		resp.Days = append(resp.Days, day)
+	}
+	if err := rows.Err(); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if len(resp.Days) > 0 {
+		resp.MinDay = resp.Days[0]
+		resp.MaxDay = resp.Days[len(resp.Days)-1]
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // productivityIdleCapMin is the §6.4 idle-gap cap: when the gap between

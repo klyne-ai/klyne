@@ -29,6 +29,7 @@ func newProductivityRouter(t *testing.T, db *store.DB) http.Handler {
 	r := chi.NewRouter()
 	h := handlers.NewProductivityHandler(db)
 	r.Get(api.RouteProductivity, h.Get)
+	r.Get(api.RouteProductivityDates, h.Dates)
 	return r
 }
 
@@ -45,6 +46,60 @@ func userEmailForTest(t *testing.T) string {
 	}
 	// Substrate seed alias (see internal/productivity discover.go).
 	return "mohitpatel9753@gmail.com"
+}
+
+func TestProductivity_Dates(t *testing.T) {
+	t.Parallel()
+	db := newTestStore(t)
+	ctx := context.Background()
+	repo := t.TempDir()
+
+	days := []struct {
+		id string
+		ts time.Time
+	}{
+		{id: "s-prod-date-1", ts: time.Date(2026, 5, 22, 10, 0, 0, 0, time.Local)},
+		{id: "s-prod-date-2", ts: time.Date(2026, 5, 22, 16, 0, 0, 0, time.Local)},
+		{id: "s-prod-date-3", ts: time.Date(2026, 5, 24, 9, 0, 0, 0, time.Local)},
+	}
+	for _, d := range days {
+		s := &connectors.Session{
+			ID:          d.id,
+			CLI:         connectors.CLIClaude,
+			ProjectPath: repo,
+			StartedAt:   d.ts.Add(-30 * time.Minute).UnixMilli(),
+			LastMsgAt:   d.ts.UnixMilli(),
+			Status:      connectors.SessionStatusIdle,
+		}
+		if err := store.UpsertSession(ctx, db, s); err != nil {
+			t.Fatalf("upsert session %q: %v", d.id, err)
+		}
+	}
+
+	srv := httptest.NewServer(newProductivityRouter(t, db))
+	defer srv.Close()
+
+	res, err := http.Get(srv.URL + api.RouteProductivityDates)
+	if err != nil {
+		t.Fatalf("GET dates: %v", err)
+	}
+	defer res.Body.Close() //nolint:errcheck
+	if res.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(res.Body)
+		t.Fatalf("status = %d, body=%s", res.StatusCode, body)
+	}
+
+	var got handlers.ProductivityDatesResponse
+	if err := json.NewDecoder(res.Body).Decode(&got); err != nil {
+		t.Fatalf("decode dates: %v", err)
+	}
+	want := []string{"2026-05-22", "2026-05-24"}
+	if fmt.Sprint(got.Days) != fmt.Sprint(want) {
+		t.Fatalf("days = %v, want %v", got.Days, want)
+	}
+	if got.MinDay != "2026-05-22" || got.MaxDay != "2026-05-24" {
+		t.Fatalf("bounds = %q..%q, want 2026-05-22..2026-05-24", got.MinDay, got.MaxDay)
+	}
 }
 
 // gitCmd runs a git subcommand in dir and fatals on error. Commits are

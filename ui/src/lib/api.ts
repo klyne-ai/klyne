@@ -485,6 +485,17 @@ export async function fetchProductivity(
   });
 }
 
+/** GET /api/productivity/dates — local days that have productivity data. */
+export async function fetchProductivityDates(): Promise<ProductivityDatesResponse> {
+  return get<ProductivityDatesResponse>('/api/productivity/dates');
+}
+
+export interface ProductivityDatesResponse {
+  days: string[];
+  min_day?: string;
+  max_day?: string;
+}
+
 /** Loose mirror of Go productivity.Report — prototype only. */
 export interface ProductivityReport {
   day: string;
