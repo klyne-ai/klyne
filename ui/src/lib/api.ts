@@ -455,7 +455,7 @@ export async function compileProductivity(
   day: string,
   signal?: AbortSignal,
 ): Promise<{ project_path: string; day: string; status: string; output: string; duration_ms: number; error?: string }> {
-  const res = await fetch(`${API_BASE}/productivity/compile`, {
+  const res = await fetch(`${API_BASE}/api/productivity/compile`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ project_path: projectPath, day }),
