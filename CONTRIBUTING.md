@@ -36,6 +36,50 @@ npm run build     # production build, also exercised by the embed.FS
 
 CI (`.github/workflows/ci.yml`) runs the same set on every PR.
 
+### Test policy
+
+Every PR that changes behaviour MUST include a test covering the change:
+
+- **Adding a feature** → add a test that fails without your code and
+  passes with it. The point isn't 100% line coverage; it's that the
+  behaviour your change relies on is locked in so a future PR can't
+  silently regress it.
+- **Fixing a bug** → add a regression test that reproduces the bug
+  before applying the fix (TDD). The test should fail on `main`
+  without your fix.
+- **Refactoring** → no new test required if the existing suite covers
+  the surface, but you MUST run the full suite and report green.
+- **Docs / chore / dep-bump** → no test required.
+
+Local coverage check:
+
+```bash
+# Per-package
+go test -cover ./internal/api/handlers/
+
+# Whole repo with profile (then view in browser)
+go test -coverprofile=/tmp/cov.out ./...
+go tool cover -html=/tmp/cov.out
+
+# UI
+cd ui && npm run test:coverage
+```
+
+The current coverage floor on the public-facing packages is ~65%
+(handlers) to ~90% (productivity/store). PRs are not blocked on
+coverage drops, but reviewers will ask for tests when a behaviour
+change lands without one.
+
+### Tests that need real external state
+
+A few tests are guarded against environments where they can't run:
+
+- `internal/worklog/TestDogfoodKillCriteria` — needs a real
+  `~/.klyne/klyne.db` with ≥ 5 days of entries. Skipped automatically
+  in CI; only fires on a maintainer's machine.
+- Any test calling `withFakeHome` / `setHomeDir` mutates a global — do
+  NOT run them in parallel with each other.
+
 ## Commit style
 
 Conventional Commits: `feat`, `fix`, `chore`, `docs`, `refactor`,

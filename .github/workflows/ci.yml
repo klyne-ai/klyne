@@ -49,7 +49,20 @@ jobs:
       - name: go vet
         run: go vet ./...
       - name: go test -race
-        run: go test -race ./...
+        # -coverprofile emits a profile so reviewers can pinpoint which
+        # branches a PR did/didn't cover. -covermode=atomic is required
+        # whenever -race is on. ./... covers every package; the resulting
+        # file is uploaded as a job artifact below for inspection in the
+        # PR's Actions tab.
+        run: go test -race -covermode=atomic -coverprofile=coverage.out ./...
+      - name: coverage summary
+        run: go tool cover -func=coverage.out | tail -20
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: go-coverage
+          path: coverage.out
+          retention-days: 14
       - uses: golangci/golangci-lint-action@v6
         with:
           version: v1.62.2
