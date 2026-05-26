@@ -326,4 +326,10 @@ type Report struct {
 	Sessions           []SessionStat     `json:"sessions"`
 	ReflectionMarkdown string            `json:"reflection_markdown,omitempty"`
 	ReflectionGroups   []ReflectionGroup `json:"reflection_groups,omitempty"`
+	// PendingEntries is the count of stop_summaries written across all
+	// visible services (recap_visible=1) with ts > the project's latest
+	// reflection cursor — i.e. work that has happened but hasn't been
+	// folded into a /klyne:reflect yet. Drives the dashboard's "Sync
+	// productivity dashboard" button highlight + N-new badge.
+	PendingEntries int `json:"pending_entries"`
 }

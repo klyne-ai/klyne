@@ -216,7 +216,55 @@ func (h *ProductivityHandler) Get(w http.ResponseWriter, r *http.Request) {
 		composite.Services[i].GitFetchedAt = gitFetchedAt(composite.Services[i].ProjectPath)
 	}
 
+	// Pending-entries count: stop_summaries written across every service
+	// in the response whose ts is past that project's latest reflection
+	// cursor AND falls inside the visible window. Drives the dashboard's
+	// "Sync productivity dashboard" highlight + "N new" badge.
+	composite.PendingEntries = h.countPendingEntries(ctx, composite.Services, sinceMs, untilMs)
+
 	writeJSON(w, http.StatusOK, composite)
+}
+
+// countPendingEntries returns the number of visible stop_summaries
+// rows across all services in svcs whose ts is greater than that
+// project's latest reflection cursor (MaxReflectionCursor) AND whose
+// ts falls inside [sinceMs, untilMs). Failures degrade to 0 so the UI
+// never blocks on a slow count.
+func (h *ProductivityHandler) countPendingEntries(
+	ctx context.Context, svcs []productivity.Service, sinceMs, untilMs int64,
+) int {
+	if len(svcs) == 0 {
+		return 0
+	}
+	seen := make(map[string]struct{}, len(svcs))
+	total := 0
+	for _, s := range svcs {
+		if s.ProjectPath == "" {
+			continue
+		}
+		if _, dup := seen[s.ProjectPath]; dup {
+			continue
+		}
+		seen[s.ProjectPath] = struct{}{}
+		cursor, err := store.MaxReflectionCursor(ctx, h.db, s.ProjectPath)
+		if err != nil {
+			continue
+		}
+		var n int
+		err = h.db.Read().QueryRowContext(ctx, `
+            SELECT COUNT(*) FROM stop_summaries
+            WHERE project_path = ?
+              AND recap_visible = 1
+              AND ts > ?
+              AND ts >= ? AND ts < ?`,
+			s.ProjectPath, cursor, sinceMs, untilMs,
+		).Scan(&n)
+		if err != nil {
+			continue
+		}
+		total += n
+	}
+	return total
 }
 
 // computeLiveReport runs the full live-scan pipeline for one (since,
