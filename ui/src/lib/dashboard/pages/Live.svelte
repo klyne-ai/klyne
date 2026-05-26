@@ -98,7 +98,7 @@
     </div>
     <div class="actions">
       <span class="mono" style:color="var(--ok)" style:font-size="11px" style:white-space="nowrap">
-        <span class="dot ok" style:display="inline-block" style:margin-right="6px"></span>
+        <span class="dot dot--live" style:display="inline-block" style:margin-right="6px"></span>
         {liveCount} live
       </span>
       <span class="mono dim" style:font-size="11px" style:white-space="nowrap">· {idleCount} idle</span>

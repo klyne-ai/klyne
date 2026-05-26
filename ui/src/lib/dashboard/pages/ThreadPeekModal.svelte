@@ -308,7 +308,7 @@
   aria-label={`Thread for ${projectName} · ${thread.session_id.slice(0, 8)}`}
 >
   <header class="thread-modal__head">
-    <span class="dot" class:ok={isLive}></span>
+    <span class="dot" class:dot--live={isLive} class:dot--idle={!isLive}></span>
     <div class="meta">
       <h3>
         <span>{projectName}</span>

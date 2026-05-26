@@ -68,7 +68,7 @@
   <!-- Header -->
   <div class="tile-head">
     <div class="row tile-head-left">
-      <span class="dot" class:ok={isLive}></span>
+      <span class="dot" class:dot--live={isLive} class:dot--idle={!isLive}></span>
       <span class="tile-project">{projectName}</span>
       <span class="mono dim tile-id">{shortId}</span>
     </div>
