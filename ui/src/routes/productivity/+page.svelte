@@ -24,7 +24,7 @@
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
-  import { fetchProductivityDates, runReflect, type ProductivityReport, type ProductivityService, type ProductivitySessionStat } from '$lib/api.js';
+  import { fetchProductivityDates, runReflect, compileProductivity, type ProductivityReport, type ProductivityService, type ProductivitySessionStat } from '$lib/api.js';
   import { applyHiddenFilter, hiddenSessionIds, hideMany, clearHidden } from '$lib/hidden-sessions.svelte';
   import ConcurrencyTimeline from '$lib/components/productivity/ConcurrencyTimeline.svelte';
   import WhatWasDoneCard from '$lib/dashboard/pages/productivity/WhatWasDoneCard.svelte';
@@ -51,6 +51,44 @@
   let reflectDone   = $state(0);
   let reflectTotal  = $state(0);
   let reflectError  = $state<string | null>(null);
+  // Compile-run state: drives the inline "Generate productivity" button
+  // surfaced when pending_compile > 0 (typed worklog reflections exist
+  // but no LLM-compiled card has landed for them yet).
+  let compileRunning = $state(false);
+  let compileDone    = $state(0);
+  let compileTotal   = $state(0);
+  let compileError   = $state<string | null>(null);
+  async function runCompileForAllPendingServices() {
+    if (compileRunning || !rep) return;
+    // Only services whose what_was_done exists but is NOT llm_compiled
+    // need the second-pass LLM. Dedup by project_path so cross-service
+    // shared paths don't double-spawn.
+    const targets = Array.from(new Map(
+      (rep.services ?? [])
+        .filter(s => s.what_was_done && !s.what_was_done.llm_compiled && !!s.project_path)
+        .map(s => [s.project_path as string, s.project_path as string]),
+    ).keys());
+    if (targets.length === 0) return;
+    const dayStr = rep.day ?? new Date().toISOString().slice(0, 10);
+    compileRunning = true;
+    compileError = null;
+    compileDone = 0;
+    compileTotal = targets.length;
+    try {
+      for (const p of targets) {
+        try {
+          await compileProductivity(p, dayStr);
+        } catch (e) {
+          if (!compileError) compileError = e instanceof Error ? e.message : String(e);
+        } finally {
+          compileDone += 1;
+        }
+      }
+      await load({ refresh: true });
+    } finally {
+      compileRunning = false;
+    }
+  }
   async function runReflectForAllProjects() {
     if (reflectRunning || !rep) return;
     const projects = Array.from(new Set(
@@ -858,6 +896,7 @@
     {@const legacyBullets = wwdServices.length === 0 ? bullets : []}
     {@const pendingNew = v.pending_entries ?? 0}
     {@const needsSync = v.reflection_status !== 'current' || pendingNew > 0}
+    {@const pendingCompileCount = v.pending_compile ?? 0}
     {@const alerts = topAlerts(v.services)}
     {@const totalRisks = hist.uncommitted + hist.unpushedSignal + hist.drifted + hist.unpushedNoise + alerts.length}
     {@const claudeM = v.minutes_by_cli?.claude ?? 0}
@@ -894,6 +933,20 @@
                 {/if}
               {/if}
             </button>
+            {#if pendingCompileCount > 0}
+              <button
+                class="pill pill-action is-highlighted"
+                onclick={runCompileForAllPendingServices}
+                disabled={compileRunning}
+                title="Spawn /klyne:productivity-sync to compile cohesive Tier 1 prose from this day's typed reflections">
+                {#if compileRunning}
+                  Compiling {compileDone}/{compileTotal}…
+                {:else}
+                  ✨ Generate productivity
+                  <span class="pill-action-badge mono">{pendingCompileCount} pending</span>
+                {/if}
+              </button>
+            {/if}
             {#if alerts.length > 0}
               <span class="pill pill-alert"><span class="dot dot-alert"></span>{plural(alerts.length, 'open alert')} · review before EOD</span>
             {/if}

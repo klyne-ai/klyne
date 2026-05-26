@@ -222,7 +222,31 @@ func (h *ProductivityHandler) Get(w http.ResponseWriter, r *http.Request) {
 	// "Sync productivity dashboard" highlight + "N new" badge.
 	composite.PendingEntries = h.countPendingEntries(ctx, composite.Services, sinceMs, untilMs)
 
+	// Pending-compile count: services that have at least one typed
+	// reflection but whose what_was_done card is NOT llm_compiled.
+	// Drives the dashboard's "Generate productivity" button.
+	composite.PendingCompile = countPendingCompile(composite.Services)
+
 	writeJSON(w, http.StatusOK, composite)
+}
+
+// countPendingCompile returns the number of services in svcs that have
+// at least one typed reflection (signalled by a non-nil what_was_done
+// derived from typed body_json rows) but whose what_was_done.LLMCompiled
+// is false — i.e. /klyne:productivity-sync hasn't run for them yet.
+//
+// Services with WhatWasDone == nil are skipped: nothing to compile.
+func countPendingCompile(svcs []productivity.Service) int {
+	n := 0
+	for _, s := range svcs {
+		if s.WhatWasDone == nil {
+			continue
+		}
+		if !s.WhatWasDone.LLMCompiled {
+			n++
+		}
+	}
+	return n
 }
 
 // countPendingEntries returns the number of visible stop_summaries

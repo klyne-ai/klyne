@@ -444,6 +444,30 @@ export async function runReflect(
   return (await res.json()) as ReflectRunResponse;
 }
 
+/**
+ * POST /productivity/compile — spawn `/klyne:productivity-sync` (LLM #2)
+ * for one (project, day). Reads typed worklog_reflections rows and
+ * writes an LLM-compiled WhatWasDoneCard with cohesive Tier 1 prose +
+ * llm_compiled=true.
+ */
+export async function compileProductivity(
+  projectPath: string,
+  day: string,
+  signal?: AbortSignal,
+): Promise<{ project_path: string; day: string; status: string; output: string; duration_ms: number; error?: string }> {
+  const res = await fetch(`${API_BASE}/productivity/compile`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project_path: projectPath, day }),
+    signal,
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new ApiError(res.status, text, `compileProductivity failed (${res.status})`);
+  }
+  return await res.json();
+}
+
 // ---------------------------------------------------------------------------
 // /insights/projects
 // ---------------------------------------------------------------------------
@@ -542,6 +566,13 @@ export interface ProductivityReport {
    * the field (spec docs/plan/2026-05-26-wwd-typed-cards.md §2 Agent U).
    */
   pending_entries?: number;
+  /**
+   * Count of services in the report that have at least one typed
+   * reflection but whose `what_was_done` card is NOT llm_compiled —
+   * a /klyne:productivity-sync run is owed. Drives the "Generate
+   * productivity" button visibility on the dashboard.
+   */
+  pending_compile?: number;
 }
 /** One row from worklog_reflections — one /klyne:reflect run. */
 export interface ReflectionGroup {

@@ -195,36 +195,14 @@ func (h *WorklogReflectRunHandler) Run(w http.ResponseWriter, r *http.Request) {
 		}
 		resp.RecomposedCardCount = len(cards)
 
-		// Chain the SECOND LLM pass — /klyne:productivity-sync — so the
-		// dashboard's "Run /klyne:reflect now" button delivers the
-		// compiled (LLM-authored) cards on the same UI round-trip. The
-		// deterministic recompose above already ran, so even if this
-		// second pass fails or times out the dashboard renders something
-		// — only the `llm_compiled` badge will be absent until the next
-		// successful compile.
-		//
-		// nil runSyncCmd means tests opted out of the second pass; mark
-		// status="skipped" so production wiring is observable in tests
-		// without forcing them to stub two spawns.
-		if h.runSyncCmd == nil {
-			resp.LLMCompileStatus = "skipped"
-		} else {
-			syncCtx, syncCancel := context.WithTimeout(context.Background(), 5*time.Minute)
-			_, syncErr := h.runSyncCmd(syncCtx, req.ProjectPath, dayStr)
-			switch {
-			case syncErr == nil:
-				resp.LLMCompileStatus = "ok"
-			case syncCtx.Err() == context.DeadlineExceeded:
-				resp.LLMCompileStatus = "timeout"
-				resp.LLMCompileError = "second-pass subprocess exceeded 5m budget"
-			default:
-				resp.LLMCompileStatus = "error"
-				resp.LLMCompileError = syncErr.Error()
-				fmt.Printf("worklog reflect: productivity-sync chain failed for %s/%s: %v\n",
-					req.ProjectPath, dayStr, syncErr)
-			}
-			syncCancel()
-		}
+		// The second LLM pass (/klyne:productivity-sync) is NOT chained
+		// here — it's a separate user-initiated step surfaced as a
+		// distinct "Generate productivity" button on the dashboard so the
+		// user can see and explicitly trigger the compile. The
+		// deterministic recompose above already ran so the dashboard is
+		// never blank; the LLM compile only adds cohesive Tier 1 prose
+		// + the `llm_compiled` badge on top.
+		resp.LLMCompileStatus = "deferred"
 	}
 
 	writeJSON(w, http.StatusOK, resp)

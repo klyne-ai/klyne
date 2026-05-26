@@ -332,4 +332,10 @@ type Report struct {
 	// folded into a /klyne:reflect yet. Drives the dashboard's "Sync
 	// productivity dashboard" button highlight + N-new badge.
 	PendingEntries int `json:"pending_entries"`
+	// PendingCompile is the count of services in this report that have
+	// at least one typed reflection (worklog_reflections row with
+	// body_json non-empty) but whose `what_was_done` card is NOT
+	// llm_compiled — i.e. a /klyne:productivity-sync run is owed. Drives
+	// the dashboard's "Generate productivity" button visibility.
+	PendingCompile int `json:"pending_compile"`
 }
