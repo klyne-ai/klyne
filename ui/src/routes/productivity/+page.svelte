@@ -22,7 +22,7 @@
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
-  import type { ProductivityReport, ProductivityService, ProductivitySessionStat } from '$lib/api.js';
+  import { fetchProductivityDates, type ProductivityReport, type ProductivityService, type ProductivitySessionStat } from '$lib/api.js';
   import { applyHiddenFilter, hiddenSessionIds, hideMany, clearHidden } from '$lib/hidden-sessions.svelte';
   import ConcurrencyTimeline from '$lib/components/productivity/ConcurrencyTimeline.svelte';
 
@@ -38,18 +38,25 @@
   let copied = $state(false);
   // Four preset windows only. The dashboard is snapshot-backed
   // (daily_productivity_snapshot, migration 021) so past-day rendering
-  // is deterministic across reloads; arbitrary multi-day ranges are no
-  // longer offered. Default opens on today so the user sees their
-  // in-progress work first.
-  type RangeKey = 'today' | 'yesterday' | 'this_week' | 'last_week';
-  const RANGE_KEYS: readonly RangeKey[] = ['today', 'yesterday', 'this_week', 'last_week'] as const;
-  const RANGE_LABELS: Record<RangeKey, string> = {
+  // is deterministic across reloads. Presets stay limited to common
+  // windows; the calendar adds explicit single-day historical picks.
+  type PresetRangeKey = 'today' | 'yesterday' | 'this_week' | 'last_week';
+  type RangeKey = PresetRangeKey | 'custom';
+  const RANGE_KEYS: readonly PresetRangeKey[] = ['today', 'yesterday', 'this_week', 'last_week'] as const;
+  const RANGE_LABELS: Record<PresetRangeKey, string> = {
     today: 'today',
     yesterday: 'yesterday',
     this_week: 'this week',
     last_week: 'last week',
   };
+  function rangeLabel(key: RangeKey): string {
+    return key === 'custom' ? 'calendar day' : RANGE_LABELS[key];
+  }
   let rangeKey = $state<RangeKey>('today');
+  let calendarOpen = $state(false);
+  let availableDays = $state<string[]>([]);
+  let calendarMonth = $state<Date>(new Date());
+  let datesError = $state<string | null>(null);
 
   interface CachedReport { since: number; until: number; loadedAt: number; rep: ProductivityReport; }
   function loadCached(): CachedReport | null {
@@ -71,7 +78,7 @@
     d.setDate(d.getDate() - back);
     return d;
   }
-  function rangeFor(key: RangeKey): { since: number; until: number } {
+  function rangeFor(key: PresetRangeKey): { since: number; until: number } {
     const now = new Date();
     const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).getTime();
     const day = 24*60*60*1000;
@@ -91,10 +98,8 @@
   function detectRangeKey(s: number, u: number): RangeKey {
     // Compare against the four preset windows by snapping each to its
     // day-resolution start. Multi-day windows match against the week
-    // presets by date-equality of the start day. Anything that doesn't
-    // match falls back to 'today' — the dashboard now only offers the
-    // four presets, so a mismatched (since,until) is a stale URL or
-    // localStorage value from a previous version.
+    // presets by date-equality of the start day. Anything else is a
+    // calendar/custom day.
     const now = new Date();
     const todayMid = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).getTime();
     const day = 86_400_000;
@@ -106,7 +111,7 @@
     if (sameMidnight(s, todayMid - day)) return 'yesterday';
     if (sameMidnight(s, thisWeekStart)) return 'this_week';
     if (sameMidnight(s, lastWeekStart)) return 'last_week';
-    return 'today';
+    return 'custom';
   }
   function syncUrl(s: number, u: number) {
     const q = new URLSearchParams(window.location.search);
@@ -146,15 +151,89 @@
       loading = false;
     }
   }
-  function pickRange(k: RangeKey) {
+  function pickRange(k: PresetRangeKey) {
     if (rangeKey === k) return;
     rangeKey = k;
+    calendarOpen = false;
     const r = rangeFor(k);
     since = r.since; until = r.until;
     saveRange(since, until); syncUrl(since, until);
     void load();
   }
   function refresh() { void load({ refresh: true }); }
+
+  function localDateKey(ms: number): string {
+    const d = new Date(ms);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+  function parseLocalDay(day: string): Date {
+    const [y, m, d] = day.split('-').map(Number);
+    return new Date(y, m - 1, d, 0, 0, 0, 0);
+  }
+  function dayWindow(day: string): { since: number; until: number } {
+    const d = parseLocalDay(day);
+    const start = d.getTime();
+    const today = localDateKey(Date.now());
+    const end = day === today ? Date.now() : new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999).getTime();
+    return { since: start, until: end };
+  }
+  async function loadAvailableDays() {
+    try {
+      const res = await fetchProductivityDates();
+      availableDays = res.days ?? [];
+      const selected = localDateKey(since || Date.now());
+      const anchor = availableDays.includes(selected) ? selected : (res.max_day || selected);
+      calendarMonth = parseLocalDay(anchor);
+      datesError = null;
+    } catch (e) {
+      datesError = e instanceof Error ? e.message : 'failed to load dates';
+    }
+  }
+  function selectCalendarDay(day: string) {
+    if (!availableDays.includes(day)) return;
+    const r = dayWindow(day);
+    since = r.since; until = r.until;
+    rangeKey = detectRangeKey(since, until);
+    calendarOpen = false;
+    saveRange(since, until); syncUrl(since, until);
+    void load();
+  }
+  function shiftCalendarMonth(delta: number) {
+    calendarMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + delta, 1);
+  }
+  function monthKey(d: Date): string {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  }
+  function monthLabel(d: Date): string {
+    return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  }
+  const availableDaySet = $derived(new Set(availableDays));
+  const selectedCalendarDay = $derived(localDateKey(since || Date.now()));
+  const calendarCells = $derived.by(() => {
+    const first = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), 1);
+    const start = new Date(first);
+    start.setDate(first.getDate() - first.getDay());
+    const cells: { key: string; day: string; label: number; inMonth: boolean; hasData: boolean; selected: boolean }[] = [];
+    for (let i = 0; i < 42; i++) {
+      const d = new Date(start);
+      d.setDate(start.getDate() + i);
+      const day = localDateKey(d.getTime());
+      cells.push({
+        key: day,
+        day,
+        label: d.getDate(),
+        inMonth: d.getMonth() === calendarMonth.getMonth(),
+        hasData: availableDaySet.has(day),
+        selected: day === selectedCalendarDay,
+      });
+    }
+    return cells;
+  });
+  const canGoPrevMonth = $derived(availableDays.length === 0 || monthKey(calendarMonth) > monthKey(parseLocalDay(availableDays[0])));
+  const canGoNextMonth = $derived(availableDays.length === 0 || monthKey(calendarMonth) < monthKey(parseLocalDay(availableDays[availableDays.length - 1])));
 
   onMount(() => {
     // URL params and localStorage only hint at WHICH preset chip should
@@ -174,7 +253,11 @@
       if (saved) hintedKey = detectRangeKey(saved.since, saved.until);
     }
     rangeKey = hintedKey;
-    const r = rangeFor(hintedKey);
+    const r = hintedKey === 'custom'
+      ? (Number.isFinite(qs) && qs > 0 && Number.isFinite(qu) && qu > 0
+          ? { since: qs, until: qu }
+          : loadSaved() ?? rangeFor('today'))
+      : rangeFor(hintedKey);
     since = r.since; until = r.until;
     saveRange(since, until); syncUrl(since, until);
     // Cache validity now also requires the cached window to match the
@@ -183,6 +266,7 @@
     const c = loadCached();
     if (c && c.since === since && c.until === until) { rep = c.rep; loadedAt = c.loadedAt; loading = false; }
     else void load();
+    void loadAvailableDays();
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   });
@@ -606,6 +690,56 @@
       {#each RANGE_KEYS as k (k)}
         <button class="seg-btn" class:on={rangeKey === k} onclick={() => pickRange(k)}>{RANGE_LABELS[k]}</button>
       {/each}
+      <div class="cal-wrap">
+        <button
+          class="seg-btn cal-trigger"
+          class:on={rangeKey === 'custom' || calendarOpen}
+          onclick={() => { calendarOpen = !calendarOpen; if (calendarOpen && availableDays.length === 0) void loadAvailableDays(); }}
+          title="Pick a specific day"
+          aria-haspopup="dialog"
+          aria-expanded={calendarOpen}
+        >
+          calendar
+        </button>
+        {#if calendarOpen}
+          <div class="cal-pop" role="dialog" aria-label="Pick productivity date">
+            <div class="cal-head">
+              <button class="cal-nav" onclick={() => shiftCalendarMonth(-1)} disabled={!canGoPrevMonth} aria-label="Previous month">‹</button>
+              <span>{monthLabel(calendarMonth)}</span>
+              <button class="cal-nav" onclick={() => shiftCalendarMonth(1)} disabled={!canGoNextMonth} aria-label="Next month">›</button>
+            </div>
+            <div class="cal-week" aria-hidden="true">
+              {#each ['S','M','T','W','T','F','S'] as d}
+                <span>{d}</span>
+              {/each}
+            </div>
+            <div class="cal-grid">
+              {#each calendarCells as cell (cell.key)}
+                <button
+                  class="cal-day"
+                  class:calDayMuted={!cell.inMonth}
+                  class:calDayData={cell.hasData}
+                  class:selected={cell.selected}
+                  disabled={!cell.hasData}
+                  onclick={() => selectCalendarDay(cell.day)}
+                  aria-label={cell.hasData ? `Show productivity for ${cell.day}` : `No productivity data for ${cell.day}`}
+                >
+                  {cell.label}
+                </button>
+              {/each}
+            </div>
+            <div class="cal-foot">
+              {#if datesError}
+                <span class="alert">dates unavailable</span>
+              {:else if availableDays.length > 0}
+                <span>{availableDays[0]} → {availableDays[availableDays.length - 1]}</span>
+              {:else}
+                <span>no dated data yet</span>
+              {/if}
+            </div>
+          </div>
+        {/if}
+      </div>
     </div>
     <div class="rail-right">
       <span class="rail-ago">{ago(loadedAt)}</span>
@@ -620,7 +754,7 @@
   {#if loading && rep}
     <div class="range-loading mono" role="status" aria-live="polite">
       <span class="range-spinner"></span>
-      <span>Fetching {RANGE_LABELS[rangeKey]}…</span>
+      <span>Fetching {rangeLabel(rangeKey)}…</span>
       <button class="btn-ghost-l" onclick={() => { inflight?.abort(); }}>Cancel</button>
     </div>
   {/if}
@@ -1081,6 +1215,7 @@
 
   /* ── 1. Top rail ─────────────────────────────────────────── */
   .rail {
+    position: relative; z-index: 5; overflow: visible;
     display: grid; grid-template-columns: 1fr auto 1fr;
     align-items: center; padding: 10px 28px;
     border-bottom: 1px solid var(--border-hair);
@@ -1100,6 +1235,77 @@
     font-family: var(--font-mono); font-size: 11px; cursor: pointer;
   }
   .seg-btn.on { background: var(--fg); color: var(--bg); }
+  .cal-wrap { position: relative; display: inline-flex; }
+  .cal-trigger { min-width: 74px; }
+  .cal-pop {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    z-index: 20;
+    width: 252px;
+    padding: 10px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-soft);
+    border-radius: 8px;
+    box-shadow: 0 18px 50px color-mix(in oklch, black 42%, transparent);
+  }
+  .cal-head {
+    display: grid;
+    grid-template-columns: 28px 1fr 28px;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--fg-soft);
+    text-align: center;
+  }
+  .cal-nav {
+    width: 28px; height: 26px;
+    border-radius: 6px;
+    border: 1px solid var(--border-hair);
+    background: var(--bg-inset);
+    color: var(--fg-soft);
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+  }
+  .cal-nav:disabled { opacity: 0.35; cursor: default; }
+  .cal-week, .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+  .cal-week { margin-bottom: 4px; color: var(--fg-dim); font-family: var(--font-mono); font-size: 10px; text-align: center; }
+  .cal-day {
+    height: 28px;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--fg-dim);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    cursor: default;
+  }
+  .cal-day.calDayData {
+    cursor: pointer;
+    color: var(--fg-soft);
+    background: var(--bg-inset);
+    border-color: var(--border-hair);
+  }
+  .cal-day.calDayData:hover { color: var(--fg); border-color: var(--border); }
+  .cal-day.selected {
+    color: var(--bg);
+    background: var(--fg);
+    border-color: var(--fg);
+  }
+  .cal-day.calDayMuted { opacity: 0.38; }
+  .cal-day:disabled { opacity: 0.22; }
+  .cal-foot {
+    margin-top: 9px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border-hair);
+    color: var(--fg-dim);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    text-align: center;
+  }
   .rail-right { display: inline-flex; align-items: center; gap: 10px; justify-self: end; }
   .rail-ago { font-family: var(--font-mono); font-size: 10.5px; color: var(--fg-dim); }
 

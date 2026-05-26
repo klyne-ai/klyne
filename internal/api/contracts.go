@@ -80,6 +80,11 @@ const (
 	// grabs the path first and the dashboard never renders in the
 	// embedded build.
 	RouteProductivity        = "/api/productivity"
+	// RouteProductivityDates: GET /api/productivity/dates.
+	// Lists local calendar days with session data so the productivity
+	// dashboard can bound its explicit day picker without calculating
+	// reports for every historical day.
+	RouteProductivityDates   = "/api/productivity/dates"
 	// RouteProjectDelete: DELETE /api/projects?path=<abs>&dry_run=true|false.
 	// Wipes (or counts, in dry-run mode) every project-scoped row across
 	// stop_summaries, worklog_reflections, decisions, runbook_dismissals,
@@ -116,6 +121,7 @@ func AllRoutes() []string {
 		RouteWorklogReflectRun,
 		RouteInsightsProjects,
 		RouteProductivity,
+		RouteProductivityDates,
 		RouteProjectDelete,
 	}
 }

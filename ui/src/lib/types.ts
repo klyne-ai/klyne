@@ -37,6 +37,13 @@ export interface ToolResult {
   is_error: boolean;
 }
 
+/** CompactBoundary mirrors connectors.CompactBoundary. */
+export interface CompactBoundary {
+  trigger?: string;
+  pre_tokens?: number;
+  post_tokens?: number;
+}
+
 /**
  * Message is the canonical, connector-agnostic representation of a single
  * turn in a CLI session. Mirrors connectors.Message.
@@ -77,6 +84,8 @@ export interface Message {
   git_branch?: string;
   /** May be absent (omitempty in Go). */
   cwd?: string;
+  /** May be absent (omitempty in Go). */
+  compact_boundary?: CompactBoundary;
 }
 
 /**
