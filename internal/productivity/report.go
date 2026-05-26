@@ -168,7 +168,7 @@ func BuildReport(ctx context.Context, in ReportInput, refl ReflectionLookup) (Re
 			if len(groups) > 0 {
 				anyReflection = true
 				svc.ReflectionGroups = groups
-				svc.ReflectionMarkdown = concatReflectionBodies(groups)
+				svc.ReflectionMarkdown = ConcatReflectionBodies(groups)
 				if rep.ReflectionMarkdown == "" {
 					rep.ReflectionMarkdown = svc.ReflectionMarkdown
 				}
@@ -529,13 +529,18 @@ func dayTime(day string, now time.Time) time.Time {
 	return now
 }
 
-// concatReflectionBodies joins the iterative-reflection groups' bodies
+// ConcatReflectionBodies joins the iterative-reflection groups' bodies
 // into one markdown blob — the legacy ReflectionMarkdown shape kept for
 // consumers that don't yet read ReflectionGroups. Bodies are separated
 // by a horizontal rule so a downstream parser can recover the boundary
 // if it needs to. Order matches the input (caller hands these in
 // chronological order).
-func concatReflectionBodies(groups []ReflectionGroup) string {
+//
+// Exported so the handler's snapshot-hydration path can reuse the same
+// joiner the live BuildReport path uses (handlers/productivity.go's
+// tryReadSnapshotDay refreshes ReflectionGroups + Markdown from
+// worklog_reflections on each read).
+func ConcatReflectionBodies(groups []ReflectionGroup) string {
 	if len(groups) == 0 {
 		return ""
 	}

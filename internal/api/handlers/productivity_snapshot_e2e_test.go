@@ -287,3 +287,97 @@ func TestProductivity_ReflectionSnapshotBeatsLiveBackfill(t *testing.T) {
 		t.Fatalf("authoritative payload replaced: want minutes=999, got %d", got.TotalActiveMinutes)
 	}
 }
+
+// TestProductivity_SnapshotReadHydratesReflections is the regression
+// guard for the catch-up reflection bug. Snapshots written by
+// worklog.recordReflection serialize the substrate Report BEFORE the
+// new reflection row is inserted, so the persisted payload carries
+// reflection_status="missing" and zero ReflectionGroups even though
+// a row exists in worklog_reflections. tryReadSnapshotDay must
+// hydrate ReflectionGroups + ReflectionStatus from worklog_reflections
+// on every read so the dashboard surfaces the reflection under the
+// day it covers.
+//
+// Concretely: insert a snapshot with "missing" + no groups, insert a
+// reflection row tagged day=that-day, then GET /productivity and
+// assert the response shows status="current" with the body bullet.
+func TestProductivity_SnapshotReadHydratesReflections(t *testing.T) {
+	t.Parallel()
+	db := newTestStore(t)
+	ctx := context.Background()
+
+	now := time.Now()
+	dayMid := time.Date(now.Year(), now.Month(), now.Day()-1, 0, 0, 0, 0, now.Location())
+	dayStr := dayMid.Format("2006-01-02")
+	projectPath := "/seeded/hydration"
+
+	stale := productivity.Report{
+		Day: dayStr,
+		Services: []productivity.Service{{
+			Repo:        "hydration",
+			ProjectPath: projectPath,
+		}},
+		ReflectionStatus: "missing",
+	}
+	stalePayload, err := json.Marshal(stale)
+	if err != nil {
+		t.Fatalf("marshal stale snapshot: %v", err)
+	}
+	if err := store.UpsertDailyProductivitySnapshot(ctx, db, store.DailyProductivitySnapshot{
+		ProjectPath: projectPath,
+		Day:         dayStr,
+		PayloadJSON: string(stalePayload),
+		Source:      "reflection",
+		CreatedAt:   1, UpdatedAt: 1,
+	}); err != nil {
+		t.Fatalf("seed stale snapshot: %v", err)
+	}
+
+	if err := store.InsertReflection(ctx, db, store.Reflection{
+		ID:               "ref-hydration-" + dayStr,
+		TS:               now.UnixMilli(),
+		ProjectPath:      projectPath,
+		Day:              dayStr,
+		Tier:             1,
+		Title:            "Daily reflection — " + dayStr,
+		BodyMD:           "- shipped the hydration fix\n",
+		EvidenceEntryIDs: []string{"sess-1"},
+		Importance:       7,
+		SummarySource:    "ai",
+		State:            "proposed",
+		StateChangedAt:   now.UnixMilli(),
+	}); err != nil {
+		t.Fatalf("insert reflection: %v", err)
+	}
+
+	srv := httptest.NewServer(newProductivityRouter(t, db))
+	t.Cleanup(srv.Close)
+
+	url := fmt.Sprintf("%s%s?since=%d&until=%d",
+		srv.URL, api.RouteProductivity,
+		dayMid.UnixMilli(),
+		dayMid.Add(24*time.Hour).Add(-time.Millisecond).UnixMilli())
+	resp, err := http.Get(url)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close() //nolint:errcheck
+	body, _ := io.ReadAll(resp.Body)
+
+	var got productivity.Report
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("decode: %v — body=%s", err, body)
+	}
+	if got.ReflectionStatus != "current" {
+		t.Fatalf("reflection_status = %q; want current (the seeded reflection row should hydrate over the stale snapshot)", got.ReflectionStatus)
+	}
+	if len(got.Services) != 1 {
+		t.Fatalf("services count = %d; want 1", len(got.Services))
+	}
+	if got := got.Services[0].ReflectionGroups; len(got) != 1 {
+		t.Fatalf("service[0].reflection_groups = %d entries; want 1", len(got))
+	}
+	if want, got := "- shipped the hydration fix\n", got.Services[0].ReflectionGroups[0].BodyMD; got != want {
+		t.Errorf("reflection body = %q; want %q", got, want)
+	}
+}

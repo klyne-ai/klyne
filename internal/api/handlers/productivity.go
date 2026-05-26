@@ -305,6 +305,17 @@ func (h *ProductivityHandler) computeLiveReport(
 // (productivity.AggregateReports with a single-day input). Returns
 // ok=false when no rows exist for the day — the caller falls through
 // to live compute + backfill.
+//
+// Reflection groups are deliberately NOT trusted from the persisted
+// payload — they are re-hydrated from worklog_reflections on every
+// read. The snapshot writer in worklog.recordReflection serialises the
+// substrate Report BEFORE the new reflection row is inserted, so a
+// freshly-written snapshot for a catch-up day has reflection_status
+// "missing" / empty ReflectionGroups even though the row exists. And
+// even when the snapshot was fresh, a LATER reflection for the same
+// day would not rewrite it. Treating worklog_reflections as the source
+// of truth at read time keeps the dashboard correct without a
+// rewrite-on-every-reflection invariant.
 func (h *ProductivityHandler) tryReadSnapshotDay(
 	ctx context.Context, dayStr string,
 ) (productivity.Report, bool, error) {
@@ -322,6 +333,9 @@ func (h *ProductivityHandler) tryReadSnapshotDay(
 			log.Printf("productivity: skip corrupt snapshot %s/%s: %v", row.ProjectPath, row.Day, err)
 			continue
 		}
+		if err := h.hydrateSnapshotReflections(ctx, &rep, dayStr); err != nil {
+			log.Printf("productivity: hydrate reflections for %s/%s: %v", row.ProjectPath, dayStr, err)
+		}
 		perProject = append(perProject, rep)
 	}
 	if len(perProject) == 0 {
@@ -332,6 +346,55 @@ func (h *ProductivityHandler) tryReadSnapshotDay(
 	day := productivity.AggregateReports(perProject, dayStr)
 	day.Day = dayStr
 	return day, true, nil
+}
+
+// hydrateSnapshotReflections refreshes the per-service ReflectionGroups,
+// ReflectionMarkdown, and the report-level ReflectionStatus on a
+// deserialised single-project snapshot Report by looking up the current
+// worklog_reflections rows for (project_path, day). Mirrors what
+// productivity.BuildReport does on the live path — exact same lookup
+// adapter and same "any group → current" semantics — so a snapshot
+// read is indistinguishable from a live recompute for the reflection
+// layer.
+//
+// dayStr is parsed in the local zone to match the recorder's day
+// labelling (reflection_recorder.go uses day.Local() since the fix in
+// migration 022).
+func (h *ProductivityHandler) hydrateSnapshotReflections(
+	ctx context.Context, rep *productivity.Report, dayStr string,
+) error {
+	day, err := time.ParseInLocation("2006-01-02", dayStr, time.Local)
+	if err != nil {
+		return fmt.Errorf("parse day %q: %w", dayStr, err)
+	}
+	lookup := &reflectionLookup{db: h.db}
+	anyReflection := false
+	for i := range rep.Services {
+		svc := &rep.Services[i]
+		groups, err := lookup.LoadReflections(ctx, svc.ProjectPath, day)
+		if err != nil {
+			return fmt.Errorf("load reflections for %s: %w", svc.ProjectPath, err)
+		}
+		if len(groups) > 0 {
+			anyReflection = true
+			svc.ReflectionGroups = groups
+			svc.ReflectionMarkdown = productivity.ConcatReflectionBodies(groups)
+		} else {
+			// Defensive: clear any stale groups carried in the persisted
+			// payload so a deleted/orphaned reflection doesn't linger.
+			svc.ReflectionGroups = nil
+			svc.ReflectionMarkdown = ""
+		}
+	}
+	if anyReflection {
+		rep.ReflectionStatus = "current"
+		rep.Nudge = ""
+	} else {
+		rep.ReflectionStatus = "missing"
+		// Leave Nudge to AggregateReports — it composes the multi-day
+		// message that depends on the union of per-day statuses.
+	}
+	return nil
 }
 
 // persistSnapshotsForDay writes one daily_productivity_snapshot row per
