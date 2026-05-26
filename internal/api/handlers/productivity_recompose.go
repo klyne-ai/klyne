@@ -158,13 +158,26 @@ func persistRecomposedCards(
 	// Service doesn't already appear in the report becomes a new
 	// Service stub so the typed panel renders even before the next
 	// live-compute fills in branches/risks/sessions.
+	//
+	// PRESERVE LLM-COMPILED CARDS: when an existing service already
+	// carries an llm_compiled=true What-was-done card (written by
+	// productivity-sync / PersistLLMCompiledCard), do NOT overwrite it
+	// with the mechanical recompose output. The deterministic compose
+	// would set llm_compiled=false and pending_compile would jump back
+	// up every time /klyne:reflect chains the recompose — wiping the
+	// user's previous "Generate productivity" work. The LLM-compiled
+	// card stays until productivity-sync overwrites it with a fresh
+	// llm_compiled=true payload.
 	matched := map[string]struct{}{}
 	for i := range rep.Services {
 		svc := &rep.Services[i]
-		// Match on the Service.Repo basename — the same key the typed
-		// payload uses for `service` (§1.1). Fall back to the project
-		// path tail when Repo is empty.
 		key := serviceKey(*svc)
+		if svc.WhatWasDone != nil && svc.WhatWasDone.LLMCompiled {
+			// Mark as matched so we don't append a stub for this service
+			// below; leave the existing LLM-compiled card untouched.
+			matched[key] = struct{}{}
+			continue
+		}
 		if c, ok := cardByService[key]; ok {
 			cardCopy := *c
 			svc.WhatWasDone = &cardCopy
