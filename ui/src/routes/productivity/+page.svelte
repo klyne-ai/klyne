@@ -157,14 +157,29 @@
   function refresh() { void load({ refresh: true }); }
 
   onMount(() => {
+    // URL params and localStorage only hint at WHICH preset chip should
+    // be active. The actual (since, until) window is always recomputed
+    // from rangeFor(key) so a stale tuple (e.g. URL saved on May 24
+    // when "yesterday" was May 23, opened on May 26) collapses to the
+    // current preset's window instead of being trusted verbatim. The
+    // old behaviour fetched May 23's snapshot for a May-26 "yesterday"
+    // chip click because the URL was treated as authoritative.
     const q = new URLSearchParams(window.location.search);
     const qs = Number(q.get('since')), qu = Number(q.get('until'));
-    let init: { since: number; until: number };
-    if (Number.isFinite(qs) && qs > 0 && Number.isFinite(qu) && qu > 0) init = { since: qs, until: qu };
-    else init = loadSaved() ?? rangeFor('today');
-    since = init.since; until = init.until;
-    rangeKey = detectRangeKey(since, until);
+    let hintedKey: RangeKey = 'today';
+    if (Number.isFinite(qs) && qs > 0 && Number.isFinite(qu) && qu > 0) {
+      hintedKey = detectRangeKey(qs, qu);
+    } else {
+      const saved = loadSaved();
+      if (saved) hintedKey = detectRangeKey(saved.since, saved.until);
+    }
+    rangeKey = hintedKey;
+    const r = rangeFor(hintedKey);
+    since = r.since; until = r.until;
     saveRange(since, until); syncUrl(since, until);
+    // Cache validity now also requires the cached window to match the
+    // freshly-recomputed range — same defence against post-midnight
+    // staleness as the URL guard above.
     const c = loadCached();
     if (c && c.since === since && c.until === until) { rep = c.rep; loadedAt = c.loadedAt; loading = false; }
     else void load();
