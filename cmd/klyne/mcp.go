@@ -132,9 +132,10 @@ func runMcpInstall(cmd *cobra.Command, platformFlag string) error {
 
 	// Always attempt to install the advisor hook into Claude
 	// Code's settings.json so the proactive session advisor works
-	// out of the box. Codex CLI does not yet expose an equivalent
-	// hook surface; the web cockpit advisory is the v1 fallback
-	// for Codex-only users.
+	// out of the box. Codex CLI now exposes an equivalent hook
+	// surface at ~/.codex/hooks.json (canonical since codex-cli
+	// 0.133, supersedes the legacy `codex_hooks` feature flag) and
+	// we install into both when Codex is selected.
 	if shouldInstallAdvisorHook(targets) {
 		// Prefer the lightweight klyne-hook stub when it's installed
 		// alongside the main binary. The stub forwards hook events
@@ -208,6 +209,32 @@ func runMcpInstall(cmd *cobra.Command, platformFlag string) error {
 			"klyne: advisor active — you'll see inline warnings in Claude Code when sessions drift, accelerate, or approach your 5-hour cap.")
 		fmt.Fprintln(cmd.OutOrStdout(),
 			"To enable the 5-hour-window advisor, run: klyne config set plan <pro|max-5x|max-20x|team>")
+	}
+
+	// Codex hooks. Codex CLI 0.133+ honours ~/.codex/hooks.json with
+	// the same SessionStart / UserPromptSubmit / PreToolUse / Stop
+	// event shape Claude Code uses, plus a `[features].hooks = true`
+	// toggle in ~/.codex/config.toml. Installing both gives Codex
+	// sessions per-turn stop_summaries population identical to
+	// Claude — including the assistant-emitted KLYNE_SUMMARY line
+	// flowing into ai_drafted_summary.
+	//
+	// First-run note: codex requires explicit hook-trust the very
+	// first interactive session after install. The user will see a
+	// one-time prompt in the codex TUI; accepting it persists trust.
+	if shouldInstallCodexHooks(targets) {
+		hookExe := resolveHookBinary(exe)
+		report, err := mcpserver.InstallCodexHooks(hookExe)
+		if err != nil {
+			return fmt.Errorf("install codex hooks: %w", err)
+		}
+		fmt.Fprintf(cmd.OutOrStdout(),
+			"codex hooks: session-start=%s, advise=%s, pretool=%s, session-end=%s — %s\n",
+			report.SessionStart, report.UserPrompt, report.PreToolUse,
+			report.Stop, report.HooksPath)
+		fmt.Fprintf(cmd.OutOrStdout(),
+			"codex feature flag: [features].hooks = true → %s\n",
+			report.FeatureFlag)
 	}
 
 	printRestartBanner(cmd, targets)
@@ -284,6 +311,19 @@ func resolveHookBinary(klyneExe string) string {
 func shouldInstallAdvisorHook(targets []mcpserver.Platform) bool {
 	for _, p := range targets {
 		if p == mcpserver.PlatformClaude {
+			return true
+		}
+	}
+	return false
+}
+
+// shouldInstallCodexHooks reports whether the install should also
+// write klyne hook entries into ~/.codex/hooks.json. Symmetric with
+// shouldInstallAdvisorHook — gated on the codex target being in the
+// platform list.
+func shouldInstallCodexHooks(targets []mcpserver.Platform) bool {
+	for _, p := range targets {
+		if p == mcpserver.PlatformCodex {
 			return true
 		}
 	}

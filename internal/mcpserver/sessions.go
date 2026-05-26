@@ -228,7 +228,12 @@ func CLIForPath(path string) connectors.CLI {
 		return ""
 	}
 	switch {
-	case strings.Contains(path, "/.codex/sessions/"):
+	case strings.Contains(path, "/.codex/sessions/"),
+		// Codex moves rollouts to archived_sessions/ when the session
+		// closes. A Stop hook firing very close to the archive (or any
+		// retroactive snapshot read after a session ends) needs the
+		// codex parser, not the Claude one. Match both layouts.
+		strings.Contains(path, "/.codex/archived_sessions/"):
 		return connectors.CLICodex
 	case strings.Contains(path, "/.claude/projects/"):
 		return connectors.CLIClaude

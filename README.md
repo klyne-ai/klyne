@@ -86,11 +86,43 @@ Open `http://127.0.0.1:7878`, then finish one Claude Code or Codex CLI session. 
 
 > Restart Claude Code and Codex CLI after `klyne mcp install`; hooks attach when a new session starts.
 
+### What `klyne mcp install` wires up
+
+The installer is idempotent — re-running only rewrites entries that would actually change, and never strips hook entries belonging to other tools.
+
+**Claude Code** (`~/.claude/settings.json`):
+
+| Event | Subcommand | Purpose |
+|---|---|---|
+| `UserPromptSubmit` | `klyne-hook advise` | Inject context + the per-turn `KLYNE_SUMMARY` instruction |
+| `PreToolUse` | `klyne-hook pretool` | Snapshot the working tree before risky commands |
+| `PreCompact` | `klyne-hook precompact` | Block native compact when a snapshot is armed (Compact Shield) |
+| `Stop` | `klyne-hook session-end` | Write the per-turn `stop_summaries` row with `ai_drafted_summary` |
+| `SessionStart` | `klyne-hook session-start` | Show recent reflections + open loops at session start |
+
+Plus `~/.claude/commands/klyne/*.md` — the `/klyne:reflect`, `/klyne:bootstrap`, etc. slash commands.
+
+**Codex CLI** (`~/.codex/hooks.json` + `[features].hooks = true` in `~/.codex/config.toml`):
+
+| Event | Subcommand | Purpose |
+|---|---|---|
+| `SessionStart` | `klyne-hook session-start` | Same as Claude |
+| `UserPromptSubmit` | `klyne-hook advise` | Same as Claude — codex honours the `additionalContext` injection, so `KLYNE_SUMMARY` flows through |
+| `PreToolUse` | `klyne-hook pretool` | Same as Claude |
+| `Stop` | `klyne-hook session-end` | Same as Claude — the per-turn flow is fully shared via `internal/hooks.ComputeAndPersistSessionEnd` |
+
+> Codex requires explicit hook-trust the very first time you run an interactive session after install. You'll see a one-time prompt in the codex TUI — accept it to persist trust.
+>
+> Codex `exec` (non-interactive) does NOT fire hooks. Use the interactive `codex` TUI for the per-turn flow.
+
+If you installed klyne before this version, the installer also migrates the legacy `[features].codex_hooks` flag (deprecated as of codex-cli 0.133) to the canonical `[features].hooks` form in a single pass.
+
 <details>
 <summary>Requirements and package status</summary>
 
 - Requires Go 1.25+. The Makefile uses `GOTOOLCHAIN=auto`, so older Go installations can fetch the required toolchain.
 - Builds two binaries: `klyne` and `klyne-hook`.
+- Codex hook support requires codex-cli 0.133 or newer (older codex builds use the deprecated `codex_hooks` feature flag; the installer migrates it automatically).
 - Homebrew tap and one-line installer are planned for v0.1.
 
 </details>
@@ -225,10 +257,10 @@ The end-to-end scenarios assert that daemon-side AI subprocesses stay at zero. I
 <summary>Planned releases</summary>
 
 - **v0.1** - Homebrew tap, one-line installer, signed binaries.
-- **v0.2** - Codex `SessionStart` parity when the Codex API supports it.
+- ~~**v0.2** - Codex `SessionStart` parity when the Codex API supports it.~~ ✓ Shipped — codex-cli 0.133+ exposes the same SessionStart / UserPromptSubmit / PreToolUse / Stop hook surface as Claude Code; `klyne mcp install` now wires both.
 - **v0.3** - VSCode / JetBrains extension for worklog and advisor signals in the editor.
 - **v0.4** - Team-mode opt-in, aggregated locally on each user's machine.
-- **v0.5** - Hooks for more coding agents using the same `KLYNE_SUMMARY` contract.
+- **v0.5** - Hooks for more coding agents (Cursor, Continue, …) using the same `KLYNE_SUMMARY` contract.
 
 </details>
 
