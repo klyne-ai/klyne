@@ -22,7 +22,7 @@
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { fetchProductivityDates, type ProductivityReport, type ProductivityService, type ProductivitySessionStat } from '$lib/api.js';
+  import { fetchProductivityDates, runReflect, type ProductivityReport, type ProductivityService, type ProductivitySessionStat } from '$lib/api.js';
   import { applyHiddenFilter, hiddenSessionIds, hideMany, clearHidden } from '$lib/hidden-sessions.svelte';
   import ConcurrencyTimeline from '$lib/components/productivity/ConcurrencyTimeline.svelte';
 
@@ -36,6 +36,51 @@
   let since = $state<number>(0);
   let until = $state<number>(0);
   let copied = $state(false);
+  // Reflect-run state: drives the inline "Run /klyne:reflect now" button
+  // surfaced when reflection_status != "current". We track per-project
+  // progress so a multi-project window (e.g. "today" spanning klyne +
+  // operations-app + trackIt) shows a running counter instead of a
+  // single opaque spinner. Sequential dispatch — each /klyne:reflect
+  // spawns a full claude subprocess; parallel fan-out would burn
+  // resources and could trip rate limits.
+  let reflectRunning = $state(false);
+  let reflectDone   = $state(0);
+  let reflectTotal  = $state(0);
+  let reflectError  = $state<string | null>(null);
+  async function runReflectForAllProjects() {
+    if (reflectRunning || !rep) return;
+    const projects = Array.from(new Set(
+      (rep.services ?? [])
+        .map(s => s.project_path)
+        .filter((p): p is string => !!p && p.trim() !== ''),
+    ));
+    if (projects.length === 0) return;
+    reflectRunning = true;
+    reflectError = null;
+    reflectDone = 0;
+    reflectTotal = projects.length;
+    try {
+      for (const p of projects) {
+        try {
+          await runReflect(p);
+        } catch (e) {
+          // Capture but keep going — one project's reflect failure
+          // shouldn't prevent the others from running. The user sees
+          // the first error after the batch completes.
+          if (!reflectError) {
+            reflectError = e instanceof Error ? e.message : String(e);
+          }
+        } finally {
+          reflectDone += 1;
+        }
+      }
+      // After all reflections land, force-refresh the dashboard so the
+      // newly-written worklog_reflections rows surface immediately.
+      await load({ refresh: true });
+    } finally {
+      reflectRunning = false;
+    }
+  }
   // Four preset windows only. The dashboard is snapshot-backed
   // (daily_productivity_snapshot, migration 021) so past-day rendering
   // is deterministic across reloads. Presets stay limited to common
@@ -808,12 +853,32 @@
         </div>
         <div class="mast-m">
           <div class="mast-pills">
-            <span class="pill pill-ok"><span class="dot dot-ok"></span>{reflectionLabel(v.reflection_status)}</span>
+            <span class="pill pill-{v.reflection_status === 'current' ? 'ok' : v.reflection_status === 'stale' ? 'warn' : 'alert'}">
+              <span class="dot dot-{v.reflection_status === 'current' ? 'ok' : v.reflection_status === 'stale' ? 'warn' : 'alert'}"></span>{reflectionLabel(v.reflection_status)}
+            </span>
+            {#if v.reflection_status !== 'current'}
+              <button
+                class="pill pill-action"
+                onclick={runReflectForAllProjects}
+                disabled={reflectRunning}
+                title="Spawn /klyne:reflect for every project in this window">
+                {#if reflectRunning}
+                  Running {reflectDone}/{reflectTotal}…
+                {:else}
+                  ▶ Run /klyne:reflect now
+                {/if}
+              </button>
+            {/if}
             {#if alerts.length > 0}
               <span class="pill pill-alert"><span class="dot dot-alert"></span>{plural(alerts.length, 'open alert')} · review before EOD</span>
             {/if}
           </div>
-          <span class="mast-sub">{realSessions.length} worklog entries pending · next /klyne:reflect when window resets</span>
+          <span class="mast-sub">
+            {realSessions.length} worklog entries pending · next /klyne:reflect when window resets
+            {#if reflectError}
+              · <span class="refl-err">last run reported: {reflectError}</span>
+            {/if}
+          </span>
         </div>
         <div class="mast-r">
           <button class="btn-primary" onclick={copyForStandup}>{copied ? '✓ Copied' : 'Copy for standup ⌘C'}</button>
@@ -1199,6 +1264,23 @@
   .pill-warn  { color: var(--warn);  border-color: color-mix(in oklch, var(--warn)  35%, transparent); background: color-mix(in oklch, var(--warn)  10%, var(--bg-card-2)); }
   .pill-alert { color: var(--alert); border-color: color-mix(in oklch, var(--alert) 35%, transparent); background: color-mix(in oklch, var(--alert) 10%, var(--bg-card-2)); }
   .pill-info  { color: var(--info);  border-color: color-mix(in oklch, var(--info)  35%, transparent); background: color-mix(in oklch, var(--info)  10%, var(--bg-card-2)); }
+  /* The reflect-now trigger looks like a pill but is interactive. Borrow
+     the accent palette so it reads as the primary call-to-action when
+     reflection_status is missing/stale. Disabled state dims and removes
+     the hover lift while a /klyne:reflect batch is in flight. */
+  .pill-action {
+    color: var(--accent, var(--ok));
+    border-color: color-mix(in oklch, var(--accent, var(--ok)) 45%, transparent);
+    background: color-mix(in oklch, var(--accent, var(--ok)) 12%, var(--bg-card-2));
+    cursor: pointer;
+    font-family: var(--font-mono);
+    font-size: 11px;
+  }
+  .pill-action:hover:not(:disabled) {
+    background: color-mix(in oklch, var(--accent, var(--ok)) 22%, var(--bg-card-2));
+  }
+  .pill-action:disabled { cursor: progress; opacity: 0.7; }
+  .refl-err { color: var(--alert); }
 
   .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--fg-muted); flex-shrink: 0; }
   .dot-ok    { background: var(--ok); }
