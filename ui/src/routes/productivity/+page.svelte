@@ -1322,7 +1322,8 @@
   .cal-pop {
     position: absolute;
     top: calc(100% + 8px);
-    right: 0;
+    left: 50%;
+    transform: translateX(-50%);
     z-index: 20;
     width: 252px;
     padding: 10px;
