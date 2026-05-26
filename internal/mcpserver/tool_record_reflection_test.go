@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/klyne-ai/klyne/internal/productivity"
 	"github.com/klyne-ai/klyne/internal/store"
 	"github.com/klyne-ai/klyne/internal/worklog"
 )
@@ -109,6 +110,15 @@ func TestHandleRecordReflection_PersistsWithDay(t *testing.T) {
 // commit-dated, ticket id) into body_md.
 func TestHandleRecordReflection_EnrichesWithGitSubstrate(t *testing.T) {
 	withFakeHome(t)
+	// withFakeHome blanks $HOME so productivity.UserEmails() (which reads
+	// `git config user.email` from the global config) returns an empty
+	// set. Without a seeded identity, every commit authored below fails
+	// the §6.3 identity filter — svc.Branches comes out empty and the
+	// shippedLedger section disappears, so the test then asserts on a
+	// missing "Shipped" header. Seed the test author explicitly so the
+	// filter keeps them.
+	productivity.SetUserEmailAliases([]string{"coders@clinikk.com"})
+	t.Cleanup(func() { productivity.SetUserEmailAliases(nil) })
 	db := withBootstrapDB(t)
 
 	when := time.Now().Add(-2 * time.Hour)
