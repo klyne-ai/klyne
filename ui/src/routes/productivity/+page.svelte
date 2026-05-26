@@ -893,7 +893,8 @@
     {@const parsedBullets = gatherProjectBullets(v)}
     {@const bullets = parsedBullets.length > 0 ? parsedBullets : fallbackSessionBullets(v)}
     {@const wwdServices = (v.services ?? []).filter(s => s.what_was_done != null)}
-    {@const legacyBullets = wwdServices.length === 0 ? bullets : []}
+    {@const wwdRepos = new Set(wwdServices.map(s => (s.repo || '').toLowerCase()))}
+    {@const legacyBullets = bullets.filter(b => !wwdRepos.has((b.repo || '').toLowerCase()))}
     {@const pendingNew = v.pending_entries ?? 0}
     {@const needsSync = v.reflection_status !== 'current' || pendingNew > 0}
     {@const pendingCompileCount = v.pending_compile ?? 0}
@@ -1057,11 +1058,15 @@
               {/if}
             {/each}
           </div>
-        {:else if legacyBullets.length > 0}
+        {/if}
+        {#if legacyBullets.length > 0}
           <!--
-            Legacy prose-bullet fallback: shown only when NO service in
-            this window has a typed `what_was_done` card. As Agent G + P
-            backfill body_json, this branch will quietly disappear.
+            Legacy prose-bullet fallback: rendered ALONGSIDE typed cards
+            for any service whose reflection is still pre-023 prose
+            (body_json IS NULL). Once that project's next /klyne:reflect
+            run lands a typed payload, those bullets get replaced by a
+            real WhatWasDoneCard. As all projects backfill, this branch
+            disappears naturally.
           -->
           <ol class="bul-list">
             {#each legacyBullets as b, i (b.title + i)}
