@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/klyne-ai/klyne/internal/connectors"
 	"github.com/klyne-ai/klyne/internal/mcpserver"
@@ -47,7 +48,15 @@ const klyneSummaryMaxLen = 1000
 // budget and return whatever's loaded; the caller proceeds with that
 // (the deterministic columns still write, ai_drafted_summary just
 // stays empty for that row).
-func loadSnapshotWaitForFinalText(ctx context.Context, path string, budget time.Duration) (*mcpserver.SessionSnapshot, error) {
+//
+// Exported (capitalised) so the cobra `klyne session-end` subcommand
+// (cmd/klyne/session_end.go — the path Claude Code actually invokes
+// via the klyne-hook fallback) can reuse the same retry semantics
+// instead of doing a single blind LoadSnapshot. Keeping ONE wait
+// implementation prevents the two session-end code paths from
+// drifting apart again — that drift is exactly what caused
+// `ai_drafted_summary` to stay empty system-wide.
+func LoadSnapshotWaitForFinalText(ctx context.Context, path string, budget time.Duration) (*mcpserver.SessionSnapshot, error) {
 	const pollEvery = 100 * time.Millisecond
 	deadline := time.Now().Add(budget)
 	var lastSnap *mcpserver.SessionSnapshot
@@ -71,27 +80,46 @@ func loadSnapshotWaitForFinalText(ctx context.Context, path string, budget time.
 	}
 }
 
-// hasFinalAssistantText reports whether snap's most recent assistant
-// message has non-empty text content. Tool-call-only assistant turns
-// don't count — they're a sign the model hasn't emitted its final
-// reply yet (the typical sequence is: tool_use, tool_result,
-// tool_use, ..., final text). The Stop hook fires once the LAST
-// assistant turn includes plain text — which is also where the
-// KLYNE_SUMMARY line will live.
+// hasFinalAssistantText reports whether the JSONL has fully landed
+// the current turn's assistant text. The check is deliberately
+// strict: the VERY LAST message in the snapshot must be an assistant
+// turn with non-empty text content. Anything else means the file
+// flush is still in flight and we should keep polling.
+//
+// Why so strict — production race observed 2026-05-26: Claude Code
+// fires the Stop hook the moment the model stops generating, but
+// the file write of the final assistant message hasn't been
+// committed to disk yet (file mtime trailed the hook by ~1s in the
+// captured repro). At that instant the parsed snapshot's most
+// recent assistant message is the PRIOR turn (one full
+// user/assistant pair earlier). An earlier looser implementation
+// scanned backward for "any assistant with text" and latched onto
+// that prior turn, so the wait short-circuited and the row landed
+// with empty AIDraftedSummary even though the actual KLYNE_SUMMARY
+// arrived in the file shortly after.
+//
+// The strict last-message-is-assistant-with-text check makes those
+// three states distinguishable:
+//   - last is USER / tool result          → new turn not yet in file → wait
+//   - last is ASSISTANT, no text content  → still emitting tool_use   → wait
+//   - last is ASSISTANT with text         → final text landed         → ready
+//
+// On budget elapse the loop in LoadSnapshotWaitForFinalText returns
+// whatever's loaded; the caller proceeds with ExtractKlyneSummary
+// which will yield "" on an incomplete tail and the row writes with
+// empty AIDraftedSummary — the documented degraded path.
 func hasFinalAssistantText(snap *mcpserver.SessionSnapshot) bool {
-	if snap == nil {
+	if snap == nil || len(snap.Messages) == 0 {
 		return false
 	}
-	for i := len(snap.Messages) - 1; i >= 0; i-- {
-		m := snap.Messages[i]
-		if m == nil || m.Role != connectors.RoleAssistant {
-			continue
-		}
-		if strings.TrimSpace(m.Content) != "" {
-			return true
-		}
+	last := snap.Messages[len(snap.Messages)-1]
+	if last == nil {
+		return false
 	}
-	return false
+	if last.Role != connectors.RoleAssistant {
+		return false
+	}
+	return strings.TrimSpace(last.Content) != ""
 }
 
 
@@ -115,7 +143,13 @@ func hasFinalAssistantText(snap *mcpserver.SessionSnapshot) bool {
 //
 // Returns "" when no real summary is found within the current turn's
 // assistant span, or when the captured text is empty.
-func extractKlyneSummary(msgs []*connectors.Message) string {
+//
+// Exported (capitalised) so the cobra `klyne session-end` subcommand
+// can populate stop_summaries.ai_drafted_summary identically to the
+// daemon-side path. Both Stop-event entry points MUST funnel through
+// this single function — they previously diverged and the cobra path
+// silently dropped every KLYNE_SUMMARY line.
+func ExtractKlyneSummary(msgs []*connectors.Message) string {
 	for i := len(msgs) - 1; i >= 0; i-- {
 		m := msgs[i]
 		if m == nil {
@@ -152,7 +186,7 @@ func extractKlyneSummary(msgs []*connectors.Message) string {
 			continue
 		}
 		if len(raw) > klyneSummaryMaxLen {
-			raw = raw[:klyneSummaryMaxLen]
+			raw = clipRuneSafe(raw, klyneSummaryMaxLen)
 		}
 		return raw
 	}
@@ -195,21 +229,28 @@ func SessionEnd(ctx context.Context, stdin io.Reader, db *store.DB) Result {
 	defer cancel()
 
 	var errb bytes.Buffer
-	if err := computeAndPersistSessionEnd(ctx, stdin, db, &errb); err != nil {
+	if err := ComputeAndPersistSessionEnd(ctx, stdin, db, &errb); err != nil {
 		fmt.Fprintf(&errb, "klyne session-end: %v\n", err)
 	}
 	return Result{Stderr: errb.Bytes()}
 }
 
-// computeAndPersistSessionEnd is the I/O-aware body — mirrors
-// cmd/klyne/session_end.go::computeAndPersistSessionEnd. Duplicated
-// (rather than shared) per the convention documented in hooks.go:
-// the cobra path lives in `package main` and can't be imported.
+// ComputeAndPersistSessionEnd is the canonical Stop-hook body. Both
+// entry points — the daemon's hookserver (via SessionEnd) and the
+// cobra `klyne session-end` subprocess — funnel through this single
+// function. They previously diverged (the cobra path silently dropped
+// the KLYNE_SUMMARY extraction for over a week before this fix), and
+// keeping ONE implementation is the only structural guarantee against
+// that drift re-emerging.
 //
-// stderr is used for worklog write failures (which must not block
-// the Stop event) — every other failure path returns via the error
-// channel so the caller can prefix with the hook name.
-func computeAndPersistSessionEnd(ctx context.Context, stdin io.Reader, db *store.DB, stderr io.Writer) error {
+// db: pass the daemon's open handle when called from within the
+// daemon process; pass nil from the standalone cobra entry — the
+// function opens its own DB and closes it on return.
+//
+// stderr is used for worklog / git-snapshot write failures (which
+// must not block the Stop event). Every other failure path returns
+// via the error channel so the caller can prefix with the hook name.
+func ComputeAndPersistSessionEnd(ctx context.Context, stdin io.Reader, db *store.DB, stderr io.Writer) error {
 	in := readSessionEndInput(stdin)
 
 	transcript := strings.TrimSpace(in.TranscriptPath)
@@ -234,7 +275,7 @@ func computeAndPersistSessionEnd(ctx context.Context, stdin io.Reader, db *store
 	// retry loop polls until the most recent assistant message
 	// carries non-empty text content (i.e., not just tool calls), or
 	// the budget elapses. Bounded ≤ 3s, well within the 5s sessionEndTimeout.
-	snap, err := loadSnapshotWaitForFinalText(ctx, transcript, 3*time.Second)
+	snap, err := LoadSnapshotWaitForFinalText(ctx, transcript, 3*time.Second)
 	if err != nil {
 		return fmt.Errorf("load snapshot: %w", err)
 	}
@@ -318,7 +359,7 @@ func computeAndPersistSessionEnd(ctx context.Context, stdin io.Reader, db *store
 		wallTime = time.Duration(lastTs-firstTs) * time.Millisecond
 	}
 
-	tags := deriveEventTags(sessionFixture{
+	tags := DeriveEventTags(SessionFixture{
 		LastBash:       summary.LastBash,
 		EditWriteCount: editWriteCount,
 		Files:          summary.Files,
@@ -331,7 +372,7 @@ func computeAndPersistSessionEnd(ctx context.Context, stdin io.Reader, db *store
 	// reflection has a real prose record without any daemon-side LM call.
 	// Empty / "skip" / missing → empty AIDraftedSummary; reflection still
 	// works using the deterministic columns.
-	aiDraftedSummary := extractKlyneSummary(snap.Messages)
+	aiDraftedSummary := ExtractKlyneSummary(snap.Messages)
 
 	entry := worklog.Entry{
 		SessionID:        row.SessionID,
@@ -395,18 +436,20 @@ func captureGitSnapshots(ctx context.Context, db *store.DB, sessionID, dir strin
 	}
 }
 
-// sessionFixture is the minimal input shape consumed by
-// deriveEventTags. Mirrors the cobra path's type of the same name.
-type sessionFixture struct {
+// SessionFixture is the minimal input shape consumed by
+// DeriveEventTags. Exported so the (now-canonical) tag-derivation
+// unit tests live alongside the implementation in this package.
+type SessionFixture struct {
 	LastBash       string
 	EditWriteCount int
 	Files          []string
 }
 
-// deriveEventTags is the deterministic classifier that maps a
-// session-end summary onto worklog event tags. Mirrors the cobra
-// path; keyword/prefix matches only, no model calls.
-func deriveEventTags(s sessionFixture) []worklog.EventTag {
+// DeriveEventTags is the deterministic classifier that maps a
+// session-end summary onto worklog event tags. Keyword/prefix
+// matches only — no model calls — so the memory layer's signal is
+// reproducible and auditable.
+func DeriveEventTags(s SessionFixture) []worklog.EventTag {
 	var tags []worklog.EventTag
 	cmd := strings.TrimSpace(s.LastBash)
 	// Detect commits and PR-opens in compound commands too — e.g.
@@ -647,14 +690,50 @@ func extractFilePath(input string) string {
 	return ""
 }
 
-// sessionEndTruncate is a UTF-8-safe string truncator. Renamed from
-// the cobra path's `truncate` to avoid collision if a future shared
-// helper lands.
+// sessionEndTruncate clips s to at most max bytes and appends an
+// ellipsis when truncation occurs. The byte cut is rune-safe — it
+// trims back to the last valid UTF-8 boundary so a multi-byte
+// codepoint at the edge is dropped whole instead of being split.
+// The "…" suffix is 3 bytes; the returned string is at most
+// max-1+3 = max+2 bytes (the function trades a tight upper bound
+// for the human-friendly ellipsis).
 func sessionEndTruncate(s string, max int) string {
 	if len(s) <= max {
 		return s
 	}
-	return s[:max-1] + "…"
+	return clipRuneSafe(s, max-1) + "…"
+}
+
+// clipRuneSafe returns s clipped to at most maxBytes bytes, never
+// splitting a UTF-8 codepoint. The cut lands on the highest rune
+// boundary at or before maxBytes. Caller decides whether to append
+// an ellipsis (and accounts for its byte cost).
+//
+// Used by both KLYNE_SUMMARY extraction (which persists into a
+// SQLite TEXT column where downstream readers assume valid UTF-8)
+// and by sessionEndTruncate's human-friendly path.
+func clipRuneSafe(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	// Range over string yields the byte offset of each rune's start;
+	// the largest such offset that is ≤ maxBytes is where we cut.
+	end := 0
+	for i := range s {
+		if i > maxBytes {
+			break
+		}
+		end = i
+	}
+	// Belt-and-braces: confirm the slice is valid UTF-8 (it should
+	// always be when s was valid, since we cut on a rune boundary).
+	out := s[:end]
+	if !utf8.ValidString(out) {
+		for len(out) > 0 && !utf8.ValidString(out) {
+			out = out[:len(out)-1]
+		}
+	}
+	return out
 }
 
 // sessionOneLine collapses newlines so a single message body renders

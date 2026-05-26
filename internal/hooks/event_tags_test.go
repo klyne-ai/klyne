@@ -1,4 +1,4 @@
-package main
+package hooks
 
 import (
 	"testing"
@@ -9,13 +9,19 @@ import (
 // TestDeriveEventTags asserts the deterministic event-tag classifier
 // fires the right tags for the canonical git-commit-with-edits case
 // over a security-relevant file.
+//
+// Lives next to internal/hooks/sessionend.go (the canonical
+// implementation). Previously lived under cmd/klyne with a duplicate
+// classifier; that duplication is the same drift pattern that broke
+// ai_drafted_summary system-wide, so the implementation AND its tests
+// are co-located here as a single source of truth.
 func TestDeriveEventTags(t *testing.T) {
-	s := sessionFixture{
+	s := SessionFixture{
 		LastBash:       "git commit -m x",
 		EditWriteCount: 4,
 		Files:          []string{"src/auth.go"},
 	}
-	tags := deriveEventTags(s)
+	tags := DeriveEventTags(s)
 	want := map[worklog.EventTag]bool{
 		worklog.TagCommitLanded:            true,
 		worklog.TagFileSignificantlyEdited: true,
@@ -41,38 +47,38 @@ func TestDeriveEventTags(t *testing.T) {
 func TestDeriveEventTags_PRMigrationDependency(t *testing.T) {
 	cases := []struct {
 		name string
-		in   sessionFixture
+		in   SessionFixture
 		want worklog.EventTag
 	}{
 		{
 			name: "gh pr create triggers TagPROpened",
-			in:   sessionFixture{LastBash: "gh pr create --title x", Files: nil},
+			in:   SessionFixture{LastBash: "gh pr create --title x", Files: nil},
 			want: worklog.TagPROpened,
 		},
 		{
 			name: "migrations/*.sql triggers TagMigrationOrSchemaChange",
-			in:   sessionFixture{Files: []string{"db/migrations/001_init.sql"}},
+			in:   SessionFixture{Files: []string{"db/migrations/001_init.sql"}},
 			want: worklog.TagMigrationOrSchemaChange,
 		},
 		{
 			name: ".proto triggers TagMigrationOrSchemaChange",
-			in:   sessionFixture{Files: []string{"api/service.proto"}},
+			in:   SessionFixture{Files: []string{"api/service.proto"}},
 			want: worklog.TagMigrationOrSchemaChange,
 		},
 		{
 			name: "go.mod triggers TagDependencyChange",
-			in:   sessionFixture{Files: []string{"go.mod"}},
+			in:   SessionFixture{Files: []string{"go.mod"}},
 			want: worklog.TagDependencyChange,
 		},
 		{
 			name: "package.json triggers TagDependencyChange",
-			in:   sessionFixture{Files: []string{"web/package.json"}},
+			in:   SessionFixture{Files: []string{"web/package.json"}},
 			want: worklog.TagDependencyChange,
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			tags := deriveEventTags(tc.in)
+			tags := DeriveEventTags(tc.in)
 			found := false
 			for _, got := range tags {
 				if got == tc.want {

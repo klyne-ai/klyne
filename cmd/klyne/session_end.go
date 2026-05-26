@@ -2,51 +2,36 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
-	"github.com/klyne-ai/klyne/internal/config"
-	"github.com/klyne-ai/klyne/internal/connectors"
-	"github.com/klyne-ai/klyne/internal/mcpserver"
-	"github.com/klyne-ai/klyne/internal/productivity"
-	"github.com/klyne-ai/klyne/internal/projectpath"
-	"github.com/klyne-ai/klyne/internal/store"
-	"github.com/klyne-ai/klyne/internal/worklog"
+	"github.com/klyne-ai/klyne/internal/hooks"
 )
 
 // session_end.go — `klyne session-end` Stop-hook entry point.
 //
 // This subcommand is registered by `klyne mcp install` as a Stop
 // hook in ~/.claude/settings.json. When Claude Code ends a session,
-// it spawns this subprocess and pipes the Stop-event JSON to stdin:
+// it spawns this subprocess (via the klyne-hook fallback path —
+// see cmd/klyne-hook/main.go) and pipes the Stop-event JSON to stdin.
 //
-//	{
-//	  "session_id": "...",
-//	  "transcript_path": "/abs/path/to/.jsonl",
-//	  "stop_hook_active": true,
-//	  "cwd": "/abs/project/path"
-//	}
+// # Why this is a thin shim
 //
-// The hook:
-//
-//  1. Reads stdin (Stop-event JSON), resolves the transcript path
-//     and cwd.
-//  2. Loads the snapshot directly from JSONL.
-//  3. Computes a deterministic summary (last user prompt, last
-//     bash command, files touched in final tool-call window).
-//  4. Persists one row to the stop_summaries table so a future
-//     SessionStart in the same project can recall what just
-//     happened.
+// The full session-end body lives in internal/hooks.
+// ComputeAndPersistSessionEnd. There used to be a second, divergent
+// implementation here in cmd/klyne that built its own worklog.Entry
+// WITHOUT the AIDraftedSummary field set — which silently dropped
+// every per-turn KLYNE_SUMMARY line emitted by the assistant. That
+// divergence persisted for over a week before it was caught. The fix
+// is the structural guarantee: the cobra path and the daemon's
+// hookserver both funnel through the SAME function. The only thing
+// that lives here is the cobra registration glue.
 //
 // Hard rules:
-//
 //   - The hook must NEVER block session-end. Any error returns
 //     exit 0 with empty stdout.
 //   - Stdout is the hook channel; nothing is written there in v1
@@ -57,21 +42,6 @@ import (
 // than the advise hook's 2s because we may walk a longer transcript;
 // still bounded so a corrupt JSONL never stalls Claude Code's exit.
 const sessionEndTimeout = 5 * time.Second
-
-// sessionEndMaxFiles caps how many distinct file paths the summary
-// stores. The last 10 files touched are far more useful than a long
-// list spanning the whole session.
-const sessionEndMaxFiles = 10
-
-// sessionEndInput is the JSON the Stop hook receives on stdin. We
-// only care about the four fields Claude Code documents — other
-// keys may appear and are ignored.
-type sessionEndInput struct {
-	SessionID      string `json:"session_id,omitempty"`
-	TranscriptPath string `json:"transcript_path,omitempty"`
-	StopHookActive bool   `json:"stop_hook_active,omitempty"`
-	CWD            string `json:"cwd,omitempty"`
-}
 
 // newSessionEndCmd registers `klyne session-end`. Hidden from the
 // help menu — it's an entry point for the hook, not for humans.
@@ -108,428 +78,17 @@ func runSessionEnd(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-// computeAndPersistSessionEnd is the I/O-aware body, separated so
-// tests can drive it without a cobra command.
-func computeAndPersistSessionEnd(ctx context.Context, stdin io.Reader) error {
-	in := readSessionEndInput(stdin)
-
-	transcript := strings.TrimSpace(in.TranscriptPath)
-	if transcript == "" {
-		// Fall back to cwd-based resolution; useful when a future
-		// Claude Code build adjusts the event shape.
-		cwd := in.CWD
-		if cwd == "" {
-			w, _ := os.Getwd()
-			cwd = w
-		}
-		if cwd == "" {
-			return nil // nothing to do silently
-		}
-		path, err := resolvePath(in.SessionID, cwd)
-		if err != nil || path == "" {
-			return err
-		}
-		transcript = path
-	}
-
-	snap, err := mcpserver.LoadSnapshot(ctx, transcript)
-	if err != nil {
-		return fmt.Errorf("load snapshot: %w", err)
-	}
-	if snap == nil || len(snap.Messages) == 0 {
-		return nil // no data → no summary
-	}
-
-	cwd := strings.TrimSpace(in.CWD)
-	if cwd == "" {
-		// Use the cwd reported on the latest message as a fallback.
-		cwd = derivedCWD(snap.Messages)
-	}
-	// Canonicalize to the main repo path so worklog entries from a
-	// worktree session land under the same project_path as the main
-	// checkout. Non-git dirs and git failures pass through unchanged.
-	projectPath := projectpath.Canonical(cwd)
-
-	summary := buildSessionEndSummary(snap, projectPath)
-	if summary.Summary == "" {
-		return nil // nothing useful happened in the session
-	}
-
-	db, err := store.Open(ctx, config.DBPath())
-	if err != nil {
-		return fmt.Errorf("open db: %w", err)
-	}
-	defer db.Close()
-
-	row := &store.StopSummary{
-		SessionID:   snap.SessionID,
-		Ts:          time.Now().UnixMilli(),
-		ProjectPath: projectPath,
-		CLI:         string(detectCLI(snap)),
-		Summary:     summary.Summary,
-		LastUser:    summary.LastUser,
-		LastBash:    summary.LastBash,
-		Files:       summary.Files,
-	}
-	if err := store.InsertStopSummary(ctx, db, row); err != nil {
-		return fmt.Errorf("insert stop summary: %w", err)
-	}
-
-	// Derive worklog metrics from the snapshot. The Stop hook is the
-	// authoritative writer for Claude-side worklog entries; failures
-	// log to stderr but never block session-end (hook contract).
-	var (
-		toolCount      int
-		editWriteCount int
-		firstTs        int64
-		lastTs         int64
-	)
-	for _, m := range snap.Messages {
-		if m == nil {
-			continue
-		}
-		if m.Role == connectors.RoleAssistant {
-			toolCount += len(m.ToolCalls)
-			for _, tc := range m.ToolCalls {
-				switch strings.ToLower(tc.Name) {
-				case "edit", "write", "multiedit":
-					editWriteCount++
-				}
-			}
-		}
-		if firstTs == 0 || (m.Ts > 0 && m.Ts < firstTs) {
-			firstTs = m.Ts
-		}
-		if m.Ts > lastTs {
-			lastTs = m.Ts
-		}
-	}
-	wallTime := time.Duration(0)
-	if firstTs > 0 && lastTs > firstTs {
-		wallTime = time.Duration(lastTs-firstTs) * time.Millisecond
-	}
-
-	tags := deriveEventTags(sessionFixture{
-		LastBash:       summary.LastBash,
-		EditWriteCount: editWriteCount,
-		Files:          summary.Files,
-	})
-
-	entry := worklog.Entry{
-		SessionID:      row.SessionID,
-		TS:             time.UnixMilli(row.Ts),
-		ProjectPath:    row.ProjectPath,
-		CLI:            row.CLI,
-		LastUser:       row.LastUser,
-		LastBash:       row.LastBash,
-		Files:          row.Files,
-		CommitSHA:      "", // TODO: derive from `git commit` output when transcript carries it
-		WallTime:       wallTime,
-		ToolCallCount:  toolCount,
-		EditWriteCount: editWriteCount,
-		EventTags:      tags,
-	}
-	if _, werr := worklog.WriteEntry(ctx, db, entry, dismissedSignatures(ctx, db, row.ProjectPath), store.UpsertStopSummaryWithWorklog); werr != nil {
-		// Don't block session-end on a worklog failure; log to stderr.
-		fmt.Fprintf(os.Stderr, "klyne session-end: worklog write failed: %v\n", werr)
-	}
-
-	// Capture a point-in-time git snapshot of the session's repo and its
-	// sibling worktrees (spec D6 — the only way to reconstruct
-	// "AI task done but uncommitted at session end" historically).
-	// BEST-EFFORT and NON-FATAL: any git or DB failure is logged to
-	// stderr and swallowed, exactly like the worklog write above —
-	// session-end must never block on a klyne error.
-	captureGitSnapshots(ctx, db, row.SessionID, cwd, os.Stderr)
-	return nil
-}
-
-// captureGitSnapshots writes one git_session_snapshots row per worktree
-// of the session's repo. It is invoked at the end of session-end and is
-// strictly best-effort: every failure path (no git, capture error, DB
-// insert error) is logged to stderr and swallowed so the Stop hook never
-// blocks Claude Code's exit. dir is the session's cwd (a non-git dir
-// simply yields no snapshots).
-func captureGitSnapshots(ctx context.Context, db *store.DB, sessionID, dir string, stderr io.Writer) {
-	if db == nil {
-		return
-	}
-	snaps := productivity.CaptureSessionSnapshots(dir)
-	now := time.Now()
-	for _, s := range snaps {
-		row := &store.GitSnapshot{
-			SessionID:      sessionID,
-			ProjectPath:    s.ProjectPath,
-			RepoName:       s.RepoName,
-			WorktreePath:   s.WorktreePath,
-			Branch:         s.Branch,
-			HeadSHA:        s.HeadSHA,
-			AheadCount:     s.AheadCount,
-			BehindCount:    s.BehindCount,
-			DirtyFileCount: s.DirtyFileCount,
-			DirtyFiles:     s.DirtyFiles,
-			CapturedAt:     now,
-		}
-		if err := store.InsertGitSnapshot(ctx, db, row); err != nil {
-			fmt.Fprintf(stderr, "klyne session-end: git snapshot write failed: %v\n", err)
-		}
-	}
-}
-
-// sessionFixture is the minimal input shape consumed by
-// deriveEventTags. It exists as a named type so the classifier can be
-// unit-tested without having to assemble a full snapshot.
-type sessionFixture struct {
-	LastBash       string
-	EditWriteCount int
-	Files          []string
-}
-
-// deriveEventTags is the deterministic classifier that maps a
-// session-end summary onto worklog event tags. It is intentionally
-// boring — keyword and prefix matches only, no model calls — so the
-// memory layer's signal is reproducible and auditable.
-func deriveEventTags(s sessionFixture) []worklog.EventTag {
-	var tags []worklog.EventTag
-	cmd := strings.TrimSpace(s.LastBash)
-	if strings.HasPrefix(cmd, "git commit") {
-		tags = append(tags, worklog.TagCommitLanded)
-	}
-	if strings.HasPrefix(cmd, "gh pr create") {
-		tags = append(tags, worklog.TagPROpened)
-	}
-	if s.EditWriteCount >= 2 {
-		tags = append(tags, worklog.TagFileSignificantlyEdited)
-	}
-	for _, f := range s.Files {
-		if strings.Contains(f, "/migrations/") || strings.HasSuffix(f, ".sql") || strings.HasSuffix(f, ".proto") {
-			tags = append(tags, worklog.TagMigrationOrSchemaChange)
-			break
-		}
-	}
-	for _, f := range s.Files {
-		base := filepath.Base(f)
-		if base == "go.mod" || base == "package.json" || base == "Cargo.toml" || base == "pyproject.toml" {
-			tags = append(tags, worklog.TagDependencyChange)
-			break
-		}
-	}
-	for _, f := range s.Files {
-		lower := strings.ToLower(f)
-		for _, kw := range []string{"auth", "crypto", "password", "token", "secret", "oauth"} {
-			if strings.Contains(lower, kw) {
-				tags = append(tags, worklog.TagSecurityRelevantChange)
-				goto done
-			}
-		}
-	}
-done:
-	return tags
-}
-
-// dismissedSignatures returns the set of stop_summary signatures the
-// user has explicitly dismissed for a project. v1 returns an empty set;
-// the DAO will be added when the dismiss surface lands.
-func dismissedSignatures(_ context.Context, _ *store.DB, _ string) map[string]bool {
-	return map[string]bool{}
-}
-
-func readSessionEndInput(r io.Reader) sessionEndInput {
-	if r == nil {
-		return sessionEndInput{}
-	}
-	body, err := io.ReadAll(io.LimitReader(r, 64*1024))
-	if err != nil || len(body) == 0 {
-		return sessionEndInput{}
-	}
-	var in sessionEndInput
-	if err := json.Unmarshal(body, &in); err != nil {
-		return sessionEndInput{}
-	}
-	return in
-}
-
-// derivedCWD picks the cwd off the latest message that has one set.
-// Some Claude Code versions omit cwd in the Stop event but emit it on
-// every message; this keeps the summary's project_path accurate.
-func derivedCWD(msgs []*connectors.Message) string {
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i] == nil {
-			continue
-		}
-		if msgs[i].Cwd != "" {
-			return msgs[i].Cwd
-		}
-		if msgs[i].ProjectPath != "" {
-			return msgs[i].ProjectPath
-		}
-	}
-	return ""
-}
-
-// detectCLI returns "claude" / "codex" based on the snapshot's
-// message stream. Defaults to "claude" when ambiguous.
-func detectCLI(snap *mcpserver.SessionSnapshot) connectors.CLI {
-	if snap == nil {
-		return connectors.CLIClaude
-	}
-	for _, m := range snap.Messages {
-		if m != nil && m.CLI != "" {
-			return m.CLI
-		}
-	}
-	return connectors.CLIClaude
-}
-
-// sessionEndSummary is the deterministic synthesis from the JSONL.
-type sessionEndSummary struct {
-	Summary  string
-	LastUser string
-	LastBash string
-	Files    []string
-}
-
-// buildSessionEndSummary walks msgs in reverse to find:
-//   - the most recent user prompt (capped at ~200 chars)
-//   - the most recent Bash command run
-//   - up to sessionEndMaxFiles distinct file paths touched by the
-//     final tool-call window (Read / Edit / Write inputs)
+// computeAndPersistSessionEnd is the 2-arg shim that delegates to the
+// canonical hooks.ComputeAndPersistSessionEnd. Preserved as a private
+// function so the existing cmd/klyne tests (session_end_test.go,
+// session_end_snapshot_test.go) can drive the cobra path with their
+// established 2-arg signature.
 //
-// Then renders a Markdown body. The body is intended for a future
-// SessionStart's recall surface — short, scannable, fact-based.
-func buildSessionEndSummary(snap *mcpserver.SessionSnapshot, projectPath string) sessionEndSummary {
-	var (
-		last       sessionEndSummary
-		files      []string
-		seen       = map[string]struct{}{}
-		bashFound  bool
-		userFound  bool
-	)
-
-	for i := len(snap.Messages) - 1; i >= 0; i-- {
-		m := snap.Messages[i]
-		if m == nil {
-			continue
-		}
-		if !userFound && m.Role == connectors.RoleUser && strings.TrimSpace(m.Content) != "" {
-			last.LastUser = truncate(strings.TrimSpace(m.Content), 200)
-			userFound = true
-		}
-		if m.Role == connectors.RoleAssistant {
-			for _, tc := range m.ToolCalls {
-				switch strings.ToLower(tc.Name) {
-				case "bash", "shell":
-					if !bashFound {
-						if cmd := extractBashCmdFromInput(tc.Input); cmd != "" {
-							last.LastBash = truncate(cmd, 200)
-							bashFound = true
-						}
-					}
-				case "read", "edit", "write", "multiedit":
-					if path := extractFilePath(tc.Input); path != "" {
-						if _, dup := seen[path]; !dup {
-							seen[path] = struct{}{}
-							files = append(files, path)
-						}
-					}
-				}
-				if len(files) >= sessionEndMaxFiles && bashFound && userFound {
-					break
-				}
-			}
-		}
-		if len(files) >= sessionEndMaxFiles && bashFound && userFound {
-			break
-		}
-	}
-
-	last.Files = files
-	last.Summary = renderSessionEndBody(snap.SessionID, projectPath, last)
-	return last
-}
-
-// renderSessionEndBody produces the Markdown body persisted on the
-// stop_summary row. Kept short; the contract is "useful for a future
-// session to recall what just happened" — not a transcript.
-func renderSessionEndBody(sessionID, projectPath string, s sessionEndSummary) string {
-	if s.LastUser == "" && s.LastBash == "" && len(s.Files) == 0 {
-		return ""
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "# klyne session-end summary\n\n")
-	fmt.Fprintf(&b, "Session: `%s`\n", shortID(sessionID))
-	if projectPath != "" {
-		fmt.Fprintf(&b, "Project: `%s`\n", projectPath)
-	}
-	fmt.Fprintf(&b, "Ended: %s\n\n", time.Now().UTC().Format(time.RFC3339))
-	if s.LastUser != "" {
-		fmt.Fprintf(&b, "## Last user prompt\n\n> %s\n\n", oneLineSafe(s.LastUser))
-	}
-	if s.LastBash != "" {
-		fmt.Fprintf(&b, "## Last shell command\n\n`%s`\n\n", oneLineSafe(s.LastBash))
-	}
-	if len(s.Files) > 0 {
-		b.WriteString("## Files touched (most recent first)\n\n")
-		for _, f := range s.Files {
-			fmt.Fprintf(&b, "- `%s`\n", f)
-		}
-	}
-	return b.String()
-}
-
-// extractBashCmdFromInput is the same parser logic the runbook
-// detector uses — co-located here so the session-end hook doesn't
-// require the insights package as a dep of the cmd directory tree.
-func extractBashCmdFromInput(input string) string {
-	input = strings.TrimSpace(input)
-	if input == "" {
-		return ""
-	}
-	var obj map[string]any
-	if err := json.Unmarshal([]byte(input), &obj); err != nil {
-		return input
-	}
-	if v, ok := obj["command"].(string); ok && strings.TrimSpace(v) != "" {
-		return strings.TrimSpace(v)
-	}
-	if v, ok := obj["cmd"].(string); ok && strings.TrimSpace(v) != "" {
-		return strings.TrimSpace(v)
-	}
-	return ""
-}
-
-// extractFilePath pulls the "file_path" / "path" field from a Read
-// or Edit tool call's JSON input payload. Returns empty when the
-// payload is unparseable or carries neither field.
-func extractFilePath(input string) string {
-	input = strings.TrimSpace(input)
-	if input == "" {
-		return ""
-	}
-	var obj map[string]any
-	if err := json.Unmarshal([]byte(input), &obj); err != nil {
-		return ""
-	}
-	for _, k := range []string{"file_path", "path", "filePath"} {
-		if v, ok := obj[k].(string); ok && strings.TrimSpace(v) != "" {
-			return strings.TrimSpace(v)
-		}
-	}
-	return ""
-}
-
-// truncate is a UTF-8-safe string truncator with an ellipsis.
-func truncate(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	return s[:max-1] + "…"
-}
-
-// oneLineSafe collapses internal newlines so a single message body
-// renders cleanly inside a Markdown blockquote / code span.
-func oneLineSafe(s string) string {
-	s = strings.ReplaceAll(s, "\r\n", " ")
-	s = strings.ReplaceAll(s, "\n", " ")
-	return strings.Join(strings.Fields(s), " ")
+// db is passed as nil — the canonical function opens its own
+// connection via internal/hooks.resolveDB (the same defaulting the
+// cobra path used to do inline). stderr is os.Stderr because we are
+// in a standalone subprocess; the daemon-side caller injects a
+// captured buffer instead.
+func computeAndPersistSessionEnd(ctx context.Context, stdin io.Reader) error {
+	return hooks.ComputeAndPersistSessionEnd(ctx, stdin, nil, os.Stderr)
 }

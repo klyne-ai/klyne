@@ -170,9 +170,9 @@ func TestExtractKlyneSummary(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := extractKlyneSummary(tc.msgs)
+			got := ExtractKlyneSummary(tc.msgs)
 			if got != tc.want {
-				t.Errorf("extractKlyneSummary = %q; want %q", got, tc.want)
+				t.Errorf("ExtractKlyneSummary = %q; want %q", got, tc.want)
 			}
 		})
 	}
