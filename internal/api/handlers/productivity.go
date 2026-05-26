@@ -504,6 +504,39 @@ func hydrateWhatWasDone(
 ) {
 	for i := range rep.Services {
 		svc := &rep.Services[i]
+
+		// LLM-compiled override: if the day's productivity_snapshots row
+		// contains a card for this service with llm_compiled=true (written
+		// by PersistLLMCompiledCard during /klyne:productivity-sync), prefer
+		// it. Today's path bypasses tryReadSnapshotDay so without this we'd
+		// always re-derive via ComposeWWD and the Sonnet-written tldr +
+		// llm_compiled badge would never surface on today's view.
+		if snap, ok, err := store.GetDailyProductivitySnapshot(ctx, db, svc.ProjectPath, dayStr); err == nil && ok && strings.TrimSpace(snap.PayloadJSON) != "" {
+			var saved productivity.Report
+			if err := json.Unmarshal([]byte(snap.PayloadJSON), &saved); err == nil {
+				key := serviceKeyForLookup(*svc)
+				base := basePath(svc.ProjectPath)
+				for j := range saved.Services {
+					ssvc := &saved.Services[j]
+					if ssvc.WhatWasDone == nil || !ssvc.WhatWasDone.LLMCompiled {
+						continue
+					}
+					sk := ssvc.Repo
+					if sk == "" {
+						sk = basePath(ssvc.ProjectPath)
+					}
+					if sk == key || sk == base {
+						cardCopy := *ssvc.WhatWasDone
+						svc.WhatWasDone = &cardCopy
+						break
+					}
+				}
+				if svc.WhatWasDone != nil && svc.WhatWasDone.LLMCompiled {
+					continue
+				}
+			}
+		}
+
 		rows, err := store.ListReflectionsForProjectDay(ctx, db, svc.ProjectPath, dayStr)
 		if err != nil {
 			log.Printf("productivity: wwd hydrate %s/%s: %v", svc.ProjectPath, dayStr, err)
