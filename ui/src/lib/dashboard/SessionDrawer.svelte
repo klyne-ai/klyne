@@ -17,9 +17,15 @@
 
   interface Props {
     sessionId: string;
+    /** Optional message_id passed from SearchPalette. When present the
+     * drawer scrolls to that message after the initial load (auto-
+     * loading older pages if it isn't in the newest page) and pulses
+     * a highlight on it so the user immediately sees their search hit
+     * instead of having to re-find it in the conversation. */
+    jumpToMessageId?: string | null;
     onClose: () => void;
   }
-  const { sessionId, onClose }: Props = $props();
+  const { sessionId, jumpToMessageId = null, onClose }: Props = $props();
 
   // ---------------------------------------------------------------------------
   // State
@@ -217,9 +223,35 @@
   }
 
   let unsubscribeSSE: (() => void) | null = null;
+  let msgStreamEl = $state<HTMLDivElement | null>(null);
+  let highlightedMsgId = $state<string | null>(null);
+
+  // Auto-paginate older messages until the searched message_id appears in
+  // the loaded set, then scroll-into-view + pulse highlight. Bounded so
+  // a typo'd id can't loop forever; the user can still click "Load older
+  // messages" manually if the bound is hit.
+  const JUMP_MAX_PAGES = 10; // 10 × 100 = 1000 messages max auto-load
+  async function jumpToMessage(targetId: string): Promise<void> {
+    for (let i = 0; i < JUMP_MAX_PAGES; i++) {
+      if (messages.some((m) => m.id === targetId)) break;
+      if (olderCursor === null) break; // reached the start
+      await loadOlderMessages();
+    }
+    // Wait one frame for the DOM to render the newly loaded rows.
+    await new Promise((r) => requestAnimationFrame(() => r(null)));
+    const row = msgStreamEl?.querySelector<HTMLElement>(`[data-msg-id="${targetId}"]`);
+    if (row) {
+      row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      highlightedMsgId = targetId;
+      // Pulse highlight fades after ~2.5s (see .msg-row.highlight CSS).
+      setTimeout(() => { if (highlightedMsgId === targetId) highlightedMsgId = null; }, 2500);
+    }
+  }
 
   onMount(() => {
-    void loadData(sessionId);
+    void loadData(sessionId).then(() => {
+      if (jumpToMessageId) void jumpToMessage(jumpToMessageId);
+    });
 
     unsubscribeSSE = subscribe({
       onMsgNew: (payload) => {
@@ -428,7 +460,7 @@
             <span class="sub">{visibleMessages.length} shown{hiddenCount > 0 ? ` · ${hiddenCount} hidden` : ''}</span>
           </div>
         </header>
-        <div class="msg-stream">
+        <div class="msg-stream" bind:this={msgStreamEl}>
           {#if olderCursor !== null}
             <button
               type="button"
@@ -443,7 +475,7 @@
           {#each messages as m (m.id)}
             {#if m.tool_calls && m.tool_calls.length > 0}
               {#each m.tool_calls as tc (tc.id)}
-                <div class="msg-row">
+                <div class="msg-row" data-msg-id={m.id} class:highlight={highlightedMsgId === m.id}>
                   <ToolCallBlock
                     toolCall={tc}
                     toolResult={m.tool_results?.find((r) => r.id === tc.id)}
@@ -458,7 +490,7 @@
               {@const isExpanded = expandedIds.has(m.id)}
               {@const long = isLong(m.content)}
 
-              <div class="msg-row">
+              <div class="msg-row" data-msg-id={m.id} class:highlight={highlightedMsgId === m.id}>
                 <div class="msg-head">
                   <span class="msg-role" style="color: {labColor};">{lab}</span>
                   <span class="msg-meta mono">
@@ -716,8 +748,31 @@
   }
 
   /* ── Message stream ──────────────────────────────────────────────────── */
+  /* Cap the message list height so it scrolls inside its own pane instead
+     of flowing into the outer drawer scroll. 60vh keeps it tall enough to
+     show real context (~10–15 turns) while leaving the stat/chart/summary
+     cards above visible. Without min-height:0 the flex parent ignores
+     overflow and the cap silently fails. */
   .msg-stream {
     display: flex; flex-direction: column; gap: 1px;
+    max-height: 60vh;
+    overflow-y: auto;
+    min-height: 0;
+    padding: 8px 12px;
+    scrollbar-gutter: stable;
+  }
+  .msg-row { scroll-margin-top: 24px; border-radius: 4px; transition: background 200ms ease; }
+  /* Pulse highlight on the jump-to-message target — fades after ~2.5s
+     so the user immediately sees their search hit without permanent
+     visual clutter. */
+  .msg-row.highlight {
+    background: color-mix(in oklch, var(--ad-codex, #f59e0b) 22%, transparent);
+    box-shadow: 0 0 0 1px color-mix(in oklch, var(--ad-codex, #f59e0b) 50%, transparent);
+    animation: msg-pulse 2.5s ease-out forwards;
+  }
+  @keyframes msg-pulse {
+    0%   { background: color-mix(in oklch, var(--ad-codex, #f59e0b) 35%, transparent); }
+    100% { background: color-mix(in oklch, var(--ad-codex, #f59e0b)  0%, transparent); box-shadow: none; }
   }
   .load-older {
     align-self: center;

@@ -58,7 +58,7 @@
   </div>
 </div>
 
-{#if search.session}<SessionDrawer sessionId={search.session} onClose={closeDrawer} />{/if}
+{#if search.session}<SessionDrawer sessionId={search.session} jumpToMessageId={search.msg} onClose={closeDrawer} />{/if}
 {#if search.palette}<SearchPalette onClose={closePalette} />{/if}
 
 <style>

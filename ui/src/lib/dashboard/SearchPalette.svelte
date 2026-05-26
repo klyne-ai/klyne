@@ -4,7 +4,7 @@
   import { search as apiSearch } from '$lib/api.js';
   import { projectsStore } from '$lib/projects.svelte.js';
   import { relTime } from '$lib/format.js';
-  import { sessionUrl } from './url-state.js';
+  import { sessionMessageUrl } from './url-state.js';
   import type { SearchHit } from '$lib/types.js';
   import DOMPurify from 'dompurify';
 
@@ -119,9 +119,11 @@
   }
 
   function pickHit(hit: SearchHit): void {
-    // All hits from the /search API are message hits pointing at sessions
+    // Carry the message_id through so the SessionDrawer can scroll/
+    // highlight the exact hit instead of dumping the user at the top
+    // of a long session and making them re-find their search term.
     const current = $page.url.pathname + $page.url.search;
-    const url = sessionUrl(current, hit.session_id);
+    const url = sessionMessageUrl(current, hit.session_id, hit.message_id);
     onClose();
     void goto(url);
   }
