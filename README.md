@@ -117,6 +117,19 @@ Plus `~/.claude/commands/klyne/*.md` — the `/klyne:reflect`, `/klyne:bootstrap
 
 If you installed klyne before this version, the installer also migrates the legacy `[features].codex_hooks` flag (deprecated as of codex-cli 0.133) to the canonical `[features].hooks` form in a single pass.
 
+**Cursor CLI** (`~/.cursor/hooks.json`, schema version 1):
+
+| Event | Subcommand | Purpose |
+|---|---|---|
+| `sessionStart` | `klyne-hook cursor` | Inject the KLYNE_SUMMARY-emit instruction into the conversation's initial system context (`additional_context` — Cursor's only injection channel) |
+| `afterAgentResponse` | `klyne-hook cursor` | Capture `KLYNE_SUMMARY: …` from each turn's final text into `stop_summaries.ai_drafted_summary` with `cli='cursor'` |
+| `stop` | `klyne-hook cursor` | Reserved (no-op today; here so future loop-aware behaviour doesn't require a hooks.json rewrite) |
+| `sessionEnd` | `klyne-hook cursor` | Reserved |
+
+> The same binary handles every Cursor event — the in-process dispatcher routes by `hook_event_name` from the JSON payload. One install line per event, no per-event subcommand sprawl.
+>
+> Cursor sessions are visible alongside Claude Code and Codex CLI sessions in the productivity dashboard. `beforeSubmitPrompt` is informational-only in Cursor (its output is `{continue, user_message}`), so per-turn KLYNE_SUMMARY emission relies on the one-time `sessionStart` injection — Cursor merges the instruction into the model's initial system context, which then shapes every subsequent turn.
+
 <details>
 <summary>Requirements and package status</summary>
 
@@ -258,6 +271,7 @@ The end-to-end scenarios assert that daemon-side AI subprocesses stay at zero. I
 
 - **v0.1** - Homebrew tap, one-line installer, signed binaries.
 - ~~**v0.2** - Codex `SessionStart` parity when the Codex API supports it.~~ ✓ Shipped — codex-cli 0.133+ exposes the same SessionStart / UserPromptSubmit / PreToolUse / Stop hook surface as Claude Code; `klyne mcp install` now wires both.
+- ~~**v0.5** - Hooks for more coding agents using the same `KLYNE_SUMMARY` contract.~~ ✓ Shipped for Cursor (`klyne mcp install --platform cursor`); event dispatch is in-process via `klyne-hook cursor`. Continue / OpenCode / Gemini next.
 - **v0.3** - VSCode / JetBrains extension for worklog and advisor signals in the editor.
 - **v0.4** - Team-mode opt-in, aggregated locally on each user's machine.
 - **v0.5** - Hooks for more coding agents (Cursor, Continue, …) using the same `KLYNE_SUMMARY` contract.

@@ -237,6 +237,38 @@ func runMcpInstall(cmd *cobra.Command, platformFlag string) error {
 			report.FeatureFlag)
 	}
 
+	// Cursor hooks. Cursor CLI honours ~/.cursor/hooks.json (schema
+	// version 1) with the same fire-on-event semantics as Claude /
+	// codex, but with a flatter shape and per-event payloads whose
+	// `hook_event_name` field discriminates the actual event. klyne
+	// wires a single `klyne-hook cursor` command across every event
+	// it cares about; the in-process dispatcher in
+	// internal/hooks/cursor_hook.go routes by hook_event_name.
+	//
+	// One-time note: Cursor injects the KLYNE_SUMMARY emit
+	// instruction via sessionStart's additional_context output —
+	// beforeSubmitPrompt does NOT support context injection (its
+	// output is continue/user_message only). So per-turn summary
+	// capture relies on the sessionStart injection landing in the
+	// model's initial system context.
+	if shouldInstallCursorHooks(targets) {
+		hookExe := resolveHookBinary(exe)
+		report, err := mcpserver.InstallCursorHooks(hookExe)
+		if err != nil {
+			return fmt.Errorf("install cursor hooks: %w", err)
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "cursor hooks: ")
+		first := true
+		for event, action := range report.Events {
+			if !first {
+				fmt.Fprint(cmd.OutOrStdout(), ", ")
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "%s=%s", event, action)
+			first = false
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), " — %s\n", report.Path)
+	}
+
 	printRestartBanner(cmd, targets)
 	return nil
 }
@@ -330,6 +362,19 @@ func shouldInstallCodexHooks(targets []mcpserver.Platform) bool {
 	return false
 }
 
+// shouldInstallCursorHooks reports whether the install should also
+// write klyne hook entries into ~/.cursor/hooks.json. Gated on the
+// cursor target being in the platform list (auto-detection adds it
+// when ~/.cursor/ exists).
+func shouldInstallCursorHooks(targets []mcpserver.Platform) bool {
+	for _, p := range targets {
+		if p == mcpserver.PlatformCursor {
+			return true
+		}
+	}
+	return false
+}
+
 // resolveInstallTargets turns the --platform flag into the concrete
 // list of platforms to write to. Empty / "all" → auto-detect; "claude"
 // or "codex" → just that one (creates the config if it does not yet
@@ -342,8 +387,10 @@ func resolveInstallTargets(flag string) ([]mcpserver.Platform, error) {
 		return []mcpserver.Platform{mcpserver.PlatformClaude}, nil
 	case "codex":
 		return []mcpserver.Platform{mcpserver.PlatformCodex}, nil
+	case "cursor":
+		return []mcpserver.Platform{mcpserver.PlatformCursor}, nil
 	default:
-		return nil, fmt.Errorf("--platform must be one of: claude, codex, all (got %q)", flag)
+		return nil, fmt.Errorf("--platform must be one of: claude, codex, cursor, all (got %q)", flag)
 	}
 }
 

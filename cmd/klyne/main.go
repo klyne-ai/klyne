@@ -67,6 +67,10 @@ func newRootCmd() *cobra.Command {
 	// SessionStart hook — injects KLYNE_SUMMARY instruction so the
 	// model emits per-turn summaries even in `claude --print` mode.
 	root.AddCommand(newSessionStartCmd())
+	// Cursor CLI hook entry — one command dispatches all Cursor
+	// hook events (sessionStart, afterAgentResponse, stop, …) via
+	// the payload's hook_event_name field.
+	root.AddCommand(newCursorCmd())
 	// Cross-AI worklog — weekly digest exports + reflection ops.
 	root.AddCommand(newWorklogCmd())
 	// v0 Context X-ray — scorecard of context fill, cache trajectory, and MCP source attribution.

@@ -82,6 +82,14 @@ const (
 	// without it, scripted/test/CI flows can't reach the assistant
 	// with our additionalContext.
 	EventSessionStart Event = "session-start"
+	// EventCursor is the single event name klyne wires into Cursor
+	// CLI's ~/.cursor/hooks.json across every hook (sessionStart,
+	// afterAgentResponse, stop, …). The actual Cursor event is
+	// discriminated by the `hook_event_name` field inside the JSON
+	// payload, dispatched inside `klyne cursor`. Keeping ONE event
+	// here simplifies the install table and means cursor doesn't
+	// need a per-event entry in DaemonRoutedEvents.
+	EventCursor Event = "cursor"
 )
 
 // AllEvents enumerates every supported event. Used by the dispatcher
@@ -93,6 +101,7 @@ var AllEvents = []Event{
 	EventPreCompact,
 	EventSessionEnd,
 	EventSessionStart,
+	EventCursor,
 }
 
 // DaemonRoutedEvents enumerates the events the daemon handles

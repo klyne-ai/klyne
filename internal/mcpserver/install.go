@@ -31,6 +31,13 @@ type Platform string
 const (
 	PlatformClaude Platform = "claude"
 	PlatformCodex  Platform = "codex"
+	// PlatformCursor identifies the Cursor CLI. Cursor's MCP server
+	// config lives at ~/.cursor/mcp.json (a separate format from
+	// Claude's mcpServers shape), which klyne doesn't yet manage —
+	// for v1 we only wire hooks. The platform value is plumbed
+	// through so install reports + auto-detection treat Cursor as a
+	// first-class target.
+	PlatformCursor Platform = "cursor"
 )
 
 // InstallAction describes what InstallForPlatform actually did.
@@ -101,6 +108,15 @@ func DetectAvailablePlatforms() []Platform {
 			out = append(out, PlatformCodex)
 		}
 	}
+	// Cursor is detected by the presence of its config dir, since
+	// hooks.json may be absent on a fresh Cursor install (the
+	// installer creates it on first --platform cursor / auto-detect).
+	if home, err := os.UserHomeDir(); err == nil {
+		cursorDir := filepath.Join(home, ".cursor")
+		if info, err := os.Stat(cursorDir); err == nil && info.IsDir() {
+			out = append(out, PlatformCursor)
+		}
+	}
 	return out
 }
 
@@ -118,6 +134,17 @@ func InstallForPlatform(p Platform, binaryPath string) (*InstallReport, error) {
 		return installClaude(binaryPath)
 	case PlatformCodex:
 		return installCodex(binaryPath)
+	case PlatformCursor:
+		// Cursor has its own MCP server config shape at
+		// ~/.cursor/mcp.json which klyne doesn't yet write to. The
+		// per-platform install loop expects a report, so we return
+		// AlreadyInstalled with the hook config path — the real
+		// install work happens in the hook block (cmd/klyne/mcp.go's
+		// shouldInstallCursorHooks branch). Treating this as a no-op
+		// here keeps the loop's contract intact without lying about
+		// what was written.
+		path, _ := cursorHooksPath()
+		return &InstallReport{Platform: PlatformCursor, Path: path, Action: InstallActionAlreadyInstalled}, nil
 	default:
 		return nil, fmt.Errorf("unsupported platform %q", p)
 	}
