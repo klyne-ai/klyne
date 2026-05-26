@@ -265,7 +265,15 @@ func spawnClaudeReflect(ctx context.Context, projectPath string) ([]byte, error)
 	// is both sufficient and ~5x cheaper than Opus. Users running `claude`
 	// interactively keep their own model preference; this only binds the
 	// daemon-spawned subprocess.
-	const reflectModel = "claude-sonnet-4-6"
+	// Opus 4.7 for the reflect synthesis step — the LLM #1 pass that
+	// reads raw stop_summaries + git substrate and emits typed details
+	// per (day × service). Opus handles merging "multiple turns on the
+	// same ticket → one detail" + the rebases-fold-into-parent rules
+	// materially better than Sonnet (the latter tends to one-detail-per-
+	// turn). Cost is ~5x Sonnet but the synthesis quality is the entire
+	// product. Productivity-sync (LLM #2) stays on Sonnet — it's just
+	// composition over already-typed details, not synthesis.
+	const reflectModel = "claude-opus-4-7"
 
 	// Layout: every other flag first, --mcp-config dead last with `--`
 	// before the prompt. claude treats --mcp-config as variadic
