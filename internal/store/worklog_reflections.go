@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // Reflection is one row of worklog_reflections — the synthesis tier of
@@ -34,6 +35,13 @@ type Reflection struct {
 	EvidenceEntryIDs      []string `json:"evidence_entry_ids"`
 	EvidenceReflectionIDs []string `json:"evidence_reflection_ids"`
 	StopSummaryCursorTS   int64    `json:"stop_summary_cursor_ts,omitempty"`
+	// Day is the local-zone YYYY-MM-DD this reflection COVERS — distinct
+	// from TS (the row's write moment). The dashboard's per-day lookup
+	// filters on this column so a catch-up reflection written today for
+	// a past day surfaces under the day it covers, not the day it was
+	// written. Empty for legacy rows means "use the row's local-ts day"
+	// — migration 022 backfills it from the title's trailing date.
+	Day string `json:"day,omitempty"`
 }
 
 // InsertReflection writes one synthesized reflection. Enforces the
@@ -69,17 +77,24 @@ func InsertReflection(ctx context.Context, db *DB, r Reflection) error {
 	if r.StopSummaryCursorTS > 0 {
 		cursor = r.StopSummaryCursorTS
 	}
+	// Defensive default for Day: mirror migration 022's fallback path
+	// (local-ts day) so legacy callers that don't set Day write rows
+	// that the per-day lookup can still locate. Production writers
+	// (recordReflection) always set Day explicitly.
+	if strings.TrimSpace(r.Day) == "" && r.TS > 0 {
+		r.Day = time.UnixMilli(r.TS).Local().Format("2006-01-02")
+	}
 	_, err = db.Write().ExecContext(ctx,
 		`INSERT INTO worklog_reflections (
             id, ts, project_path, tier, title, body_md,
             evidence_entry_ids_json, evidence_reflection_ids_json,
             importance, summary_source, state, state_changed_at,
-            stop_summary_cursor_ts
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            stop_summary_cursor_ts, day
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.ID, r.TS, r.ProjectPath, r.Tier, r.Title, r.BodyMD,
 		string(entryIDs), string(refIDs),
 		r.Importance, r.SummarySource, r.State, r.StateChangedAt,
-		cursor)
+		cursor, r.Day)
 	if err != nil {
 		return fmt.Errorf("store: insert reflection: %w", err)
 	}
@@ -99,7 +114,7 @@ func ListReflectionsForProject(ctx context.Context, db *DB, projectPath string, 
 		`SELECT id, ts, project_path, tier, title, body_md,
                 evidence_entry_ids_json, evidence_reflection_ids_json,
                 importance, summary_source, state, state_changed_at,
-                COALESCE(stop_summary_cursor_ts, 0)
+                COALESCE(stop_summary_cursor_ts, 0), day
          FROM worklog_reflections
          WHERE project_path = ?
          ORDER BY ts DESC, title DESC LIMIT ?`,
@@ -114,7 +129,7 @@ func ListReflectionsForProject(ctx context.Context, db *DB, projectPath string, 
 		var entryJSON, refJSON string
 		if err := rows.Scan(&r.ID, &r.TS, &r.ProjectPath, &r.Tier, &r.Title, &r.BodyMD,
 			&entryJSON, &refJSON, &r.Importance, &r.SummarySource, &r.State, &r.StateChangedAt,
-			&r.StopSummaryCursorTS); err != nil {
+			&r.StopSummaryCursorTS, &r.Day); err != nil {
 			return nil, fmt.Errorf("store: scan reflection: %w", err)
 		}
 		_ = json.Unmarshal([]byte(entryJSON), &r.EvidenceEntryIDs)
@@ -151,14 +166,16 @@ WHERE project_path = ?`
 // stop_summaries that arrived after the previous run.
 //
 // dayStr is the local-date string the row was filed under (YYYY-MM-DD,
-// matching what the productivity dashboard uses). The window is taken
-// against the row's ts converted to local time, mirroring how the
-// dashboard's reflection lookup keys by day.
+// matching what the productivity dashboard uses). Filters on the
+// `day` column (migration 022) — the explicit COVERED day — so a
+// catch-up reflection written today for a past day advances that past
+// day's cursor, not today's.
 //
 // Legacy rows (written before the iterative workflow) have NULL in
 // stop_summary_cursor_ts; we fall back to the row's own ts so they
 // behave as "covers everything up through when I was written" — that
-// matches their pre-change effective semantics.
+// matches their pre-change effective semantics. Pre-022 rows have been
+// backfilled with day = parsed-from-title (or local-ts-day on fallback).
 //
 // Returns 0 only when no row exists at all for the day. Callers treat
 // that as "no cursor yet — fetch every stop_summary for the day."
@@ -167,7 +184,7 @@ func MaxReflectionCursorForDay(ctx context.Context, db *DB, projectPath, dayStr 
 SELECT COALESCE(MAX(COALESCE(stop_summary_cursor_ts, ts)), 0)
 FROM worklog_reflections
 WHERE project_path = ?
-  AND date(ts / 1000, 'unixepoch', 'localtime') = ?`
+  AND day = ?`
 	var cursor int64
 	err := db.Read().QueryRowContext(ctx, q, projectPath, dayStr).Scan(&cursor)
 	if err != nil {
@@ -180,15 +197,19 @@ WHERE project_path = ?
 // (projectPath, dayStr) ordered ts ASC — chronologically, so the
 // productivity dashboard can render T1/T2/T3 groups in the order they
 // were written (see docs/features/iterative-reflection.md, A1).
+//
+// Filters on the `day` column (migration 022) — the explicit COVERED
+// day — NOT the row's local write-ts. Catch-up reflections written
+// today for past days surface under the day they cover.
 func ListReflectionsForProjectDay(ctx context.Context, db *DB, projectPath, dayStr string) ([]Reflection, error) {
 	rows, err := db.Read().QueryContext(ctx,
 		`SELECT id, ts, project_path, tier, title, body_md,
                 evidence_entry_ids_json, evidence_reflection_ids_json,
                 importance, summary_source, state, state_changed_at,
-                COALESCE(stop_summary_cursor_ts, 0)
+                COALESCE(stop_summary_cursor_ts, 0), day
          FROM worklog_reflections
          WHERE project_path = ?
-           AND date(ts / 1000, 'unixepoch', 'localtime') = ?
+           AND day = ?
          ORDER BY ts ASC`,
 		projectPath, dayStr)
 	if err != nil {
@@ -201,7 +222,7 @@ func ListReflectionsForProjectDay(ctx context.Context, db *DB, projectPath, dayS
 		var entryJSON, refJSON string
 		if err := rows.Scan(&r.ID, &r.TS, &r.ProjectPath, &r.Tier, &r.Title, &r.BodyMD,
 			&entryJSON, &refJSON, &r.Importance, &r.SummarySource, &r.State, &r.StateChangedAt,
-			&r.StopSummaryCursorTS); err != nil {
+			&r.StopSummaryCursorTS, &r.Day); err != nil {
 			return nil, fmt.Errorf("store: scan reflection: %w", err)
 		}
 		_ = json.Unmarshal([]byte(entryJSON), &r.EvidenceEntryIDs)

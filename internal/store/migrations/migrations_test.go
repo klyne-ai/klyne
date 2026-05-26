@@ -53,6 +53,7 @@ func TestMigrationsApply(t *testing.T) {
 		"019_worklog_rich_entry.sql",    // structured 15-category worklog entry per stop_summaries row
 		"020_reflection_stop_summary_cursor.sql",   // iterative reflection cursor (docs/features/iterative-reflection.md)
 		"021_daily_productivity_snapshot.sql",      // per-(project,day) snapshot for deterministic dashboard rendering
+		"022_worklog_reflections_day.sql",          // explicit covered-day column so catch-up reflections surface under the day they cover
 	}
 	if len(sqlFiles) != len(expected) {
 		t.Fatalf("expected %d migrations, found %d: %v", len(expected), len(sqlFiles), sqlFiles)

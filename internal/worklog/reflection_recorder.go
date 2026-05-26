@@ -163,7 +163,11 @@ func recordReflection(ctx context.Context, db *store.DB, projectPath string, day
 	if day.IsZero() {
 		day = now
 	}
-	dayLabel := day.UTC().Format("2006-01-02")
+	// Local-zone day matches the productivity dashboard's per-day bucketing
+	// (handlers/productivity.go's localDaysInRange uses Local). Aligning
+	// the title's date with the new `day` column means the title, the
+	// queryable column, and the dashboard all agree.
+	dayLabel := day.Local().Format("2006-01-02")
 
 	// Iterative-reflection cursor (docs/features/iterative-reflection.md):
 	// record the latest stop_summary.ts covered by this reflection so the
@@ -197,6 +201,10 @@ func recordReflection(ctx context.Context, db *store.DB, projectPath string, day
 		State:               "proposed",
 		StateChangedAt:      now.UnixMilli(),
 		StopSummaryCursorTS: cursor,
+		// Day is the COVERED day (migration 022) — distinct from TS so
+		// the per-day dashboard lookup keys on the day the work happened,
+		// not the day this row was written.
+		Day: dayLabel,
 	}
 	if err := store.InsertReflection(ctx, db, refl); err != nil {
 		return store.Reflection{}, fmt.Errorf("worklog: persist reflection: %w", err)
