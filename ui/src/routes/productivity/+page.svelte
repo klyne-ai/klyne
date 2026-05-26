@@ -22,9 +22,13 @@
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { goto } from '$app/navigation';
+  import { page } from '$app/stores';
   import { fetchProductivityDates, runReflect, type ProductivityReport, type ProductivityService, type ProductivitySessionStat } from '$lib/api.js';
   import { applyHiddenFilter, hiddenSessionIds, hideMany, clearHidden } from '$lib/hidden-sessions.svelte';
   import ConcurrencyTimeline from '$lib/components/productivity/ConcurrencyTimeline.svelte';
+  import WhatWasDoneCard from '$lib/dashboard/pages/productivity/WhatWasDoneCard.svelte';
+  import { sessionUrl } from '$lib/dashboard/url-state.js';
 
   const STORAGE_KEY = 'klyne.productivity.range';
   const REPORT_KEY  = 'klyne.productivity.lastReport';
@@ -344,6 +348,16 @@
   }
   function showAllHidden() { clearHidden(); }
 
+  // Drill into the worklog entry that produced a typed WWD detail. Mirrors
+  // the openSession pattern in projects/TabOverview.svelte — route into
+  // the session_id sub-URL so the right-hand drawer opens with that
+  // session's transcript loaded.
+  function openWorklogEntry(session_id: string): void {
+    const url = $page?.url;
+    const base = url ? (url.pathname + url.search) : '/productivity';
+    void goto(sessionUrl(base, session_id));
+  }
+
   function fmtMinutes(m: number): string {
     if (!Number.isFinite(m) || m <= 0) return '0m';
     const h = Math.floor(m / 60), mm = m % 60;
@@ -525,6 +539,12 @@
   // service repo onto bullets that don't already carry a `**repo**`
   // prefix, and de-dupes by title so a bullet that also appears in
   // the report-wide body isn't shown twice.
+  //
+  // LEGACY-COMPAT: this and fallbackSessionBullets feed the flat-bullet
+  // rendering that runs ONLY when no service has a typed `what_was_done`
+  // payload (i.e. every reflection for the day is a pre-023 prose row).
+  // Slated for removal once every active project has produced at least
+  // one typed reflection — until then it keeps legacy data visible.
   function gatherProjectBullets(rep: ProductivityReport): ReflectionBullet[] {
     const seenTitle = new Set<string>();
     const out: ReflectionBullet[] = [];
@@ -832,9 +852,12 @@
     {@const realSessions = meaningfulSessions(v, 1)}
     {@const peak = peakSweep(realSessions)}
     {@const hist = risksHistogram(v.services)}
-    {@const reflectionCards = gatherReflectionCards(v)}
     {@const parsedBullets = gatherProjectBullets(v)}
     {@const bullets = parsedBullets.length > 0 ? parsedBullets : fallbackSessionBullets(v)}
+    {@const wwdServices = (v.services ?? []).filter(s => s.what_was_done != null)}
+    {@const legacyBullets = wwdServices.length === 0 ? bullets : []}
+    {@const pendingNew = v.pending_entries ?? 0}
+    {@const needsSync = v.reflection_status !== 'current' || pendingNew > 0}
     {@const alerts = topAlerts(v.services)}
     {@const totalRisks = hist.uncommitted + hist.unpushedSignal + hist.drifted + hist.unpushedNoise + alerts.length}
     {@const claudeM = v.minutes_by_cli?.claude ?? 0}
@@ -856,19 +879,21 @@
             <span class="pill pill-{v.reflection_status === 'current' ? 'ok' : v.reflection_status === 'stale' ? 'warn' : 'alert'}">
               <span class="dot dot-{v.reflection_status === 'current' ? 'ok' : v.reflection_status === 'stale' ? 'warn' : 'alert'}"></span>{reflectionLabel(v.reflection_status)}
             </span>
-            {#if v.reflection_status !== 'current'}
-              <button
-                class="pill pill-action"
-                onclick={runReflectForAllProjects}
-                disabled={reflectRunning}
-                title="Spawn /klyne:reflect for every project in this window">
-                {#if reflectRunning}
-                  Running {reflectDone}/{reflectTotal}…
-                {:else}
-                  ▶ Run /klyne:reflect now
+            <button
+              class="pill pill-action"
+              class:is-highlighted={needsSync}
+              onclick={runReflectForAllProjects}
+              disabled={reflectRunning}
+              title="Spawn /klyne:reflect for every project in this window">
+              {#if reflectRunning}
+                Running {reflectDone}/{reflectTotal}…
+              {:else}
+                ▶ Run /klyne:reflect now
+                {#if needsSync && pendingNew > 0}
+                  <span class="pill-action-badge mono">{pendingNew} new</span>
                 {/if}
-              </button>
-            {/if}
+              {/if}
+            </button>
             {#if alerts.length > 0}
               <span class="pill pill-alert"><span class="dot dot-alert"></span>{plural(alerts.length, 'open alert')} · review before EOD</span>
             {/if}
@@ -954,70 +979,39 @@
         <div class="hero-head">
           <span class="kick kick-accent">What was done</span>
           <span class="sep">·</span>
-          {#if reflectionCards.length > 0}
-            <span class="mono muted">{reflectionCards.length} reflection{reflectionCards.length === 1 ? '' : 's'} today · {realSessions.length} session{realSessions.length === 1 ? '' : 's'}</span>
-          {:else}
-            <span class="mono muted">{bullets.length} important sessions · {realSessions.length} total · importance ≥ 7</span>
+          {#if wwdServices.length > 0}
+            <span class="mono muted">{wwdServices.length} service{wwdServices.length === 1 ? '' : 's'} · {realSessions.length} session{realSessions.length === 1 ? '' : 's'}</span>
+          {:else if legacyBullets.length > 0}
+            <span class="mono muted">{legacyBullets.length} important sessions · {realSessions.length} total · importance ≥ 7</span>
           {/if}
           <span class="grow"></span>
           <span class="mono dim">deterministic · git + jsonl + sqlite</span>
         </div>
-        {#if reflectionCards.length === 0 && bullets.length === 0}
+        {#if wwdServices.length === 0 && legacyBullets.length === 0}
           <h2 class="hero-h hero-empty">No important sessions in this window. Pick a wider range or check back after end of day.</h2>
         {/if}
 
-        {#if reflectionCards.length > 0}
-          <ol class="refl-cards">
-            {#each reflectionCards as c, ci (c.id)}
-              {@const isLast = ci === reflectionCards.length - 1}
-              {@const expanded = isExpanded(c.id, isLast)}
-              {@const headTone = chipTone(c.headline.chip)}
-              <li class="refl-card">
-                <header class="refl-head">
-                  <span class="mono dim refl-num">T{ci + 1}</span>
-                  <span class="mono refl-ts">{fmtTimeHM(c.ts)}</span>
-                  <span class="mono dim refl-sep">·</span>
-                  <span class="mono refl-repo">{c.repo}</span>
-                  <span class="grow"></span>
-                  <span class="pill pill-{headTone} refl-chip">{c.headline.chip}</span>
-                </header>
-                <div class="refl-body">
-                  <div class="refl-title">{c.headline.title}</div>
-                  {#if c.headline.body}<p class="refl-desc">{c.headline.body}</p>{/if}
-                </div>
-                {#if c.details.length > 0}
-                  <button
-                    class="refl-disclose"
-                    onclick={() => toggleCard(c.id)}
-                    aria-expanded={expanded}
-                  >
-                    <span class="refl-caret" class:open={expanded}>▸</span>
-                    <span class="mono">{expanded ? 'hide' : 'view'} {c.details.length} detail{c.details.length === 1 ? '' : 's'}</span>
-                  </button>
-                  {#if expanded}
-                    <ol class="refl-details">
-                      {#each c.details as d, di (c.id + '|' + di)}
-                        {@const dTone = chipTone(d.chip)}
-                        <li class="refl-detail">
-                          <span class="pill pill-{dTone} refl-detail-chip">{d.chip}</span>
-                          <div class="refl-detail-body">
-                            <div class="refl-detail-title">{d.title}</div>
-                            {#if d.body}<p class="refl-detail-desc">{d.body}</p>{/if}
-                          </div>
-                          <div class="refl-detail-ev">
-                            {#each d.evidence as e}<span class="mono dim">{e}</span>{/each}
-                          </div>
-                        </li>
-                      {/each}
-                    </ol>
-                  {/if}
-                {/if}
-              </li>
+        {#if wwdServices.length > 0}
+          <!--
+            Typed "What was done" cards — one per service whose backend
+            wrote a body_json reflection. Spec:
+            docs/plan/2026-05-26-wwd-typed-cards.md §1.2 + §2 Agent U.
+          -->
+          <div class="wwd-list">
+            {#each wwdServices as svc, si (svc.project_path || svc.repo || si)}
+              {#if svc.what_was_done}
+                <WhatWasDoneCard card={svc.what_was_done} onOpenEntry={openWorklogEntry} />
+              {/if}
             {/each}
-          </ol>
-        {:else if bullets.length > 0}
+          </div>
+        {:else if legacyBullets.length > 0}
+          <!--
+            Legacy prose-bullet fallback: shown only when NO service in
+            this window has a typed `what_was_done` card. As Agent G + P
+            backfill body_json, this branch will quietly disappear.
+          -->
           <ol class="bul-list">
-            {#each bullets as b, i (b.title + i)}
+            {#each legacyBullets as b, i (b.title + i)}
               {@const tone = chipTone(b.chip)}
               <li class="bul">
                 <span class="mono dim bul-num">0{i+1}</span>
@@ -1269,17 +1263,42 @@
      reflection_status is missing/stale. Disabled state dims and removes
      the hover lift while a /klyne:reflect batch is in flight. */
   .pill-action {
-    color: var(--accent, var(--ok));
-    border-color: color-mix(in oklch, var(--accent, var(--ok)) 45%, transparent);
-    background: color-mix(in oklch, var(--accent, var(--ok)) 12%, var(--bg-card-2));
+    /* Default (snapshot is `current`): muted/normal styling — the
+       reflect-now button stays present but recedes when nothing is
+       pending. */
+    color: var(--fg-soft);
+    border-color: var(--border-hair);
+    background: var(--bg-inset);
     cursor: pointer;
     font-family: var(--font-mono);
     font-size: 11px;
   }
   .pill-action:hover:not(:disabled) {
-    background: color-mix(in oklch, var(--accent, var(--ok)) 22%, var(--bg-card-2));
+    color: var(--fg);
+    background: var(--bg-card);
+  }
+  /* Highlighted variant: reflection_status != "current" OR
+     pending_entries > 0. Amber accent palette + an inline badge
+     showing the pending count drives attention back to the sync. */
+  .pill-action.is-highlighted {
+    color: var(--warn);
+    border-color: color-mix(in oklch, var(--warn) 45%, transparent);
+    background: color-mix(in oklch, var(--warn) 14%, var(--bg-card-2));
+  }
+  .pill-action.is-highlighted:hover:not(:disabled) {
+    background: color-mix(in oklch, var(--warn) 24%, var(--bg-card-2));
   }
   .pill-action:disabled { cursor: progress; opacity: 0.7; }
+  .pill-action-badge {
+    margin-left: 6px;
+    padding: 0 6px;
+    border-radius: 999px;
+    font-size: 10px;
+    line-height: 1.4;
+    color: var(--bg);
+    background: var(--warn);
+    border: 1px solid color-mix(in oklch, var(--warn) 55%, transparent);
+  }
   .refl-err { color: var(--alert); }
 
   .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--fg-muted); flex-shrink: 0; }
@@ -1473,7 +1492,13 @@
     letter-spacing: 0.01em;
   }
 
-  /* ── 4b. Reflection cards (iterative-reflection phase 3) ─── */
+  /* ── 4b. Typed What-was-done cards (one per service) ─────── */
+  /* The new WhatWasDoneCard component is fully self-styled; we
+     only need a thin layout wrapper here so multiple cards stack
+     with the same spacing rhythm as the legacy refl-cards list. */
+  .wwd-list { display: flex; flex-direction: column; gap: 14px; }
+
+  /* ── 4c. Reflection cards (legacy, iterative-reflection phase 3) ─── */
   .refl-cards { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 14px; }
   .refl-card  {
     border: 1px solid var(--border-soft);

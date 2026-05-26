@@ -30,46 +30,46 @@ import (
 // MUST be unique (verified by contracts_test.go). Path parameters use
 // the chi-router ":id" syntax.
 const (
-	RouteSessions            = "/sessions"
-	RouteSession             = "/sessions/{id}"
-	RouteSessionMessages     = "/sessions/{id}/messages"
-	RouteSessionRestore      = "/sessions/{id}/restore"
-	RouteSessionSummary      = "/sessions/{id}/summary"
-	RouteSessionUsage        = "/sessions/{id}/usage"
+	RouteSessions             = "/sessions"
+	RouteSession              = "/sessions/{id}"
+	RouteSessionMessages      = "/sessions/{id}/messages"
+	RouteSessionRestore       = "/sessions/{id}/restore"
+	RouteSessionSummary       = "/sessions/{id}/summary"
+	RouteSessionUsage         = "/sessions/{id}/usage"
 	RouteSessionTokenTimeline = "/sessions/{id}/token-timeline"
-	RouteSearch              = "/search"
-	RouteCostSummary         = "/cost/summary"
-	RouteUsage               = "/usage"
-	RouteUsageStats          = "/usage/stats"
-	RouteCockpitThreads      = "/cockpit/threads"
+	RouteSearch               = "/search"
+	RouteCostSummary          = "/cost/summary"
+	RouteUsage                = "/usage"
+	RouteUsageStats           = "/usage/stats"
+	RouteCockpitThreads       = "/cockpit/threads"
 	RouteSessionAdvisorDetail = "/sessions/{id}/advisor-detail"
-	RouteEvents              = "/events"
-	RouteHealthz             = "/healthz"
-	RouteCodeReviewContext   = "/code-review-context"
+	RouteEvents               = "/events"
+	RouteHealthz              = "/healthz"
+	RouteCodeReviewContext    = "/code-review-context"
 	// Memory: SPA page lives at `/memory`, so the API uses a
 	// /memory/items[/{id}] subpath to avoid colliding with the SPA
 	// route (same pattern as /cockpit/threads and /usage/stats).
-	RouteMemory              = "/memory/items"
-	RouteMemoryItem          = "/memory/items/{id}"
+	RouteMemory     = "/memory/items"
+	RouteMemoryItem = "/memory/items/{id}"
 	// Worklog: SPA page lives at `/worklog`, so the API uses a
 	// /worklog/items subpath to avoid colliding with the SPA route
 	// (same pattern as /memory/items).
-	RouteWorklog             = "/worklog/items"
+	RouteWorklog = "/worklog/items"
 	// RouteWorklogProject: per-project drill-in. Takes ?path=<abs-path>;
 	// returns the project's rollup PLUS its full daily-reflection list
 	// newest-first. Powers /worklog/project in the cockpit SPA.
-	RouteWorklogProject      = "/worklog/items/project"
+	RouteWorklogProject = "/worklog/items/project"
 	// RouteWorklogReflectRun: POST endpoint that shells out to the
 	// local `claude` CLI to run `/klyne:reflect` for a project listed
 	// in the worklog rollup. Gated by same-origin + project-allowlist
 	// + 5m subprocess timeout. This is the ONLY route in the daemon
 	// that intentionally spawns the `claude` binary.
-	RouteWorklogReflectRun   = "/worklog/reflect/run"
+	RouteWorklogReflectRun = "/worklog/reflect/run"
 	// Insights: per-project rollup powering the Insights dashboard.
 	// Returns one rich record per project with agent split, cache hit %,
 	// efficiency, /compact pain signal, top sessions, daily sparkline,
 	// and trend vs the prior-period window of equal duration.
-	RouteInsightsProjects    = "/insights/projects"
+	RouteInsightsProjects = "/insights/projects"
 	// Productivity: the deterministic-first AI productivity dashboard
 	// (spec docs/superpowers/specs/2026-05-19-ai-productivity-dashboard-design.md).
 	// Fuses live git activity with klyne session telemetry into a
@@ -79,18 +79,26 @@ const (
 	// page at /productivity — without this prefix the API handler
 	// grabs the path first and the dashboard never renders in the
 	// embedded build.
-	RouteProductivity        = "/api/productivity"
+	RouteProductivity = "/api/productivity"
 	// RouteProductivityDates: GET /api/productivity/dates.
 	// Lists local calendar days with session data so the productivity
 	// dashboard can bound its explicit day picker without calculating
 	// reports for every historical day.
-	RouteProductivityDates   = "/api/productivity/dates"
+	RouteProductivityDates = "/api/productivity/dates"
+	// RouteProductivityRecompose: POST /api/productivity/recompose.
+	// Re-derives the typed What-was-done cards for (project_path, day)
+	// from worklog_reflections.body_json and persists a fresh
+	// daily_productivity_snapshot row. Pure-Go composer, no LLM call —
+	// see docs/plan/2026-05-26-wwd-typed-cards.md §1.3. Chained from
+	// /worklog/reflect/run after a successful reflect so the dashboard
+	// shows the new cards on the same UI round-trip.
+	RouteProductivityRecompose = "/api/productivity/recompose"
 	// RouteProjectDelete: DELETE /api/projects?path=<abs>&dry_run=true|false.
 	// Wipes (or counts, in dry-run mode) every project-scoped row across
 	// stop_summaries, worklog_reflections, decisions, runbook_dismissals,
 	// work_spans, and git_session_snapshots. Sessions/messages are
 	// intentionally preserved — see store.DeleteProjectScopedRows.
-	RouteProjectDelete       = "/api/projects"
+	RouteProjectDelete = "/api/projects"
 )
 
 // AllRoutes returns the canonical, ordered list of every HTTP path
@@ -122,6 +130,7 @@ func AllRoutes() []string {
 		RouteInsightsProjects,
 		RouteProductivity,
 		RouteProductivityDates,
+		RouteProductivityRecompose,
 		RouteProjectDelete,
 	}
 }
@@ -134,8 +143,8 @@ func AllRoutes() []string {
 // dry_run=true the counts represent what WOULD be deleted; when false they
 // are what WAS deleted. `deleted` distinguishes the two states.
 type ProjectDeleteResponse struct {
-	Deleted bool                       `json:"deleted"`
-	Counts  store.ProjectDeleteCounts  `json:"counts"`
+	Deleted bool                      `json:"deleted"`
+	Counts  store.ProjectDeleteCounts `json:"counts"`
 }
 
 // ---------------------------------------------------------------------------
@@ -166,13 +175,13 @@ type MessageListResponse struct {
 // payload (spec Flow C). The Markdown field is the ready-to-paste resume
 // prompt; Summary and Tail are exposed separately for UI rendering.
 type RestoreResponse struct {
-	SessionID    string               `json:"session_id"`
-	Summary      string               `json:"summary"`        // Markdown
-	Tail         []connectors.Message `json:"tail"`           // last N raw messages
-	Markdown     string               `json:"markdown"`       // single-block resume prompt
-	ResumeCmd    string               `json:"resume_cmd"`     // e.g. `claude --resume <id>`
-	ProjectPath  string               `json:"project_path"`
-	GeneratedAt  int64                `json:"generated_at"`   // epoch-ms
+	SessionID   string               `json:"session_id"`
+	Summary     string               `json:"summary"`    // Markdown
+	Tail        []connectors.Message `json:"tail"`       // last N raw messages
+	Markdown    string               `json:"markdown"`   // single-block resume prompt
+	ResumeCmd   string               `json:"resume_cmd"` // e.g. `claude --resume <id>`
+	ProjectPath string               `json:"project_path"`
+	GeneratedAt int64                `json:"generated_at"` // epoch-ms
 }
 
 // SummaryResponse is GET /sessions/{id}/summary — the latest rolling
@@ -299,32 +308,32 @@ type TokenTimelinePoint struct {
 //     surface their full history rather than being clipped to 5h).
 //   - hours   convenience integer hours; ignored when window is set.
 type TokenTimelineResponse struct {
-	SessionID     string               `json:"session_id"`
+	SessionID string `json:"session_id"`
 	// Model is the model id on the most recent qualifying turn. Empty
 	// when the session has no assistant turns yet.
-	Model         string               `json:"model"`
+	Model string `json:"model"`
 	// ContextWindow is the model's maximum context size in tokens.
 	// Zero when the model is unknown.
-	ContextWindow int64                `json:"context_window"`
+	ContextWindow int64 `json:"context_window"`
 	// WindowStartMs / WindowEndMs bracket the timestamps included.
 	// For an "entire session" view, WindowStartMs equals the first
 	// point's TsMs so the chart axis reads honestly.
-	WindowStartMs int64                `json:"window_start_ms"`
-	WindowEndMs   int64                `json:"window_end_ms"`
+	WindowStartMs int64 `json:"window_start_ms"`
+	WindowEndMs   int64 `json:"window_end_ms"`
 	// Points are per-assistant-turn rows in chronological order.
-	Points        []TokenTimelinePoint `json:"points"`
+	Points []TokenTimelinePoint `json:"points"`
 	// FirstInput is the oldest qualifying turn's TokensIn — "where
 	// this session started".
-	FirstInput    int64                `json:"first_input"`
+	FirstInput int64 `json:"first_input"`
 	// LatestInput is the most recent qualifying turn's TokensIn —
 	// "how big is the prefix right now".
-	LatestInput   int64                `json:"latest_input"`
+	LatestInput int64 `json:"latest_input"`
 	// PeakInput is max(TotalInput) across Points — the largest single-
 	// turn prefix the session ever carried.
-	PeakInput     int64                `json:"peak_input"`
+	PeakInput int64 `json:"peak_input"`
 	// PctOfContext = LatestInput / ContextWindow × 100, capped at 100.
 	// Zero when ContextWindow is unknown.
-	PctOfContext  float64              `json:"pct_of_context"`
+	PctOfContext float64 `json:"pct_of_context"`
 }
 
 // ---------------------------------------------------------------------------
@@ -387,8 +396,8 @@ type SearchHit struct {
 	CLI         string  `json:"cli"`
 	ProjectPath string  `json:"project_path"`
 	Role        string  `json:"role"`
-	Snippet     string  `json:"snippet"`        // FTS-highlighted excerpt
-	Score       float64 `json:"score"`          // BM25, lower = better
+	Snippet     string  `json:"snippet"` // FTS-highlighted excerpt
+	Score       float64 `json:"score"`   // BM25, lower = better
 	Ts          int64   `json:"ts"`
 }
 
@@ -396,7 +405,7 @@ type SearchHit struct {
 type SearchResponse struct {
 	Query string      `json:"query"`
 	Hits  []SearchHit `json:"hits"`
-	Took  int64       `json:"took_ms"`         // server-side latency
+	Took  int64       `json:"took_ms"` // server-side latency
 }
 
 // ---------------------------------------------------------------------------
@@ -416,20 +425,20 @@ const (
 
 // CostBucket is one row of the grouped cost summary.
 type CostBucket struct {
-	Key       string  `json:"key"`        // session id, project path, ISO-day, or model
+	Key       string  `json:"key"` // session id, project path, ISO-day, or model
 	TokensIn  int64   `json:"tokens_in"`
 	TokensOut int64   `json:"tokens_out"`
 	CostUSD   float64 `json:"cost_usd"`
-	Count     int64   `json:"count"`      // # messages contributing
+	Count     int64   `json:"count"` // # messages contributing
 }
 
 // CostSummaryResponse is GET /cost/summary.
 type CostSummaryResponse struct {
 	Group   CostGroup    `json:"group"`
-	Since   int64        `json:"since"`     // epoch-ms (0 = unbounded)
-	Until   int64        `json:"until"`     // epoch-ms (0 = unbounded)
+	Since   int64        `json:"since"` // epoch-ms (0 = unbounded)
+	Until   int64        `json:"until"` // epoch-ms (0 = unbounded)
 	Buckets []CostBucket `json:"buckets"`
-	Total   CostBucket   `json:"total"`     // aggregate across all buckets
+	Total   CostBucket   `json:"total"` // aggregate across all buckets
 }
 
 // ---------------------------------------------------------------------------
@@ -498,7 +507,7 @@ type OAuthUsage struct {
 // UsageResponse is GET /usage. Computed at request time from the messages
 // table; cheap (~ms) so polling at 60s is safe.
 type UsageResponse struct {
-	Now    int64    `json:"now"`     // epoch-ms server clock at calc time
+	Now    int64    `json:"now"` // epoch-ms server clock at calc time
 	Claude UsageCLI `json:"claude"`
 	Codex  UsageCLI `json:"codex"`
 }
@@ -601,11 +610,11 @@ type FileRelevanceProof struct {
 // StaleProof bundles the relevance scorer's outputs in a shape the
 // cockpit modal can render directly.
 type StaleProof struct {
-	Files          []FileRelevanceProof `json:"files"`
-	StaleBytes     int                  `json:"stale_bytes"`
-	TotalBytes     int                  `json:"total_bytes"`
-	StaleShare     float64              `json:"stale_share"`
-	Threshold      float64              `json:"threshold"`
+	Files      []FileRelevanceProof `json:"files"`
+	StaleBytes int                  `json:"stale_bytes"`
+	TotalBytes int                  `json:"total_bytes"`
+	StaleShare float64              `json:"stale_share"`
+	Threshold  float64              `json:"threshold"`
 }
 
 // AccelerationProof is the per-turn cost trajectory the
@@ -613,12 +622,12 @@ type StaleProof struct {
 // are the numbers the user sees in the modal's "why klyne thinks
 // you're accelerating" panel.
 type AccelerationProof struct {
-	RecentMean       float64 `json:"recent_mean"`
-	PriorMean        float64 `json:"prior_mean"`
-	Ratio            float64 `json:"ratio"`
-	LatestEffective  int64   `json:"latest_effective"`
-	SampledTurns     int     `json:"sampled_turns"`
-	WouldFire        bool    `json:"would_fire"`
+	RecentMean      float64 `json:"recent_mean"`
+	PriorMean       float64 `json:"prior_mean"`
+	Ratio           float64 `json:"ratio"`
+	LatestEffective int64   `json:"latest_effective"`
+	SampledTurns    int     `json:"sampled_turns"`
+	WouldFire       bool    `json:"would_fire"`
 }
 
 // ContextWindowProof proves the hard-ceiling advisor: current
@@ -856,7 +865,7 @@ type ProjectInsight struct {
 //   - since int64   epoch-ms lower bound (default 0 = all time)
 //   - until int64   epoch-ms upper bound (default 0 = "now")
 //   - top   int     # of top sessions to attach per project (default 3,
-//                   max 10). Zero disables the drill-down.
+//     max 10). Zero disables the drill-down.
 //
 // The prior-window comparison reuses the same duration as
 // [Since, Until], shifted left by exactly that duration. When Since==0

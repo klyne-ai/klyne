@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"regexp"
 	"strings"
 	"time"
 
@@ -36,6 +37,202 @@ import (
 type Insight struct {
 	Text     string   `json:"text"`
 	Evidence []string `json:"evidence"`
+}
+
+// Detail kinds for the typed "What was done" payload (spec §1.1 of
+// docs/plan/2026-05-26-wwd-typed-cards.md). The enum is frozen — the
+// productivity composer (Tier 1 derivation) pivots on these literal
+// strings to build pill counts and the templated tldr.
+const (
+	DetailKindShipped      = "SHIPPED"
+	DetailKindMajor        = "MAJOR"
+	DetailKindFixed        = "FIXED"
+	DetailKindDecision     = "DECISION"
+	DetailKindInvestigated = "INVESTIGATED"
+	DetailKindInProgress   = "IN_PROGRESS"
+)
+
+// validDetailKinds is the closed set the MCP tool + recorder validate
+// against. Keep in sync with the §1.1 frozen enum.
+var validDetailKinds = map[string]bool{
+	DetailKindShipped:      true,
+	DetailKindMajor:        true,
+	DetailKindFixed:        true,
+	DetailKindDecision:     true,
+	DetailKindInvestigated: true,
+	DetailKindInProgress:   true,
+}
+
+// detailKindOrder is the §1.2 Tier 2 render order. The recorder uses it
+// to produce a stable, grep-friendly body_md rendering of body_json so
+// legacy prose readers stay aligned with the dashboard ordering.
+var detailKindOrder = []string{
+	DetailKindShipped,
+	DetailKindMajor,
+	DetailKindFixed,
+	DetailKindDecision,
+	DetailKindInvestigated,
+	DetailKindInProgress,
+}
+
+// detailWhenRe matches the HH:MM local-time format the §1.1 schema
+// requires for WWDDetail.When. 00..29:00..59 is intentionally permissive
+// on the hour (no model of "valid hour" — the schema only constrains
+// digit shape).
+var detailWhenRe = regexp.MustCompile(`^[0-2][0-9]:[0-5][0-9]$`)
+
+// WWDPayload is the typed What-was-done payload the MCP tool receives
+// on record_reflection. It mirrors store.WWDPayload exactly — keeping a
+// worklog-package copy lets the recorder validate without importing the
+// store package's parsing-side helpers and keeps the wire contract
+// authored in one place per layer.
+type WWDPayload struct {
+	Service string      `json:"service"`
+	Details []WWDDetail `json:"details"`
+}
+
+// WWDDetail is one typed detail in a WWDPayload. Field order + tags
+// match store.WWDDetail so the wire JSON is identical on both sides.
+type WWDDetail struct {
+	Kind      string   `json:"kind"`
+	When      string   `json:"when"`
+	Text      string   `json:"text"`
+	Evidence  []string `json:"evidence"`
+	SessionID string   `json:"session_id,omitempty"`
+}
+
+// ValidateWWDPayload enforces the §1.1 invariants the MCP tool surfaces
+// to its caller as a hard reject (not a silent strip):
+//
+//   - service is non-empty
+//   - details is non-empty and ≤6 entries
+//   - kind ∈ validDetailKinds
+//   - when matches HH:MM (^[0-2][0-9]:[0-5][0-9]$)
+//   - text ≤ 200 chars
+//   - evidence is non-empty
+//   - text containing "PR #<n>" must have that "#<n>" present in this
+//     detail's own evidence — otherwise the host invented the ref and
+//     the whole payload is rejected (stricter than the prose path's
+//     deterministic strip, by design: typed details land in a
+//     UI-facing component and a fabricated PR number would be more
+//     load-bearing there).
+//
+// Returns a descriptive error naming the first detail index that failed
+// so the AI host gets a precise diagnostic on the round-trip back.
+func ValidateWWDPayload(p WWDPayload) error {
+	if strings.TrimSpace(p.Service) == "" {
+		return errors.New("worklog: wwd payload: service required")
+	}
+	if len(p.Details) == 0 {
+		return errors.New("worklog: wwd payload: at least one detail required")
+	}
+	if len(p.Details) > 6 {
+		return fmt.Errorf("worklog: wwd payload: at most 6 details per (day, service) bucket, got %d", len(p.Details))
+	}
+	for i, d := range p.Details {
+		if !validDetailKinds[d.Kind] {
+			return fmt.Errorf("worklog: wwd payload: detail %d kind %q not in {SHIPPED,MAJOR,FIXED,DECISION,INVESTIGATED,IN_PROGRESS}", i, d.Kind)
+		}
+		if !detailWhenRe.MatchString(d.When) {
+			return fmt.Errorf("worklog: wwd payload: detail %d when %q must match HH:MM", i, d.When)
+		}
+		if strings.TrimSpace(d.Text) == "" {
+			return fmt.Errorf("worklog: wwd payload: detail %d text empty", i)
+		}
+		if len(d.Text) > 200 {
+			return fmt.Errorf("worklog: wwd payload: detail %d text %d chars > 200", i, len(d.Text))
+		}
+		if len(d.Evidence) == 0 {
+			return fmt.Errorf("worklog: wwd payload: detail %d evidence empty (citation invariant)", i)
+		}
+		for j, ev := range d.Evidence {
+			if strings.TrimSpace(ev) == "" {
+				return fmt.Errorf("worklog: wwd payload: detail %d evidence[%d] blank", i, j)
+			}
+		}
+		// Spec §5: a "PR #<n>" in text without that "#<n>" appearing in
+		// THIS detail's evidence is the invented-id failure mode. Reject
+		// rather than strip so the host has to fix the typed payload.
+		if matches := prRefRe.FindAllStringSubmatch(d.Text, -1); len(matches) > 0 {
+			haystack := strings.ToLower(strings.Join(d.Evidence, "\n"))
+			for _, m := range matches {
+				if len(m) < 2 {
+					continue
+				}
+				num := m[1]
+				backed := strings.Contains(haystack, "#"+num) ||
+					strings.Contains(haystack, "pr "+num) ||
+					strings.Contains(haystack, "pr#"+num) ||
+					strings.Contains(haystack, "pr-"+num)
+				if !backed {
+					return fmt.Errorf("worklog: wwd payload: detail %d text references PR #%s not present in evidence", i, num)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// renderWWDPayloadMarkdown turns a validated typed payload into a
+// deterministic markdown bullet list so legacy prose readers (grep,
+// older /worklog views, the iterative-reflection cursor's textual
+// fallback) stay useful. The render groups by the §1.2 kind order and,
+// within a kind, preserves the input order (the slash command emits
+// details newest-first inside each kind already).
+//
+// Output shape:
+//
+//	## What was done — <service>
+//
+//	- [SHIPPED] 16:49 — wrote ~/.codex/hooks.json … (evidence: be8cc8c8, ~/.codex/hooks.json)
+//	- [FIXED]   17:10 — applied .dot--live across 3 svelte files (evidence: 620a9551)
+//	...
+//
+// The leading "## What was done — <service>" header gives the dashboard
+// a stable anchor and the per-bullet `(evidence: …)` tail keeps the
+// existing citation invariant visible to readers who can't parse
+// body_json.
+func renderWWDPayloadMarkdown(p WWDPayload) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "## What was done — %s\n\n", p.Service)
+	// Group by kind, in §1.2 render order, preserving input order within
+	// a kind. Unknown kinds are filtered upstream by ValidateWWDPayload.
+	byKind := make(map[string][]WWDDetail, len(detailKindOrder))
+	for _, d := range p.Details {
+		byKind[d.Kind] = append(byKind[d.Kind], d)
+	}
+	for _, k := range detailKindOrder {
+		for _, d := range byKind[k] {
+			fmt.Fprintf(&b, "- [%s] %s — %s (evidence: %s)\n",
+				d.Kind, d.When, d.Text, strings.Join(d.Evidence, ", "))
+		}
+	}
+	return b.String()
+}
+
+// collectTypedEvidence flattens evidence ids across every detail in a
+// WWDPayload, preserving first-seen order and de-duplicating across
+// details. Detail.SessionID (when set) is prepended to the per-detail
+// evidence list so the resulting evidence_entry_ids_json column still
+// carries the originating stop_summary id even when the detail's own
+// `evidence` list is exclusively commit SHAs / file paths / test names.
+func collectTypedEvidence(p WWDPayload) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(p.Details))
+	add := func(s string) {
+		if strings.TrimSpace(s) == "" || seen[s] {
+			return
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	for _, d := range p.Details {
+		add(d.SessionID)
+		for _, ev := range d.Evidence {
+			add(ev)
+		}
+	}
+	return out
 }
 
 // RecordReflection persists a synthesized reflection. Enforces the
@@ -73,6 +270,91 @@ func RecordReflection(ctx context.Context, db *store.DB, projectPath string, day
 // error. The existing reflection flow is never broken.
 func RecordReflectionWithSubstrate(ctx context.Context, db *store.DB, projectPath string, day time.Time, insights []Insight, rep productivity.Report) (store.Reflection, error) {
 	return recordReflection(ctx, db, projectPath, day, insights, &rep)
+}
+
+// RecordReflectionTyped is the spec §1.1 typed-payload path the /klyne:
+// reflect slash command exercises (one call per (day, service) bucket).
+// It validates the WWDPayload against the frozen §1.1 schema, renders a
+// deterministic body_md companion from the details so legacy prose
+// readers stay useful, persists both columns through the extended
+// store.InsertReflection, and advances the iterative-reflection cursor
+// identically to the prose path.
+//
+// projectPath is the project the reflection rolls up under (the
+// dashboard's "service" column is derived from this and from
+// payload.Service — they should usually be the basename of projectPath
+// but the slash command is free to pass any descriptive label).
+//
+// day is the COVERED calendar day (UTC). Zero falls back to now.Local()
+// for back-compat — but the slash command must pass an explicit day.
+//
+// The returned store.Reflection carries the assembled BodyJSON / BodyMD
+// fields so callers can echo the persisted shape back to the host.
+func RecordReflectionTyped(ctx context.Context, db *store.DB, projectPath string, day time.Time, payload WWDPayload) (store.Reflection, error) {
+	if strings.TrimSpace(projectPath) == "" {
+		return store.Reflection{}, errors.New("worklog: project_path required")
+	}
+	if err := ValidateWWDPayload(payload); err != nil {
+		return store.Reflection{}, err
+	}
+
+	// Roll worktrees up to the canonical main-repo path so a reflect
+	// triggered from a worktree lands under the main repo's project
+	// (matches the prose path's behaviour, see recordReflection).
+	projectPath = projectpath.Canonical(projectPath)
+
+	// Build the per-row evidence set: SessionID first (so the
+	// stop_summary back-pointer is preserved at the head) then each
+	// detail's evidence tokens. Dedupe across details.
+	allEvidence := collectTypedEvidence(payload)
+	if len(allEvidence) == 0 {
+		// ValidateWWDPayload already guarantees per-detail evidence is
+		// non-empty, but the store CHECK constraint requires the JSON
+		// array to be non-trivial (len > 2). Defensive fallback when a
+		// detail's evidence is exclusively whitespace strings — should
+		// be unreachable in practice.
+		return store.Reflection{}, errors.New("worklog: wwd payload: no usable evidence ids across details")
+	}
+
+	bodyJSONBytes, err := json.Marshal(payload)
+	if err != nil {
+		return store.Reflection{}, fmt.Errorf("worklog: marshal wwd payload: %w", err)
+	}
+	bodyMD := renderWWDPayloadMarkdown(payload)
+
+	now := time.Now()
+	if day.IsZero() {
+		day = now
+	}
+	dayLabel := day.Local().Format("2006-01-02")
+
+	// Cursor advancement is identical to the prose path: take MAX(ts)
+	// across the cited session_ids inside this day's local window.
+	cursor, cerr := stopSummaryCursorForCitations(ctx, db, projectPath, day, allEvidence)
+	if cerr != nil {
+		cursor = 0
+	}
+
+	refl := store.Reflection{
+		ID:                  fmt.Sprintf("ref-%s-%d", dayLabel, now.UnixNano()),
+		TS:                  now.UnixMilli(),
+		ProjectPath:         projectPath,
+		Tier:                1,
+		Title:               fmt.Sprintf("Daily reflection — %s", dayLabel),
+		BodyMD:              bodyMD,
+		BodyJSON:            string(bodyJSONBytes),
+		EvidenceEntryIDs:    allEvidence,
+		Importance:          7,
+		SummarySource:       "ai",
+		State:               "proposed",
+		StateChangedAt:      now.UnixMilli(),
+		StopSummaryCursorTS: cursor,
+		Day:                 dayLabel,
+	}
+	if err := store.InsertReflection(ctx, db, refl); err != nil {
+		return store.Reflection{}, fmt.Errorf("worklog: persist typed reflection: %w", err)
+	}
+	return refl, nil
 }
 
 // recordReflection is the shared core. rep is nil for the plain path and

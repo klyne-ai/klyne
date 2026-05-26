@@ -35,25 +35,26 @@ func TestMigrationsApply(t *testing.T) {
 		"001_init.sql",
 		"002_fts.sql",
 		"003_summaries.sql",
-		"004_messages_tool_columns.sql", // W2: Option-A tool-call JSON columns
-		"005_cached_tokens.sql",         // cached_read/write columns on messages + sessions
-		"006_deleted_sessions.sql",      // soft-delete tombstones
-		"007_zero_costs.sql",            // backfill cost=0 for flat-subscription DTO compat
-		"008_message_branch_cwd.sql",    // git_branch + cwd on messages for cockpit splits
-		"009_decisions.sql",             // decisions log (project-scoped persistent notes)
-		"010_runbook_dismissals.sql",    // user dismissals for proposed recurring runbooks
-		"011_stop_summaries.sql",        // deterministic Stop-hook session summaries
-		"012_shield_snapshots.sql",      // compact-shield snapshot log
-		"013_safety_snapshots.sql",      // pre-action safety-net snapshot log
-		"014_work_spans.sql",            // cost-per-outcome work-span attribution
-		"015_worklog_columns.sql",       // worklog memory-layer columns on stop_summaries
-		"016_worklog_reflections.sql",   // reflection layer (Generative Agents pattern) w/ citation invariant
-		"017_git_dashboard.sql",         // AI productivity dashboard tables (git_session_snapshots, dashboard_cache)
-		"018_github_pr_cache.sql",       // merged-PR `gh` enrichment cache (TTL-refreshed)
-		"019_worklog_rich_entry.sql",    // structured 15-category worklog entry per stop_summaries row
-		"020_reflection_stop_summary_cursor.sql",   // iterative reflection cursor (docs/features/iterative-reflection.md)
-		"021_daily_productivity_snapshot.sql",      // per-(project,day) snapshot for deterministic dashboard rendering
-		"022_worklog_reflections_day.sql",          // explicit covered-day column so catch-up reflections surface under the day they cover
+		"004_messages_tool_columns.sql",          // W2: Option-A tool-call JSON columns
+		"005_cached_tokens.sql",                  // cached_read/write columns on messages + sessions
+		"006_deleted_sessions.sql",               // soft-delete tombstones
+		"007_zero_costs.sql",                     // backfill cost=0 for flat-subscription DTO compat
+		"008_message_branch_cwd.sql",             // git_branch + cwd on messages for cockpit splits
+		"009_decisions.sql",                      // decisions log (project-scoped persistent notes)
+		"010_runbook_dismissals.sql",             // user dismissals for proposed recurring runbooks
+		"011_stop_summaries.sql",                 // deterministic Stop-hook session summaries
+		"012_shield_snapshots.sql",               // compact-shield snapshot log
+		"013_safety_snapshots.sql",               // pre-action safety-net snapshot log
+		"014_work_spans.sql",                     // cost-per-outcome work-span attribution
+		"015_worklog_columns.sql",                // worklog memory-layer columns on stop_summaries
+		"016_worklog_reflections.sql",            // reflection layer (Generative Agents pattern) w/ citation invariant
+		"017_git_dashboard.sql",                  // AI productivity dashboard tables (git_session_snapshots, dashboard_cache)
+		"018_github_pr_cache.sql",                // merged-PR `gh` enrichment cache (TTL-refreshed)
+		"019_worklog_rich_entry.sql",             // structured 15-category worklog entry per stop_summaries row
+		"020_reflection_stop_summary_cursor.sql", // iterative reflection cursor (docs/features/iterative-reflection.md)
+		"021_daily_productivity_snapshot.sql",    // per-(project,day) snapshot for deterministic dashboard rendering
+		"022_worklog_reflections_day.sql",        // explicit covered-day column so catch-up reflections surface under the day they cover
+		"023_worklog_reflections_body_json.sql",  // typed What-was-done payload column (NULLable, parsed by ComposeWWD)
 	}
 	if len(sqlFiles) != len(expected) {
 		t.Fatalf("expected %d migrations, found %d: %v", len(expected), len(sqlFiles), sqlFiles)

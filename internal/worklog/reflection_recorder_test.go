@@ -228,6 +228,228 @@ func TestRecordReflectionWithSubstrate_DegradesWhenNoRepo(t *testing.T) {
 	}
 }
 
+// TestRecordReflectionTyped_RoundTrip is the spec §1.1 typed-payload
+// happy path: a properly-formed WWDPayload round-trips through
+// RecordReflectionTyped → store.InsertReflection → ListReflectionsForProject
+// with BOTH BodyJSON (raw, canonical) and BodyMD (deterministically
+// rendered) populated. The body_md rendering must group by the §1.2
+// kind order so legacy prose readers see the same order the dashboard
+// does.
+func TestRecordReflectionTyped_RoundTrip(t *testing.T) {
+	db := newRecorderTestDB(t)
+	payload := WWDPayload{
+		Service: "klyne",
+		Details: []WWDDetail{
+			{
+				Kind:      DetailKindShipped,
+				When:      "16:49",
+				Text:      "Wrote ~/.codex/hooks.json with klyne-hook entries for SessionStart/UserPromptSubmit",
+				Evidence:  []string{"be8cc8c8", "~/.codex/hooks.json"},
+				SessionID: "sess-1",
+			},
+			{
+				Kind:      DetailKindFixed,
+				When:      "17:10",
+				Text:      "Applied .dot--live modifier across 3 svelte files",
+				Evidence:  []string{"620a9551"},
+				SessionID: "sess-2",
+			},
+			{
+				Kind:      DetailKindDecision,
+				When:      "16:34",
+				Text:      "Adopt git-substrate join in propose_reflection",
+				Evidence:  []string{"sess-3"},
+				SessionID: "sess-3",
+			},
+		},
+	}
+	day := time.Date(2026, 5, 26, 0, 0, 0, 0, time.UTC)
+	refl, err := RecordReflectionTyped(context.Background(), db, "/p", day, payload)
+	if err != nil {
+		t.Fatalf("record typed: %v", err)
+	}
+	// In-memory struct carries both columns.
+	if refl.BodyJSON == "" {
+		t.Errorf("expected non-empty BodyJSON on returned reflection")
+	}
+	if refl.BodyMD == "" {
+		t.Errorf("expected non-empty BodyMD (rendered companion) on returned reflection")
+	}
+	if !strings.Contains(refl.BodyMD, "What was done — klyne") {
+		t.Errorf("expected service header in rendered body_md, got:\n%s", refl.BodyMD)
+	}
+	if !strings.Contains(refl.BodyMD, "[SHIPPED]") || !strings.Contains(refl.BodyMD, "[FIXED]") || !strings.Contains(refl.BodyMD, "[DECISION]") {
+		t.Errorf("expected each kind chip in rendered body_md, got:\n%s", refl.BodyMD)
+	}
+	// §1.2 render order: SHIPPED before FIXED before DECISION.
+	shippedIdx := strings.Index(refl.BodyMD, "[SHIPPED]")
+	fixedIdx := strings.Index(refl.BodyMD, "[FIXED]")
+	decisionIdx := strings.Index(refl.BodyMD, "[DECISION]")
+	if !(shippedIdx < fixedIdx && fixedIdx < decisionIdx) {
+		t.Errorf("rendered body_md violates §1.2 kind order (SHIPPED→FIXED→DECISION), got:\n%s", refl.BodyMD)
+	}
+	// session_id back-pointers are at the head of evidence_entry_ids so
+	// the citation invariant carries the originating stop_summary row.
+	if len(refl.EvidenceEntryIDs) == 0 {
+		t.Fatalf("expected non-empty evidence_entry_ids derived from typed payload")
+	}
+
+	// Round-trip via the store layer — confirms BodyJSON survives the
+	// migration-023 column round-trip.
+	rows, err := store.ListReflectionsForProject(context.Background(), db, "/p", 10)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 persisted typed reflection, got %d", len(rows))
+	}
+	if rows[0].BodyJSON == "" {
+		t.Errorf("persisted row missing body_json — typed payload did not round-trip")
+	}
+	if rows[0].BodyMD == "" {
+		t.Errorf("persisted row missing body_md companion")
+	}
+
+	// Parse the persisted body_json and confirm shape matches what we
+	// emitted (deterministic JSON marshaling preserves field order
+	// inside details).
+	parsed, err := store.ParseBodyJSON(rows[0])
+	if err != nil {
+		t.Fatalf("parse persisted body_json: %v", err)
+	}
+	if parsed.Service != "klyne" {
+		t.Errorf("persisted body_json.service = %q, want klyne", parsed.Service)
+	}
+	if len(parsed.Details) != 3 {
+		t.Errorf("persisted body_json.details = %d items, want 3", len(parsed.Details))
+	}
+}
+
+// TestRecordReflectionTyped_RejectsEmptyEvidence is the citation-
+// invariant guard for the typed path: any detail with empty evidence is
+// rejected and no row is written. Spec §5.
+func TestRecordReflectionTyped_RejectsEmptyEvidence(t *testing.T) {
+	db := newRecorderTestDB(t)
+	payload := WWDPayload{
+		Service: "klyne",
+		Details: []WWDDetail{
+			{Kind: DetailKindShipped, When: "10:00", Text: "did a thing", Evidence: nil},
+		},
+	}
+	day := time.Date(2026, 5, 26, 0, 0, 0, 0, time.UTC)
+	_, err := RecordReflectionTyped(context.Background(), db, "/p", day, payload)
+	if err == nil {
+		t.Fatalf("expected citation-invariant error on empty evidence")
+	}
+	if !strings.Contains(err.Error(), "evidence empty") {
+		t.Errorf("expected 'evidence empty' diagnostic, got: %v", err)
+	}
+	rows, err := store.ListReflectionsForProject(context.Background(), db, "/p", 10)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Errorf("rejected payload must not write a row, got %d row(s)", len(rows))
+	}
+}
+
+// TestRecordReflectionTyped_RejectsUnbackedPRRef is the spec §5
+// "don't invent PR numbers" guard: a detail whose text says "PR #57"
+// without "#57" appearing in that SAME detail's evidence is rejected
+// outright (no silent strip — typed details face the dashboard UI
+// where an invented PR ref would be more load-bearing than in prose).
+func TestRecordReflectionTyped_RejectsUnbackedPRRef(t *testing.T) {
+	db := newRecorderTestDB(t)
+	payload := WWDPayload{
+		Service: "klyne",
+		Details: []WWDDetail{
+			{
+				Kind:     DetailKindShipped,
+				When:     "12:00",
+				Text:     "Shipped the labstack pipeline via PR #57",
+				Evidence: []string{"be8cc8c8"}, // no "#57" anywhere
+			},
+		},
+	}
+	day := time.Date(2026, 5, 26, 0, 0, 0, 0, time.UTC)
+	_, err := RecordReflectionTyped(context.Background(), db, "/p", day, payload)
+	if err == nil {
+		t.Fatalf("expected error on unbacked PR ref")
+	}
+	if !strings.Contains(err.Error(), "PR #57") {
+		t.Errorf("expected diagnostic naming the offending PR number, got: %v", err)
+	}
+}
+
+// TestRecordReflectionTyped_AcceptsBackedPRRef confirms the inverse:
+// a "PR #57" that IS present in the detail's evidence (e.g. a commit
+// subject "Merge PR #57" cited as evidence) survives validation and
+// the row lands.
+func TestRecordReflectionTyped_AcceptsBackedPRRef(t *testing.T) {
+	db := newRecorderTestDB(t)
+	payload := WWDPayload{
+		Service: "klyne",
+		Details: []WWDDetail{
+			{
+				Kind: DetailKindShipped,
+				When: "12:00",
+				Text: "Shipped the labstack pipeline via PR #57",
+				// Evidence carries "#57" literally — the guard is satisfied.
+				Evidence:  []string{"be8cc8c8", "Merge PR #57: labstack pipeline"},
+				SessionID: "sess-1",
+			},
+		},
+	}
+	day := time.Date(2026, 5, 26, 0, 0, 0, 0, time.UTC)
+	refl, err := RecordReflectionTyped(context.Background(), db, "/p", day, payload)
+	if err != nil {
+		t.Fatalf("expected backed PR ref to pass validation, got: %v", err)
+	}
+	if !strings.Contains(refl.BodyMD, "PR #57") {
+		t.Errorf("backed PR ref must survive into body_md, got:\n%s", refl.BodyMD)
+	}
+}
+
+// TestRecordReflectionTyped_RejectsBadKind / BadWhen / OverlongText
+// covers the §1.1 schema-validator boundary cases.
+func TestRecordReflectionTyped_RejectsSchemaViolations(t *testing.T) {
+	db := newRecorderTestDB(t)
+	day := time.Date(2026, 5, 26, 0, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name   string
+		detail WWDDetail
+		want   string
+	}{
+		{
+			name:   "bad kind",
+			detail: WWDDetail{Kind: "BOGUS", When: "10:00", Text: "x", Evidence: []string{"e1"}},
+			want:   "kind",
+		},
+		{
+			name:   "bad when",
+			detail: WWDDetail{Kind: DetailKindShipped, When: "10:99", Text: "x", Evidence: []string{"e1"}},
+			want:   "when",
+		},
+		{
+			name:   "overlong text",
+			detail: WWDDetail{Kind: DetailKindShipped, When: "10:00", Text: strings.Repeat("x", 201), Evidence: []string{"e1"}},
+			want:   "200",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := RecordReflectionTyped(context.Background(), db, "/p", day,
+				WWDPayload{Service: "klyne", Details: []WWDDetail{tc.detail}})
+			if err == nil {
+				t.Fatalf("expected error for %s", tc.name)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("expected error mentioning %q, got: %v", tc.want, err)
+			}
+		})
+	}
+}
+
 func TestRecordReflection_WritesOnePerDay(t *testing.T) {
 	db := newRecorderTestDB(t)
 	days := []time.Time{

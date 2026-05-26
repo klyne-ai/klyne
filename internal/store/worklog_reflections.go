@@ -26,9 +26,9 @@ type Reflection struct {
 	ProjectPath           string   `json:"project_path"`
 	Title                 string   `json:"title"`
 	BodyMD                string   `json:"body_md"`
-	SummarySource         string   `json:"summary_source"`         // "ai" | "user" | "hybrid"
-	State                 string   `json:"state"`                  // "proposed" | "accepted" | "dismissed"
-	Tier                  int      `json:"tier"`                   // 1=daily, 2=weekly, 3=quarterly
+	SummarySource         string   `json:"summary_source"` // "ai" | "user" | "hybrid"
+	State                 string   `json:"state"`          // "proposed" | "accepted" | "dismissed"
+	Tier                  int      `json:"tier"`           // 1=daily, 2=weekly, 3=quarterly
 	Importance            int      `json:"importance"`
 	TS                    int64    `json:"ts"`
 	StateChangedAt        int64    `json:"state_changed_at"`
@@ -42,6 +42,56 @@ type Reflection struct {
 	// written. Empty for legacy rows means "use the row's local-ts day"
 	// — migration 022 backfills it from the title's trailing date.
 	Day string `json:"day,omitempty"`
+	// BodyJSON is the typed What-was-done payload (migration 023). Carries
+	// the §1.1 schema of docs/plan/2026-05-26-wwd-typed-cards.md — one
+	// service per row, one or more details with kind/when/text/evidence/
+	// session_id. Empty (NULL in the DB) for legacy / prose-only rows
+	// written before the typed-cards workflow; the productivity composer
+	// (internal/productivity.ComposeWWD) skips rows where BodyJSON is
+	// empty.
+	BodyJSON string `json:"body_json,omitempty"`
+}
+
+// WWDPayload is the parsed shape of Reflection.BodyJSON — the typed
+// "What was done" detail payload defined in §1.1 of
+// docs/plan/2026-05-26-wwd-typed-cards.md.
+//
+// A single payload covers ONE service and carries one or more details.
+// ParseBodyJSON returns this shape; the productivity composer
+// (internal/productivity.ComposeWWD) groups Details across rows by
+// Service to build the per-service dashboard card.
+type WWDPayload struct {
+	Service string      `json:"service"`
+	Details []WWDDetail `json:"details"`
+}
+
+// WWDDetail is one typed entry in a reflection's What-was-done payload.
+// The field set mirrors the §1.1 schema literally — Kind enum, HH:MM
+// When, ≤200-char Text, non-empty Evidence drawn LITERALLY from the
+// source stop_summary, and the SessionID back-pointer to that source.
+type WWDDetail struct {
+	Kind      string   `json:"kind"`
+	When      string   `json:"when"`
+	Text      string   `json:"text"`
+	Evidence  []string `json:"evidence"`
+	SessionID string   `json:"session_id,omitempty"`
+}
+
+// ParseBodyJSON parses the typed What-was-done payload stored in
+// Reflection.BodyJSON. Returns an empty WWDPayload with no error when
+// BodyJSON is empty / whitespace — the typed-cards composer treats
+// legacy prose-only rows as "no typed contribution" and skips them
+// without surfacing as an error.
+func ParseBodyJSON(r Reflection) (WWDPayload, error) {
+	body := strings.TrimSpace(r.BodyJSON)
+	if body == "" {
+		return WWDPayload{}, nil
+	}
+	var p WWDPayload
+	if err := json.Unmarshal([]byte(body), &p); err != nil {
+		return WWDPayload{}, fmt.Errorf("store: parse worklog_reflection body_json: %w", err)
+	}
+	return p, nil
 }
 
 // InsertReflection writes one synthesized reflection. Enforces the
@@ -84,17 +134,24 @@ func InsertReflection(ctx context.Context, db *DB, r Reflection) error {
 	if strings.TrimSpace(r.Day) == "" && r.TS > 0 {
 		r.Day = time.UnixMilli(r.TS).Local().Format("2006-01-02")
 	}
+	// body_json is the migration-023 typed payload; persist NULL when the
+	// caller didn't set it (legacy prose-only path) so the column's
+	// "absent vs empty-string" distinction survives a round-trip.
+	var bodyJSON any
+	if strings.TrimSpace(r.BodyJSON) != "" {
+		bodyJSON = r.BodyJSON
+	}
 	_, err = db.Write().ExecContext(ctx,
 		`INSERT INTO worklog_reflections (
             id, ts, project_path, tier, title, body_md,
             evidence_entry_ids_json, evidence_reflection_ids_json,
             importance, summary_source, state, state_changed_at,
-            stop_summary_cursor_ts, day
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            stop_summary_cursor_ts, day, body_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.ID, r.TS, r.ProjectPath, r.Tier, r.Title, r.BodyMD,
 		string(entryIDs), string(refIDs),
 		r.Importance, r.SummarySource, r.State, r.StateChangedAt,
-		cursor, r.Day)
+		cursor, r.Day, bodyJSON)
 	if err != nil {
 		return fmt.Errorf("store: insert reflection: %w", err)
 	}
@@ -114,7 +171,8 @@ func ListReflectionsForProject(ctx context.Context, db *DB, projectPath string, 
 		`SELECT id, ts, project_path, tier, title, body_md,
                 evidence_entry_ids_json, evidence_reflection_ids_json,
                 importance, summary_source, state, state_changed_at,
-                COALESCE(stop_summary_cursor_ts, 0), day
+                COALESCE(stop_summary_cursor_ts, 0), day,
+                COALESCE(body_json, '')
          FROM worklog_reflections
          WHERE project_path = ?
          ORDER BY ts DESC, title DESC LIMIT ?`,
@@ -129,7 +187,7 @@ func ListReflectionsForProject(ctx context.Context, db *DB, projectPath string, 
 		var entryJSON, refJSON string
 		if err := rows.Scan(&r.ID, &r.TS, &r.ProjectPath, &r.Tier, &r.Title, &r.BodyMD,
 			&entryJSON, &refJSON, &r.Importance, &r.SummarySource, &r.State, &r.StateChangedAt,
-			&r.StopSummaryCursorTS, &r.Day); err != nil {
+			&r.StopSummaryCursorTS, &r.Day, &r.BodyJSON); err != nil {
 			return nil, fmt.Errorf("store: scan reflection: %w", err)
 		}
 		_ = json.Unmarshal([]byte(entryJSON), &r.EvidenceEntryIDs)
@@ -206,7 +264,8 @@ func ListReflectionsForProjectDay(ctx context.Context, db *DB, projectPath, dayS
 		`SELECT id, ts, project_path, tier, title, body_md,
                 evidence_entry_ids_json, evidence_reflection_ids_json,
                 importance, summary_source, state, state_changed_at,
-                COALESCE(stop_summary_cursor_ts, 0), day
+                COALESCE(stop_summary_cursor_ts, 0), day,
+                COALESCE(body_json, '')
          FROM worklog_reflections
          WHERE project_path = ?
            AND day = ?
@@ -222,7 +281,7 @@ func ListReflectionsForProjectDay(ctx context.Context, db *DB, projectPath, dayS
 		var entryJSON, refJSON string
 		if err := rows.Scan(&r.ID, &r.TS, &r.ProjectPath, &r.Tier, &r.Title, &r.BodyMD,
 			&entryJSON, &refJSON, &r.Importance, &r.SummarySource, &r.State, &r.StateChangedAt,
-			&r.StopSummaryCursorTS, &r.Day); err != nil {
+			&r.StopSummaryCursorTS, &r.Day, &r.BodyJSON); err != nil {
 			return nil, fmt.Errorf("store: scan reflection: %w", err)
 		}
 		_ = json.Unmarshal([]byte(entryJSON), &r.EvidenceEntryIDs)

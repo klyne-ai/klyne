@@ -155,6 +155,15 @@ type Service struct {
 	// surface "git as of N ago" so the user can see it. Zero when no
 	// fetch has ever run in this clone.
 	GitFetchedAt time.Time `json:"git_fetched_at"`
+	// WhatWasDone is the typed two-tier card surfaced on the
+	// productivity dashboard's "What was done" panel — Tier 1 headline
+	// (counts + tldr + top commit shas) plus the expandable Tier 2
+	// details list. Computed by ComposeWWD over the day's
+	// worklog_reflections rows whose body_json is non-empty. Nil when
+	// no typed reflection exists for this service-on-day (legacy
+	// prose-only rows produce no card; the UI falls back to the
+	// legacy reflection_markdown / reflection_groups path for those).
+	WhatWasDone *WhatWasDoneCard `json:"what_was_done,omitempty"`
 }
 
 // MergedPR is one GitHub pull request the user authored and merged
@@ -209,6 +218,60 @@ type SessionStat struct {
 	MessageCount    int              `json:"message_count"`
 }
 
+// WWDDetail is one typed entry in a service's "What was done" Tier 2
+// list. The shape mirrors §1.2 of docs/plan/2026-05-26-wwd-typed-cards.md
+// (which itself mirrors the §1.1 stored shape persisted in
+// worklog_reflections.body_json).
+//
+// Kind is the SHIPPED/MAJOR/FIXED/DECISION/INVESTIGATED/IN_PROGRESS
+// taxonomy. When is local "HH:MM". Text is the verb-led ≤200-char
+// detail. Evidence is at least one citation token drawn LITERALLY from
+// the source stop_summary (commit sha, file path, test name, etc.).
+// SessionID is the originating stop_summary's session_id — the UI
+// renders each detail as a clickable row that opens that source.
+type WWDDetail struct {
+	Kind      string   `json:"kind"`
+	When      string   `json:"when"`
+	Text      string   `json:"text"`
+	Evidence  []string `json:"evidence"`
+	SessionID string   `json:"session_id,omitempty"`
+}
+
+// WWDTier1 is the deterministically-computed headline row of a service's
+// "What was done" card — the always-visible summary above the
+// expandable Tier 2 details list. Every field is derived by ComposeWWD
+// from the merged Tier 2 details across every reflection row for the
+// service-on-day; no LLM call participates in this computation.
+//
+// PillCounts uses lowercased kind names ("shipped", "fixed", "decisions",
+// "investigated", "in_progress", "major") so the UI can render fixed
+// chip slots without re-keying.
+type WWDTier1 struct {
+	TLDR        string         `json:"tldr"`
+	PillCounts  map[string]int `json:"pill_counts"`
+	TopEvidence []string       `json:"top_evidence"`
+	TurnCount   int            `json:"turn_count"`
+	CommitCount int            `json:"commit_count"`
+}
+
+// WhatWasDoneCard is the per-service typed "What was done" card served
+// on GET /api/productivity at services[].what_was_done. Matches §1.2 of
+// docs/plan/2026-05-26-wwd-typed-cards.md.
+//
+// Tier1 is always present. Tier2.Details is ordered SHIPPED → MAJOR →
+// FIXED → DECISION → INVESTIGATED → IN_PROGRESS, and within each kind
+// newest-first by `When` — the same render order the dashboard uses
+// (no per-render sort). The composer drops legacy reflection rows
+// (BodyJSON empty) so cards are only emitted for services whose
+// reflections opted into the typed payload.
+type WhatWasDoneCard struct {
+	Service string   `json:"service"`
+	Tier1   WWDTier1 `json:"tier1"`
+	Tier2   struct {
+		Details []WWDDetail `json:"details"`
+	} `json:"tier2"`
+}
+
 // ReflectionGroup is one worklog_reflections row in the
 // iterative-reflection workflow (docs/features/iterative-reflection.md).
 // The dashboard renders each group as a separate entry under WHAT WAS
@@ -244,12 +307,12 @@ type ReflectionGroup struct {
 // (Change 3); empty when there is no single sensible project-agnostic
 // reflection — per-Service ReflectionMarkdown carries the per-repo body.
 type Report struct {
-	Day                string         `json:"day"`
-	Services           []Service      `json:"services"`
-	ReflectionStatus   string         `json:"reflection_status"`
-	Nudge              string         `json:"nudge"`
-	TotalActiveMinutes int            `json:"total_active_minutes"`
-	MinutesByCLI       map[string]int `json:"minutes_by_cli"`
+	Day                string            `json:"day"`
+	Services           []Service         `json:"services"`
+	ReflectionStatus   string            `json:"reflection_status"`
+	Nudge              string            `json:"nudge"`
+	TotalActiveMinutes int               `json:"total_active_minutes"`
+	MinutesByCLI       map[string]int    `json:"minutes_by_cli"`
 	Sessions           []SessionStat     `json:"sessions"`
 	ReflectionMarkdown string            `json:"reflection_markdown,omitempty"`
 	ReflectionGroups   []ReflectionGroup `json:"reflection_groups,omitempty"`

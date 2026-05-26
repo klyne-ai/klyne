@@ -178,6 +178,12 @@ func (h *ProductivityHandler) Get(w http.ResponseWriter, r *http.Request) {
 		// unambiguously a "this day's snapshot."
 		rep.Day = dayStr
 
+		// Lazy-compose the typed What-was-done cards from the day's
+		// worklog_reflections rows (§1.2). Same composer as the
+		// snapshot-read path so today's live render and tomorrow's
+		// snapshot read both produce identical cards for the same input.
+		hydrateWhatWasDone(ctx, h.db, &rep, dayStr)
+
 		// Persist a per-project snapshot for every past day. Today is
 		// never persisted — it's not done yet, and persisting now would
 		// let a same-day reload read a stale row instead of recomputing.
@@ -357,6 +363,14 @@ func (h *ProductivityHandler) tryReadSnapshotDay(
 // read is indistinguishable from a live recompute for the reflection
 // layer.
 //
+// Also lazy-composes the typed What-was-done cards (§1.2 of
+// docs/plan/2026-05-26-wwd-typed-cards.md) by running
+// productivity.ComposeWWD over the same per-day reflection rows. A
+// persisted snapshot may already carry a Service.WhatWasDone pointer
+// (the reflection-recorder writes it on commit) — re-composing on read
+// keeps the panel honest if any reflection row was deleted or edited
+// (catch-up reflects).
+//
 // dayStr is parsed in the local zone to match the recorder's day
 // labelling (reflection_recorder.go uses day.Local() since the fix in
 // migration 022).
@@ -394,7 +408,96 @@ func (h *ProductivityHandler) hydrateSnapshotReflections(
 		// Leave Nudge to AggregateReports — it composes the multi-day
 		// message that depends on the union of per-day statuses.
 	}
+
+	// Lazy-compose the typed What-was-done cards from the day's
+	// worklog_reflections rows. ComposeWWD skips legacy prose-only
+	// rows (BodyJSON empty), so this is a no-op for services whose
+	// reflections never opted into the typed payload — exactly the
+	// behaviour the UI's "fall back to legacy bullets" path expects.
+	hydrateWhatWasDone(ctx, h.db, rep, dayStr)
 	return nil
+}
+
+// hydrateWhatWasDone attaches the typed §1.2 What-was-done cards onto
+// each Service in rep by running ComposeWWD over the day's reflection
+// rows per-project. Always emits — services with no typed reflection
+// land with WhatWasDone == nil so the UI can fall back to the legacy
+// bullets path without ambiguity.
+//
+// Errors are logged-but-not-fatal: the typed panel is a UX enrichment;
+// the rest of the dashboard MUST render even if the per-project
+// reflection read fails.
+func hydrateWhatWasDone(
+	ctx context.Context, db *store.DB, rep *productivity.Report, dayStr string,
+) {
+	for i := range rep.Services {
+		svc := &rep.Services[i]
+		rows, err := store.ListReflectionsForProjectDay(ctx, db, svc.ProjectPath, dayStr)
+		if err != nil {
+			log.Printf("productivity: wwd hydrate %s/%s: %v", svc.ProjectPath, dayStr, err)
+			svc.WhatWasDone = nil
+			continue
+		}
+		cards := productivity.ComposeWWD(rows)
+		// At most one card per service per (project, day) — the payload
+		// schema scopes one row to one service, and ComposeWWD groups
+		// by service. Find the matching card by Service basename; nil
+		// when no typed reflection landed.
+		var match *productivity.WhatWasDoneCard
+		key := serviceKeyForLookup(*svc)
+		for j := range cards {
+			if cards[j].Service == key {
+				match = &cards[j]
+				break
+			}
+		}
+		// Defensive fallback: when the service-key disagrees (e.g. the
+		// writer keyed by basename and the Repo string is e.g.
+		// "klyne-ai/klyne"), match by basename of svc.ProjectPath.
+		if match == nil {
+			base := basePath(svc.ProjectPath)
+			for j := range cards {
+				if cards[j].Service == base {
+					match = &cards[j]
+					break
+				}
+			}
+		}
+		// Last resort: if there is exactly one card and the service
+		// list only contains one service, attach it — covers the
+		// single-project recompose-stub case where Repo is empty.
+		if match == nil && len(cards) == 1 && len(rep.Services) == 1 {
+			match = &cards[0]
+		}
+		if match != nil {
+			cardCopy := *match
+			svc.WhatWasDone = &cardCopy
+		} else {
+			svc.WhatWasDone = nil
+		}
+	}
+}
+
+// serviceKeyForLookup mirrors persistRecomposedCards.serviceKey but
+// scoped to this file's lookup direction.
+func serviceKeyForLookup(svc productivity.Service) string {
+	if r := strings.TrimSpace(svc.Repo); r != "" {
+		return r
+	}
+	return basePath(svc.ProjectPath)
+}
+
+// basePath returns the last path segment of p, or p itself when it has
+// no separator. Empty for empty input.
+func basePath(p string) string {
+	p = strings.TrimSpace(p)
+	if p == "" {
+		return ""
+	}
+	if i := strings.LastIndex(p, "/"); i >= 0 && i < len(p)-1 {
+		return p[i+1:]
+	}
+	return p
 }
 
 // persistSnapshotsForDay writes one daily_productivity_snapshot row per

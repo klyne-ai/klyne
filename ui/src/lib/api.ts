@@ -534,6 +534,14 @@ export interface ProductivityReport {
    * for the day. See docs/features/iterative-reflection.md.
    */
   reflection_groups?: ReflectionGroup[];
+  /**
+   * Number of stop_summary worklog entries written since the last
+   * /klyne:reflect run for any project in the window — the
+   * "needs-sync" signal that drives the highlighted reflect-now
+   * button. Optional / may be undefined while the backend rolls out
+   * the field (spec docs/plan/2026-05-26-wwd-typed-cards.md §2 Agent U).
+   */
+  pending_entries?: number;
 }
 /** One row from worklog_reflections — one /klyne:reflect run. */
 export interface ReflectionGroup {
@@ -543,6 +551,72 @@ export interface ReflectionGroup {
   body_md: string;
   evidence_entry_ids: string[];
   stop_summary_cursor_ts?: number;
+}
+
+// ---------------------------------------------------------------------------
+// What-was-done typed cards (spec: docs/plan/2026-05-26-wwd-typed-cards.md §1.2)
+// ---------------------------------------------------------------------------
+
+/**
+ * One typed Tier-2 detail synthesized by /klyne:reflect from a single
+ * stop_summary row. Mirrors §1.1 stored shape. Cards group these by
+ * service. Evidence tokens are drawn LITERALLY from the source
+ * stop_summary — the citation invariant.
+ */
+export type WWDKind =
+  | 'SHIPPED'
+  | 'MAJOR'
+  | 'FIXED'
+  | 'DECISION'
+  | 'INVESTIGATED'
+  | 'IN_PROGRESS';
+
+export interface WWDDetail {
+  kind: WWDKind;
+  /** HH:MM local — when the originating stop_summary landed. */
+  when: string;
+  /** ≤200 chars, verb-led. */
+  text: string;
+  /** At least one literal token from the source stop_summary. */
+  evidence: string[];
+  /** Originating stop_summary session id — the worklog drill-in target. */
+  session_id: string;
+}
+
+/**
+ * Deterministic per-service headline derived in Go from the merged
+ * Tier-2 details. No LLM at render time — recomputed each /klyne:reflect.
+ */
+export interface WWDTier1 {
+  /** Templated one-liner: "{N} shipped · {N} fixed · … · latest: {text…}". */
+  tldr: string;
+  /** Counts by lowercased kind. Missing kinds may be omitted by the backend. */
+  pill_counts: Partial<Record<Lowercase<WWDKind> | 'decisions', number>>;
+  /** Up to 3 commit-sha-looking tokens from any detail's evidence, dedup, newest-first. */
+  top_evidence: string[];
+  /** Distinct `session_id`s across the merged details. */
+  turn_count: number;
+  /** Count of commit-sha-looking tokens across all evidence. */
+  commit_count: number;
+}
+
+/**
+ * Per-service "What was done" card carried on
+ * GET /api/productivity → services[].what_was_done. Null/absent on
+ * services whose reflections are all legacy prose (pre-body_json) —
+ * the UI falls back to the existing bullet rendering in that case.
+ */
+export interface WhatWasDoneCard {
+  service: string;
+  tier1: WWDTier1;
+  tier2: {
+    /**
+     * Merged details across every body_json row for (project, day).
+     * Ordered SHIPPED → MAJOR → FIXED → DECISION → INVESTIGATED →
+     * IN_PROGRESS; within a kind, newest-first.
+     */
+    details: WWDDetail[];
+  };
 }
 export interface ProductivityService {
   repo: string;
@@ -571,6 +645,14 @@ export interface ProductivityService {
    * for the day.
    */
   reflection_groups?: ReflectionGroup[];
+  /**
+   * Typed "What was done" card for this service — Tier-1 deterministic
+   * headline + Tier-2 merged details. Null/absent on services whose
+   * reflections are all legacy prose (no `body_json`); the UI falls
+   * back to the bullet-parsing path in that case. Spec:
+   * docs/plan/2026-05-26-wwd-typed-cards.md §1.2.
+   */
+  what_was_done?: WhatWasDoneCard | null;
   /**
    * GitHub pull requests the user merged within the report window — a
    * Layer-2 `gh`-sourced enrichment, NOT a deterministic git fact.

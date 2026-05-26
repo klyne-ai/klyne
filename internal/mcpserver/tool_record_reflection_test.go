@@ -177,6 +177,147 @@ func TestHandleRecordReflection_EnrichesWithGitSubstrate(t *testing.T) {
 	}
 }
 
+// TestHandleRecordReflection_TypedPath exercises the spec §1.1 typed
+// payload at the MCP tool boundary: the tool accepts the new BodyJSON
+// field, validates per-detail evidence, persists with body_json
+// non-null, and renders a deterministic body_md companion.
+func TestHandleRecordReflection_TypedPath(t *testing.T) {
+	withFakeHome(t)
+	db := withBootstrapDB(t)
+
+	in := RecordReflectionInput{
+		ProjectPath: "/p",
+		Day:         "2026-05-26",
+		BodyJSON: &worklog.WWDPayload{
+			Service: "klyne",
+			Details: []worklog.WWDDetail{
+				{
+					Kind:      worklog.DetailKindShipped,
+					When:      "16:49",
+					Text:      "Wrote ~/.codex/hooks.json with klyne-hook entries",
+					Evidence:  []string{"be8cc8c8", "~/.codex/hooks.json"},
+					SessionID: "s1",
+				},
+			},
+		},
+	}
+	out, err := handleRecordReflection(context.Background(), db, in)
+	if err != nil {
+		t.Fatalf("typed record: %v", err)
+	}
+	if out.ReflectionID == "" {
+		t.Errorf("expected non-empty reflection id")
+	}
+	rows, err := store.ListReflectionsForProject(context.Background(), db, "/p", 10)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	if rows[0].BodyJSON == "" {
+		t.Errorf("expected body_json to round-trip non-empty")
+	}
+	if !strings.Contains(rows[0].BodyMD, "What was done — klyne") {
+		t.Errorf("expected rendered body_md companion, got:\n%s", rows[0].BodyMD)
+	}
+}
+
+// TestHandleRecordReflection_TypedPath_RejectsEmptyEvidence is the
+// spec §5 citation-invariant guard at the MCP tool boundary: a typed
+// payload with any empty-evidence detail is rejected by the tool with
+// no row written.
+func TestHandleRecordReflection_TypedPath_RejectsEmptyEvidence(t *testing.T) {
+	withFakeHome(t)
+	db := withBootstrapDB(t)
+
+	in := RecordReflectionInput{
+		ProjectPath: "/p",
+		Day:         "2026-05-26",
+		BodyJSON: &worklog.WWDPayload{
+			Service: "klyne",
+			Details: []worklog.WWDDetail{
+				{Kind: worklog.DetailKindShipped, When: "16:49", Text: "Wrote a thing", Evidence: nil},
+			},
+		},
+	}
+	_, err := handleRecordReflection(context.Background(), db, in)
+	if err == nil {
+		t.Fatalf("expected citation-invariant error on empty per-detail evidence")
+	}
+	if !strings.Contains(err.Error(), "evidence empty") {
+		t.Errorf("expected diagnostic mentioning 'evidence empty', got: %v", err)
+	}
+	rows, _ := store.ListReflectionsForProject(context.Background(), db, "/p", 10)
+	if len(rows) != 0 {
+		t.Errorf("rejected payload must not write a row, got %d", len(rows))
+	}
+}
+
+// TestHandleRecordReflection_TypedPath_RejectsUnbackedPRRef is the
+// spec §5 "don't invent PR numbers" guard at the MCP tool boundary:
+// a detail text containing "PR #<digits>" not present in the same
+// detail's evidence makes the call fail at the tool layer.
+func TestHandleRecordReflection_TypedPath_RejectsUnbackedPRRef(t *testing.T) {
+	withFakeHome(t)
+	db := withBootstrapDB(t)
+
+	in := RecordReflectionInput{
+		ProjectPath: "/p",
+		Day:         "2026-05-26",
+		BodyJSON: &worklog.WWDPayload{
+			Service: "klyne",
+			Details: []worklog.WWDDetail{
+				{
+					Kind:     worklog.DetailKindShipped,
+					When:     "10:00",
+					Text:     "Shipped the labstack pipeline via PR #57",
+					Evidence: []string{"be8cc8c8"}, // does not contain "#57"
+				},
+			},
+		},
+	}
+	_, err := handleRecordReflection(context.Background(), db, in)
+	if err == nil {
+		t.Fatalf("expected error on unbacked PR ref")
+	}
+	if !strings.Contains(err.Error(), "PR #57") {
+		t.Errorf("expected diagnostic naming PR #57, got: %v", err)
+	}
+}
+
+// TestHandleRecordReflection_TypedPath_AcceptsBackedPRRef is the
+// converse: when the PR number is present in the detail's evidence
+// (typical: cited as a commit subject) the call succeeds.
+func TestHandleRecordReflection_TypedPath_AcceptsBackedPRRef(t *testing.T) {
+	withFakeHome(t)
+	db := withBootstrapDB(t)
+
+	in := RecordReflectionInput{
+		ProjectPath: "/p",
+		Day:         "2026-05-26",
+		BodyJSON: &worklog.WWDPayload{
+			Service: "klyne",
+			Details: []worklog.WWDDetail{
+				{
+					Kind:      worklog.DetailKindShipped,
+					When:      "10:00",
+					Text:      "Shipped the labstack pipeline via PR #57",
+					Evidence:  []string{"Merge PR #57: labstack pipeline", "be8cc8c8"},
+					SessionID: "s1",
+				},
+			},
+		},
+	}
+	out, err := handleRecordReflection(context.Background(), db, in)
+	if err != nil {
+		t.Fatalf("expected backed PR ref to pass tool layer, got: %v", err)
+	}
+	if out.ReflectionID == "" {
+		t.Errorf("expected non-empty reflection id on success")
+	}
+}
+
 func TestHandleRecordReflection_RejectsBadDay(t *testing.T) {
 	withFakeHome(t)
 	db := withBootstrapDB(t)

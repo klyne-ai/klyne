@@ -53,18 +53,31 @@ func NewWorklogReflectRunHandler(db *store.DB) *WorklogReflectRunHandler {
 	return &WorklogReflectRunHandler{db: db, runCmd: spawnClaudeReflect}
 }
 
-// reflectRunRequest is the POST body.
+// reflectRunRequest is the POST body. Day is optional — defaults to
+// today (server-local) — and is forwarded to the chained productivity
+// recompose call that runs after a successful reflect so the typed
+// What-was-done cards are re-derived for the correct day before the
+// UI reloads the dashboard.
 type reflectRunRequest struct {
 	ProjectPath string `json:"project_path"`
+	Day         string `json:"day,omitempty"`
 }
 
 // reflectRunResponse is what the UI renders inline.
+//
+// RecomposedCardCount is the number of typed What-was-done cards
+// re-derived after a successful reflect — zero when the reflect didn't
+// land any typed payload (legacy prose path) or when the chained
+// recompose call itself failed (which is logged-but-not-fatal: the
+// reflect already succeeded; the dashboard's next read will recompose
+// lazily).
 type reflectRunResponse struct {
-	ProjectPath string `json:"project_path"`
-	Status      string `json:"status"` // "ok" | "error" | "timeout"
-	Output      string `json:"output"`
-	DurationMs  int64  `json:"duration_ms"`
-	Error       string `json:"error,omitempty"`
+	ProjectPath         string `json:"project_path"`
+	Status              string `json:"status"` // "ok" | "error" | "timeout"
+	Output              string `json:"output"`
+	DurationMs          int64  `json:"duration_ms"`
+	Error               string `json:"error,omitempty"`
+	RecomposedCardCount int    `json:"recomposed_card_count,omitempty"`
 }
 
 // Run handles POST /worklog/reflect/run.
@@ -128,6 +141,39 @@ func (h *WorklogReflectRunHandler) Run(w http.ResponseWriter, r *http.Request) {
 		resp.Status = "error"
 		resp.Error = runErr.Error()
 	}
+
+	// On success, chain a typed What-was-done recompose for the day
+	// the reflect covered so the dashboard shows the new cards on the
+	// same UI round-trip. Day defaults to today (server-local) when
+	// the request omits it; an invalid day is treated as today so the
+	// chain never breaks the reflect's success status.
+	//
+	// Failure here is logged-but-not-fatal — the reflect already
+	// committed; the dashboard's lazy-recompose path picks the cards
+	// up on next read.
+	if resp.Status == "ok" {
+		dayStr := strings.TrimSpace(req.Day)
+		if dayStr == "" {
+			dayStr = time.Now().Local().Format("2006-01-02")
+		} else if _, err := time.ParseInLocation("2006-01-02", dayStr, time.Local); err != nil {
+			dayStr = time.Now().Local().Format("2006-01-02")
+		}
+		// Use a fresh background context for the chained recompose so
+		// the client closing the connection (e.g. a successful POST
+		// where the browser tears down the fetch) doesn't abort the
+		// persistence write.
+		recCtx, recCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer recCancel()
+		cards, recErr := RecomposeWhatWasDone(recCtx, h.db, req.ProjectPath, dayStr)
+		if recErr != nil {
+			// Surface as a server-log breadcrumb; do NOT mutate
+			// resp.Status — the reflect call itself succeeded.
+			fmt.Printf("worklog reflect: recompose chain failed for %s/%s: %v\n",
+				req.ProjectPath, dayStr, recErr)
+		}
+		resp.RecomposedCardCount = len(cards)
+	}
+
 	writeJSON(w, http.StatusOK, resp)
 }
 

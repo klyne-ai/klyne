@@ -135,6 +135,14 @@ func (m *Mounter) Mount(r chi.Router) {
 	r.Get(api.RouteProductivity, hProductivity.Get)
 	r.Get(api.RouteProductivityDates, hProductivity.Dates)
 
+	// POST /api/productivity/recompose — re-derive typed What-was-done
+	// cards from worklog_reflections.body_json for (project_path, day)
+	// and persist them into the day's productivity snapshot. Pure-Go
+	// composer, no LLM call; chained from /worklog/reflect/run after a
+	// successful reflect. See docs/plan/2026-05-26-wwd-typed-cards.md.
+	hProductivityRecompose := NewProductivityRecomposeHandler(m.deps.DB)
+	r.Post(api.RouteProductivityRecompose, hProductivityRecompose.Run)
+
 	// DELETE /api/projects — project-wide wipe of the worklog/decision/
 	// runbook/work-span/git-snapshot tables for a given project_path.
 	// Sessions and messages (the transcript layer) are preserved.

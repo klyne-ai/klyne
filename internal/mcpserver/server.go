@@ -175,14 +175,16 @@ Pure SQLite read — no AI call. The AI host (you) performs the synthesis and th
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "record_reflection",
-		Description: `Persist a synthesized DAILY reflection for a project (tier=1, "Daily reflection — YYYY-MM-DD"). Enforces the citation invariant — every insight must cite at least one entry session_id from the propose_reflection output.
+		Description: `Persist a synthesized DAILY reflection for a project (tier=1, "Daily reflection — YYYY-MM-DD"). Enforces the citation invariant — every insight/detail must cite at least one piece of evidence drawn LITERALLY from the source stop_summaries.
 
-Call this AFTER bucketing propose_reflection's entries by date and synthesizing per-day insights. Call it ONCE per distinct date — a single /klyne:reflect run may invoke it N times to catch up across N days.
+Call this AFTER bucketing propose_reflection's entries by date AND by service (the source project of each entry). For each (day, service) bucket, call this once. A single /klyne:reflect run may invoke it N×M times to catch up across N days × M services.
 
-Inputs:
+Inputs (two paths — supply exactly one of insights or body_json):
+
   - project_path (required) absolute project path
   - day (strongly recommended) YYYY-MM-DD in UTC, the calendar day this reflection covers. Omitting it files the reflection under today's UTC date, which is wrong for multi-day catch-up.
-  - insights ([{text, evidence: [session_id, ...]}, ...])`,
+  - body_json (TYPED PATH — preferred): the §1.1 "What was done" payload {service, details:[{kind, when, text, evidence, session_id}]}. kind ∈ {SHIPPED,MAJOR,FIXED,DECISION,INVESTIGATED,IN_PROGRESS}, when is HH:MM local, text ≤200 chars verb-led, evidence non-empty drawn literally from source entries, ≤6 details per bucket. A "PR #<n>" in text must have that "#<n>" appear in the same detail's evidence — otherwise the whole call is rejected.
+  - insights (PROSE PATH — legacy): [{text, evidence: [session_id, ...]}, ...]. The substrate-enrichment / open-loops / shipped-ledger sections still append automatically on this path.`,
 	}, HandleRecordReflection)
 
 	mcp.AddTool(srv, &mcp.Tool{
@@ -213,7 +215,7 @@ Inputs: text (required), optional project_path (defaults to cwd), optional sessi
 		Name: "list_decisions",
 		Description: `List recently recorded decisions, scoped by default to the current project.
 
-Use when the user asks "what did we decide about X?" or when you start a new task and want to recall prior choices. Returns up to `+"`limit`"+` rows sorted by recency. Pass all_projects=true to list across every project klyne has touched.`,
+Use when the user asks "what did we decide about X?" or when you start a new task and want to recall prior choices. Returns up to ` + "`limit`" + ` rows sorted by recency. Pass all_projects=true to list across every project klyne has touched.`,
 	}, HandleListDecisions)
 
 	mcp.AddTool(srv, &mcp.Tool{
