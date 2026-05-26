@@ -86,7 +86,12 @@
     const gen = ++generation;
     loading = true;
     try {
-      const res = await apiSearch(value, 25, 'relevance');
+      // Sort by recency (ts DESC), not FTS BM25 relevance. Users
+      // searching this palette expect "show me what I worked on" — most
+      // recent first — not "show me whatever the FTS scorer thinks is
+      // the closest lexical match." The previous 'relevance' value
+      // surfaced 12-day-old hits above 3-day-old ones for the same query.
+      const res = await apiSearch(value, 25, 'recent');
       if (gen !== generation) return; // stale
       hits = res.hits;
     } catch {
