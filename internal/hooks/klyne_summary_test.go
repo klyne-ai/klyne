@@ -111,6 +111,61 @@ func TestExtractKlyneSummary(t *testing.T) {
 			},
 			want: "",
 		},
+
+		// --- Recap-leakage guard (new) ---------------------------------
+		// Claude Code's per-turn recap generator runs as a separate model
+		// call, picks up the same UserPromptSubmit instruction klyne
+		// injects, and emits `KLYNE_SUMMARY: skip` because the recap
+		// turn is trivial. That message lands AFTER the user's real
+		// assistant reply in the transcript, with no user message
+		// between them. The naive last-wins parser then prefers the
+		// recap's skip over the user's authoritative summary, silently
+		// losing it from stop_summaries.ai_drafted_summary.
+		//
+		// Fix: when consecutive assistant messages span a real summary
+		// followed by skip(s), the real summary wins. A user message
+		// resets the scope — a skip AFTER a new user prompt is an
+		// intentional skip for that new turn, not a recap artifact.
+		{
+			name: "recap leakage: real summary followed by recap skip — real wins",
+			msgs: []*connectors.Message{
+				{Role: connectors.RoleUser, Content: "do work"},
+				{Role: connectors.RoleAssistant, Content: "Did it.\n\nKLYNE_SUMMARY: Did the thing."},
+				{Role: connectors.RoleAssistant, Content: "* recap: paragraph from claude code\nKLYNE_SUMMARY: skip"},
+			},
+			want: "Did the thing.",
+		},
+		{
+			name: "recap leakage: multiple consecutive skips walk back to real",
+			msgs: []*connectors.Message{
+				{Role: connectors.RoleAssistant, Content: "Did it.\nKLYNE_SUMMARY: Real summary."},
+				{Role: connectors.RoleAssistant, Content: "KLYNE_SUMMARY: skip"},
+				{Role: connectors.RoleAssistant, Content: "KLYNE_SUMMARY: skip"},
+			},
+			want: "Real summary.",
+		},
+		{
+			name: "skip after a user message is intentional (not recap leakage)",
+			msgs: []*connectors.Message{
+				{Role: connectors.RoleAssistant, Content: "KLYNE_SUMMARY: Old turn real."},
+				{Role: connectors.RoleUser, Content: "ok now do something trivial"},
+				{Role: connectors.RoleAssistant, Content: "Nothing actionable.\nKLYNE_SUMMARY: skip"},
+			},
+			want: "",
+		},
+		{
+			name: "recap leakage: missing-summary message between real and skip still resolves to real",
+			// The middle message has neither real summary nor explicit
+			// skip — but we still walk past it to find the real one.
+			// Without this, a future Claude Code recap that doesn't
+			// emit KLYNE_SUMMARY at all would shadow the real summary.
+			msgs: []*connectors.Message{
+				{Role: connectors.RoleAssistant, Content: "KLYNE_SUMMARY: The real one."},
+				{Role: connectors.RoleAssistant, Content: "some text but no summary line"},
+				{Role: connectors.RoleAssistant, Content: "KLYNE_SUMMARY: skip"},
+			},
+			want: "The real one.",
+		},
 	}
 
 	for _, tc := range tests {

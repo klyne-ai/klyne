@@ -95,33 +95,61 @@ func hasFinalAssistantText(snap *mcpserver.SessionSnapshot) bool {
 }
 
 
-// extractKlyneSummary scans msgs (in reverse) for the most recent
-// assistant message and returns its trailing `KLYNE_SUMMARY: ...`
-// payload. Returns "" when the line is missing, says "skip", or the
-// capture is empty. The match is taken from the LAST occurrence so
-// an interrupted earlier draft doesn't shadow the final answer.
+// extractKlyneSummary scans msgs (in reverse) for the assistant's
+// trailing `KLYNE_SUMMARY: ...` payload and returns it.
+//
+// Recap-leakage guard: Claude Code's per-turn recap generator runs as a
+// separate model call that picks up the same UserPromptSubmit hook
+// injection klyne emits, and dutifully responds with `KLYNE_SUMMARY:
+// skip` because the recap turn is trivial. That message lands AFTER
+// the user's real assistant reply in the transcript — same turn, no
+// user message between — and the naive last-wins parser used to prefer
+// the recap's skip over the user's authoritative summary, silently
+// losing it from stop_summaries.ai_drafted_summary.
+//
+// The fix: scan back through CONSECUTIVE assistant messages and prefer
+// any real (non-skip) summary over an intervening skip / missing line.
+// A user message resets the scope — a skip emitted AFTER a new user
+// prompt is an intentional skip for that new turn, not a recap
+// artifact.
+//
+// Returns "" when no real summary is found within the current turn's
+// assistant span, or when the captured text is empty.
 func extractKlyneSummary(msgs []*connectors.Message) string {
 	for i := len(msgs) - 1; i >= 0; i-- {
 		m := msgs[i]
-		if m == nil || m.Role != connectors.RoleAssistant {
+		if m == nil {
+			continue
+		}
+		// Crossing a user message ends the current turn's assistant
+		// span — anything before this is a prior turn.
+		if m.Role == connectors.RoleUser {
+			return ""
+		}
+		if m.Role != connectors.RoleAssistant {
 			continue
 		}
 		body := m.Content
 		if body == "" {
-			// First assistant message with non-empty text wins;
-			// pure tool-call turns have empty Content and are skipped.
+			// Tool-call-only assistant turns have empty Content;
+			// keep scanning. Same as the original behaviour.
 			continue
 		}
 		matches := klyneSummaryRe.FindAllStringSubmatch(body, -1)
 		if len(matches) == 0 {
-			return ""
+			// Message has prose but no KLYNE_SUMMARY line. Keep
+			// scanning back — a later recap-style message that
+			// dropped the summary entirely shouldn't shadow a
+			// real summary further back in the same turn.
+			continue
 		}
 		raw := strings.TrimSpace(matches[len(matches)-1][1])
-		if raw == "" {
-			return ""
-		}
-		if strings.EqualFold(raw, "skip") {
-			return ""
+		if raw == "" || strings.EqualFold(raw, "skip") {
+			// Skip or empty-capture in this message; treat it as
+			// possible recap leakage and keep scanning. If we hit
+			// a user message (turn boundary) or run out of
+			// assistant messages, the loop's exit paths return "".
+			continue
 		}
 		if len(raw) > klyneSummaryMaxLen {
 			raw = raw[:klyneSummaryMaxLen]
