@@ -44,13 +44,24 @@ type WorklogReflectRunHandler struct {
 	// the handler can be exercised without a real `claude` binary on
 	// the test runner.
 	runCmd func(ctx context.Context, projectPath string) ([]byte, error)
+	// runSyncCmd spawns the SECOND LLM pass (/klyne:productivity-sync)
+	// after a successful reflect so the dashboard's "Run /klyne:reflect
+	// now" button does reflect → sync invisibly. Tests override this to
+	// avoid the real `claude` binary; nil means "skip the second pass"
+	// (which keeps tests focused on the first pass without forcing
+	// every test to stub two spawns).
+	runSyncCmd func(ctx context.Context, projectPath, day string) ([]byte, error)
 }
 
 // NewWorklogReflectRunHandler constructs a handler that shells out via
 // the real `claude` CLI. Tests should construct the struct literal
 // directly to supply a stub runCmd.
 func NewWorklogReflectRunHandler(db *store.DB) *WorklogReflectRunHandler {
-	return &WorklogReflectRunHandler{db: db, runCmd: spawnClaudeReflect}
+	return &WorklogReflectRunHandler{
+		db:         db,
+		runCmd:     spawnClaudeReflect,
+		runSyncCmd: spawnClaudeProductivitySync,
+	}
 }
 
 // reflectRunRequest is the POST body. Day is optional — defaults to
@@ -78,6 +89,17 @@ type reflectRunResponse struct {
 	DurationMs          int64  `json:"duration_ms"`
 	Error               string `json:"error,omitempty"`
 	RecomposedCardCount int    `json:"recomposed_card_count,omitempty"`
+	// LLMCompileStatus surfaces the outcome of the chained second-pass
+	// /klyne:productivity-sync call: "ok" when the LLM-compiled cards
+	// landed, "skipped" when the chain was disabled (e.g. tests),
+	// "timeout" when the 5-min cap fired, "error" when the spawn
+	// itself failed. The reflect status is unchanged regardless —
+	// the deterministic recompose already ran so the dashboard is
+	// never blank.
+	LLMCompileStatus string `json:"llm_compile_status,omitempty"`
+	// LLMCompileError, when non-empty, is the spawn error surfaced
+	// for diagnostics. Mirrors Error but isolated to the second-pass.
+	LLMCompileError string `json:"llm_compile_error,omitempty"`
 }
 
 // Run handles POST /worklog/reflect/run.
@@ -172,6 +194,37 @@ func (h *WorklogReflectRunHandler) Run(w http.ResponseWriter, r *http.Request) {
 				req.ProjectPath, dayStr, recErr)
 		}
 		resp.RecomposedCardCount = len(cards)
+
+		// Chain the SECOND LLM pass — /klyne:productivity-sync — so the
+		// dashboard's "Run /klyne:reflect now" button delivers the
+		// compiled (LLM-authored) cards on the same UI round-trip. The
+		// deterministic recompose above already ran, so even if this
+		// second pass fails or times out the dashboard renders something
+		// — only the `llm_compiled` badge will be absent until the next
+		// successful compile.
+		//
+		// nil runSyncCmd means tests opted out of the second pass; mark
+		// status="skipped" so production wiring is observable in tests
+		// without forcing them to stub two spawns.
+		if h.runSyncCmd == nil {
+			resp.LLMCompileStatus = "skipped"
+		} else {
+			syncCtx, syncCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			_, syncErr := h.runSyncCmd(syncCtx, req.ProjectPath, dayStr)
+			switch {
+			case syncErr == nil:
+				resp.LLMCompileStatus = "ok"
+			case syncCtx.Err() == context.DeadlineExceeded:
+				resp.LLMCompileStatus = "timeout"
+				resp.LLMCompileError = "second-pass subprocess exceeded 5m budget"
+			default:
+				resp.LLMCompileStatus = "error"
+				resp.LLMCompileError = syncErr.Error()
+				fmt.Printf("worklog reflect: productivity-sync chain failed for %s/%s: %v\n",
+					req.ProjectPath, dayStr, syncErr)
+			}
+			syncCancel()
+		}
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -229,12 +282,20 @@ func spawnClaudeReflect(ctx context.Context, projectPath string) ([]byte, error)
 		return nil, fmt.Errorf("reflect-run: close mcp-config temp: %w", err)
 	}
 
+	// Pin the model to Sonnet 4.6 for reflection synthesis. Reflection is
+	// a structured-output task (typed body_json per spec §1.1) where Sonnet
+	// is both sufficient and ~5x cheaper than Opus. Users running `claude`
+	// interactively keep their own model preference; this only binds the
+	// daemon-spawned subprocess.
+	const reflectModel = "claude-sonnet-4-6"
+
 	// Layout: every other flag first, --mcp-config dead last with `--`
 	// before the prompt. claude treats --mcp-config as variadic
 	// (<configs...>) and will greedily swallow every following token
 	// — including /klyne:reflect — unless `--` forces an end of flags.
 	cmd := exec.CommandContext(ctx, "claude",
 		"-p",
+		"--model", reflectModel,
 		"--permission-mode", "bypassPermissions",
 		"--mcp-config", f.Name(),
 		"--",

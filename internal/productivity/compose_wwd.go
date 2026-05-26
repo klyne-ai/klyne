@@ -1,3 +1,37 @@
+// ComposeWWD — cold-start / legacy fallback (LLM-pass-1 only).
+//
+// HISTORY: This file is the FIRST-pass deterministic composer. It reads
+// the typed worklog_reflections rows that the first LLM pass
+// (/klyne:reflect) wrote and templates a card from them — Tier 1
+// counts/TLDR are mechanical, Tier 2 details are passed through
+// verbatim. The result has WhatWasDoneCard.LLMCompiled == false.
+//
+// The CANONICAL "What was done" card is now produced by the second LLM
+// pass (/klyne:productivity-sync, spec
+// docs/plan/2026-05-26-wwd-typed-cards.md) which writes cohesive
+// Sonnet-authored prose into Tier 1 TLDR and (optionally) refines
+// detail wording. That second pass persists its card via
+// productivity.PersistLLMCompiledCard with LLMCompiled == true, and
+// the productivity GET handler serves it AS-IS — ComposeWWD is NOT
+// re-invoked at read time for services that have an LLM-compiled card.
+//
+// ComposeWWD remains in play for two cases:
+//
+//  1. Cold start: a project+day has typed reflection rows but the
+//     second LLM pass has not yet run. The dashboard lazy-composes via
+//     this function so the panel renders something deterministic
+//     immediately (LLMCompiled=false; the UI shows no "sonnet · auto"
+//     badge).
+//
+//  2. Legacy days: a project+day was filed before /klyne:productivity-
+//     sync existed. POST /api/productivity/compile can be invoked to
+//     run the LLM pass on demand; until that fires this composer is
+//     the only path to a card.
+//
+// Hard determinism boundary (spec §7.1) still applies here: this
+// function calls NO LLM, makes NO network requests, and depends only
+// on the rows it is passed. Tier 1 fields are derived from Tier 2
+// details by counting and regex.
 package productivity
 
 import (
@@ -158,6 +192,19 @@ func sortDetails(details []WWDDetail) []WWDDetail {
 		return out[i].When > out[j].When
 	})
 	return out
+}
+
+// BuildMechanicalTier1 is the exported §1.2 derivation: given an
+// already-ordered Tier 2 detail list, return the deterministic
+// headline row. Useful for the second LLM pass which authors the
+// `tier1.tldr` prose but lets Go compute the pill_counts / top_evidence
+// / turn_count / commit_count from the same details.
+//
+// Callers that want the templated TLDR too should use ComposeWWD.
+// Callers that want to keep their OWN LLM-authored TLDR string should
+// take this Tier 1 and overwrite its TLDR field.
+func BuildMechanicalTier1(details []WWDDetail) WWDTier1 {
+	return buildTier1(sortDetails(details))
 }
 
 // buildTier1 derives the §1.2 deterministic headline row from the

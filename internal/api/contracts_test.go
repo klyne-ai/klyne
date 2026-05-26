@@ -55,6 +55,7 @@ func TestAllRoutesContainsExpected(t *testing.T) {
 		RouteProductivity,
 		RouteProductivityDates,
 		RouteProductivityRecompose,
+		RouteProductivityCompile,
 		RouteProjectDelete,
 	}
 	got := AllRoutes()

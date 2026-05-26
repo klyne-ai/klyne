@@ -93,6 +93,18 @@ const (
 	// /worklog/reflect/run after a successful reflect so the dashboard
 	// shows the new cards on the same UI round-trip.
 	RouteProductivityRecompose = "/api/productivity/recompose"
+	// RouteProductivityCompile: POST /api/productivity/compile.
+	// Spawns `claude -p /klyne:productivity-sync` for (project_path,
+	// day) — the SECOND LLM pass that reads the typed reflection rows
+	// the first pass wrote and persists a Sonnet-compiled
+	// WhatWasDoneCard with llm_compiled=true. Same security gating as
+	// /worklog/reflect/run (same-origin, project_path allowlist, 5-min
+	// timeout). Useful when reflection rows exist but no compiled card
+	// does (legacy day, user wants to re-sync without re-running
+	// reflection). The compile is also chained automatically from
+	// /worklog/reflect/run so the UI's existing "Run /klyne:reflect now"
+	// button does reflect → sync in one round-trip.
+	RouteProductivityCompile = "/api/productivity/compile"
 	// RouteProjectDelete: DELETE /api/projects?path=<abs>&dry_run=true|false.
 	// Wipes (or counts, in dry-run mode) every project-scoped row across
 	// stop_summaries, worklog_reflections, decisions, runbook_dismissals,
@@ -131,6 +143,7 @@ func AllRoutes() []string {
 		RouteProductivity,
 		RouteProductivityDates,
 		RouteProductivityRecompose,
+		RouteProductivityCompile,
 		RouteProjectDelete,
 	}
 }

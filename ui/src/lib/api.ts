@@ -617,6 +617,17 @@ export interface WhatWasDoneCard {
      */
     details: WWDDetail[];
   };
+  /**
+   * True when the card's `tier1.tldr` and (optionally refined) detail
+   * prose were authored by the second-pass Sonnet
+   * `/klyne:productivity-sync` compiler. False when the card was
+   * lazily composed from typed reflection rows by the deterministic
+   * Go fallback (cold start / legacy days). The UI surfaces a tiny
+   * `sonnet · auto` badge next to the service name on
+   * `llm_compiled === true` cards so the user can tell which prose
+   * is machine-authored vs deterministic templated.
+   */
+  llm_compiled: boolean;
 }
 export interface ProductivityService {
   repo: string;

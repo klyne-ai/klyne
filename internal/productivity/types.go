@@ -264,12 +264,22 @@ type WWDTier1 struct {
 // (no per-render sort). The composer drops legacy reflection rows
 // (BodyJSON empty) so cards are only emitted for services whose
 // reflections opted into the typed payload.
+//
+// LLMCompiled is true when the card's `tier1.tldr` and (optionally
+// refined) detail prose were written by the second-pass Sonnet
+// /klyne:productivity-sync compiler and persisted via
+// productivity.PersistLLMCompiledCard. False when the card was lazily
+// composed from typed reflection rows by the deterministic ComposeWWD
+// fallback. The UI surfaces a tiny "sonnet · auto" badge on
+// LLM-compiled cards so the user can tell which prose is machine-
+// authored vs deterministic templated.
 type WhatWasDoneCard struct {
 	Service string   `json:"service"`
 	Tier1   WWDTier1 `json:"tier1"`
 	Tier2   struct {
 		Details []WWDDetail `json:"details"`
 	} `json:"tier2"`
+	LLMCompiled bool `json:"llm_compiled"`
 }
 
 // ReflectionGroup is one worklog_reflections row in the

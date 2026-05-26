@@ -188,6 +188,26 @@ Inputs (two paths — supply exactly one of insights or body_json):
 	}, HandleRecordReflection)
 
 	mcp.AddTool(srv, &mcp.Tool{
+		Name: "list_typed_reflections",
+		Description: `Return every worklog_reflections row for (project_path, day) whose body_json carries a typed What-was-done payload, parsed.
+
+The second-pass /klyne:productivity-sync slash command calls this to read every typed reflection the first-pass /klyne:reflect produced for the day. Each row carries reflection_id, ts (epoch-ms), day (the COVERED day, not write-ts), project_path, and the parsed body_json payload (service + details[]).
+
+Legacy prose-only rows (no body_json) are skipped — the second pass operates strictly on the typed substrate.
+
+Inputs: project_path (required), day (required, local YYYY-MM-DD). When no typed rows exist the response is { "rows": [] } and the slash command must report "nothing to compile" and stop (the C1 no-op).`,
+	}, HandleListTypedReflections)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name: "record_productivity_card",
+		Description: `Persist a Sonnet-authored What-was-done service card for (project_path, day, service). The second LLM pass owns ONLY the tier1_tldr prose and the details[] wording; pill_counts / top_evidence / turn_count / commit_count are computed deterministically from details by Go and persisted under llm_compiled=true.
+
+Call ONCE per service in a /klyne:productivity-sync run. Validation mirrors record_reflection's typed path: tier1_tldr ≤120 chars (one verb-led sentence), each detail's evidence non-empty (§5 citation invariant), text containing "PR #<n>" must have that "#<n>" in the same detail's evidence (otherwise the call is rejected, not stripped).
+
+Inputs: project_path (required), day (required, local YYYY-MM-DD), service (required — the §1.1 service key, typically the project basename), tier1_tldr (required, ≤120 chars), details (required, ordered SHIPPED→MAJOR→FIXED→DECISION→INVESTIGATED→IN_PROGRESS, each with kind/when/text/evidence/session_id).`,
+	}, HandleRecordProductivityCard)
+
+	mcp.AddTool(srv, &mcp.Tool{
 		Name: "code_review_context",
 		Description: `Surface the optional code-review-graph enrichment for a repository.
 

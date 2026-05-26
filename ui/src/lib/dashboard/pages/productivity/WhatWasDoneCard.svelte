@@ -90,6 +90,9 @@
 <article class="wwd-card">
   <header class="wwd-head">
     <span class="mono wwd-service">{card.service}</span>
+    {#if card.llm_compiled}
+      <span class="wwd-sonnet-badge mono" title="Card composed by /klyne:productivity-sync (Sonnet)">sonnet · auto</span>
+    {/if}
     <div class="wwd-pills">
       {#each pillRows as r (r.key)}
         <span class="pill pill-{r.tone} wwd-pill">{r.count} {r.label}</span>
@@ -223,6 +226,17 @@
     font-size: 13px;
     font-weight: 600;
     letter-spacing: 0.01em;
+  }
+  .wwd-sonnet-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 10px;
+    letter-spacing: 0.04em;
+    color: var(--accent);
+    border: 1px solid color-mix(in oklch, var(--accent) 35%, transparent);
+    background: color-mix(in oklch, var(--accent) 8%, var(--bg-card-2));
   }
   .wwd-pills {
     display: flex;

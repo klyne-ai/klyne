@@ -143,6 +143,16 @@ func (m *Mounter) Mount(r chi.Router) {
 	hProductivityRecompose := NewProductivityRecomposeHandler(m.deps.DB)
 	r.Post(api.RouteProductivityRecompose, hProductivityRecompose.Run)
 
+	// POST /api/productivity/compile — second LLM pass. Spawns
+	// `claude -p /klyne:productivity-sync` for (project_path, day) so
+	// Sonnet can compile cohesive WhatWasDoneCards from the typed
+	// reflection rows the first pass wrote. Same allowlist + same-
+	// origin + 5-min timeout guards as /worklog/reflect/run; only
+	// emitted when the user explicitly wants to re-sync a day (or
+	// chained internally after a successful reflect).
+	hProductivityCompile := NewProductivityCompileHandler(m.deps.DB)
+	r.Post(api.RouteProductivityCompile, hProductivityCompile.Run)
+
 	// DELETE /api/projects — project-wide wipe of the worklog/decision/
 	// runbook/work-span/git-snapshot tables for a given project_path.
 	// Sessions and messages (the transcript layer) are preserved.
