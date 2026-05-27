@@ -188,6 +188,17 @@ Inputs (two paths — supply exactly one of insights or body_json):
 	}, HandleRecordReflection)
 
 	mcp.AddTool(srv, &mcp.Tool{
+		Name: "list_stop_summaries_for_day",
+		Description: `Return every stop_summary row for (project_path, day) — the RAW L1 ground-truth data the daemon's Stop hook captured per Claude/Codex session.
+
+Used by the v2 /klyne:productivity-sync prompt to synthesize narrative cards directly from L1 (bypassing the L3 reflection layer which can drop coverage). Each row carries: session_id, ts, cli, recap_visible, importance, recap_topic, last_user, last_bash, files (parsed from files_json), and ai_drafted_summary (the per-turn prose the assistant emitted via the KLYNE_SUMMARY instruction).
+
+Defaults to include_suppressed=true so the LLM sees every turn — many real work turns (investigations, push-only turns, sub-90s edits) get recap_visible=0 from the upstream suppression rules, but their ai_drafted_summary still describes real engineering work. The LLM filters tool-only meta turns ("Ran /klyne:reflect…", "Compiled N productivity cards…") itself.
+
+Inputs: project_path (required), day (required, local YYYY-MM-DD), include_suppressed (optional, default true).`,
+	}, HandleListStopSummariesForDay)
+
+	mcp.AddTool(srv, &mcp.Tool{
 		Name: "list_typed_reflections",
 		Description: `Return every worklog_reflections row for (project_path, day) whose body_json carries a typed What-was-done payload, parsed.
 
@@ -200,11 +211,13 @@ Inputs: project_path (required), day (required, local YYYY-MM-DD). When no typed
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "record_productivity_card",
-		Description: `Persist a Sonnet-authored What-was-done service card for (project_path, day, service). The second LLM pass owns ONLY the tier1_tldr prose and the details[] wording; pill_counts / top_evidence / turn_count / commit_count are computed deterministically from details by Go and persisted under llm_compiled=true.
+		Description: `Persist a Sonnet-authored What-was-done service card for (project_path, day, service). Two accepted payload shapes:
 
-Call ONCE per service in a /klyne:productivity-sync run. Validation mirrors record_reflection's typed path: tier1_tldr ≤120 chars (one verb-led sentence), each detail's evidence non-empty (§5 citation invariant), text containing "PR #<n>" must have that "#<n>" in the same detail's evidence (otherwise the call is rejected, not stripped).
+V2 NARRATIVE (preferred for the redesigned dashboard layout): pass service_summary (1-2 sentence paragraph) + cards (one per (ticket, kind) — same ticket may appear under SHIPPED AND FIXED) + optional followup. Each card has kind ∈ {SHIPPED,MAJOR,FIXED,DECISION,INVESTIGATED,IN_PROGRESS}, an optional ticket_id (e.g. CLI-1473), a ≤160-char outcome-led title (NOT verb-led — describe what the change IS, e.g. "OPD payment gate removed"), a ≤1200-char markdown body (2-4 sentences of narrative prose: what was broken, what changed, verification status), and typed refs[] {type ∈ {file,branch,pr,commit,ticket,test,session}, text:literal-from-source}. A "PR #<n>" mentioned in body or title MUST appear as a ref with type=pr.
 
-Inputs: project_path (required), day (required, local YYYY-MM-DD), service (required — the §1.1 service key, typically the project basename), tier1_tldr (required, ≤120 chars), details (required, ordered SHIPPED→MAJOR→FIXED→DECISION→INVESTIGATED→IN_PROGRESS, each with kind/when/text/evidence/session_id).`,
+V1 LEGACY (back-compat): pass tier1_tldr (≤120 chars, verb-led) + details (≤6 entries, each with kind/when:HH:MM/text:≤200/evidence:non-empty/session_id). PR-#<n> in detail.text must appear in detail.evidence.
+
+Inputs: project_path (required), day (required, local YYYY-MM-DD), service (required — the service key, typically the project basename), THEN EITHER v2 fields (service_summary + cards + optional followup) OR v1 fields (tier1_tldr + details). Call ONCE per service in a /klyne:productivity-sync run.`,
 	}, HandleRecordProductivityCard)
 
 	mcp.AddTool(srv, &mcp.Tool{

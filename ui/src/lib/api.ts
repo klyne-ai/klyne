@@ -514,6 +514,56 @@ export async function fetchProductivityDates(): Promise<ProductivityDatesRespons
   return get<ProductivityDatesResponse>('/api/productivity/dates');
 }
 
+/**
+ * GET /api/klyne-usage?day=YYYY-MM-DD — per-day breakdown of tokens
+ * spent by klyne's own LLM subprocesses (productivity-sync, reflect)
+ * vs the user's full-day Claude usage. Tokens only; no USD by design.
+ */
+export async function fetchKlyneUsage(day?: string): Promise<KlyneUsageResponse> {
+  return get<KlyneUsageResponse>('/api/klyne-usage', { day });
+}
+
+export interface KlyneUsageOpBreakdown {
+  operation: string;
+  runs: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  total_tokens: number;
+  duration_ms: number;
+}
+
+export interface KlyneUsageKlyne {
+  day: string;
+  runs: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  total_tokens: number;
+  duration_ms: number;
+  by_operation: KlyneUsageOpBreakdown[];
+}
+
+export interface KlyneUsageUserTotal {
+  day: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  total_tokens: number;
+  message_count: number;
+}
+
+export interface KlyneUsageResponse {
+  day: string;
+  klyne: KlyneUsageKlyne;
+  user_total: KlyneUsageUserTotal;
+  /** Rounded to one decimal place; 0 when user_total.total_tokens == 0. */
+  share_pct: number;
+}
+
 export interface ProductivityDatesResponse {
   days: string[];
   min_day?: string;
@@ -653,12 +703,58 @@ export interface WhatWasDoneCard {
    * prose were authored by the second-pass Sonnet
    * `/klyne:productivity-sync` compiler. False when the card was
    * lazily composed from typed reflection rows by the deterministic
-   * Go fallback (cold start / legacy days). The UI surfaces a tiny
-   * `sonnet · auto` badge next to the service name on
-   * `llm_compiled === true` cards so the user can tell which prose
-   * is machine-authored vs deterministic templated.
+   * Go fallback (cold start / legacy days).
    */
   llm_compiled: boolean;
+  /**
+   * V2 narrative payload (2026-05-27 redesign). When present the
+   * dashboard prefers this over tier1/tier2 — stat tiles, summary
+   * paragraph, sectioned per-ticket cards with prose bodies + typed
+   * refs. Absent on legacy llm_compiled=true rows or deterministic
+   * fallback cards.
+   */
+  narrative?: WWDNarrative | null;
+}
+
+/**
+ * V2 narrative payload — what the redesigned dashboard renders.
+ * One service summary paragraph, per-kind stat counts, and N
+ * narrative cards each grouped by (ticket, kind).
+ */
+export interface WWDNarrative {
+  /** 1-2 sentence service-level theme paragraph. May be absent. */
+  summary?: string;
+  /** Per-kind counts shown as stat tiles. */
+  stats: WWDStats;
+  /** Ordered narrative cards. */
+  cards: WWDNarrativeCard[];
+  /** Optional "open question for tomorrow" line. */
+  followup?: string;
+}
+
+export interface WWDStats {
+  shipped: number;
+  fixed: number;
+  decisions: number;
+  investigated: number;
+  in_progress?: number;
+}
+
+export interface WWDNarrativeCard {
+  kind: WWDKind;
+  /** CLI-NNNN — absent for ticket-less work. */
+  ticket_id?: string;
+  /** Outcome-led headline, ≤160 chars. */
+  title: string;
+  /** Markdown prose narrative (2-4 sentences), ≤1200 chars. */
+  body: string;
+  /** Typed reference tokens drawn LITERALLY from the source rows. */
+  refs?: WWDRef[];
+}
+
+export interface WWDRef {
+  type: 'file' | 'branch' | 'pr' | 'commit' | 'ticket' | 'test' | 'session';
+  text: string;
 }
 export interface ProductivityService {
   repo: string;

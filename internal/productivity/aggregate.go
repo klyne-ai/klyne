@@ -203,6 +203,16 @@ func AggregateReports(reports []Report, day string) Report {
 			if s.GitFetchedAt.After(a.svc.GitFetchedAt) {
 				a.svc.GitFetchedAt = s.GitFetchedAt
 			}
+			// WhatWasDone: preserve the per-day card across the aggregate
+			// (single-day reports lose it otherwise — the bug behind
+			// "narrative=null in API response" on yesterday's view). When
+			// multiple days have cards for the same service, prefer the
+			// one with the most content (narrative > tier2 details count).
+			if s.WhatWasDone != nil {
+				if a.svc.WhatWasDone == nil || wwdContentScore(s.WhatWasDone) > wwdContentScore(a.svc.WhatWasDone) {
+					a.svc.WhatWasDone = s.WhatWasDone
+				}
+			}
 		}
 	}
 
@@ -274,6 +284,28 @@ func AggregateReports(reports []Report, day string) Report {
 	}
 
 	return out
+}
+
+// wwdContentScore ranks a WhatWasDoneCard by content richness so the
+// aggregator picks the best card when multiple days have one for the
+// same service. v2 narrative cards (Narrative.Cards) always outrank v1
+// detail-only cards; within v2 the card with more entries wins.
+func wwdContentScore(c *WhatWasDoneCard) int {
+	if c == nil {
+		return 0
+	}
+	score := 0
+	if c.Narrative != nil {
+		score += 1000 + len(c.Narrative.Cards)*10
+		if c.Narrative.Summary != "" {
+			score += 5
+		}
+	}
+	score += len(c.Tier2.Details)
+	if c.LLMCompiled {
+		score += 50
+	}
+	return score
 }
 
 // hasAnyReflection — true when the day's report carries at least one

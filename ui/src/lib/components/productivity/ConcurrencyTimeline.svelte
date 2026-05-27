@@ -3,19 +3,25 @@
 
   Renders one slim 7px bar per session active-interval, arranged
   across 7 lanes (modulo session index) so overlapping sessions
-  visually stack. Repo color follows the V4 mapping:
-    operations-app → ok (green)
-    klyne          → info (blue)
-    oms-service    → warn (amber)
-    doc            → accent (gold)
-    other          → fg-dim
-  Hour ticks render as faint vertical dividers + axis labels.
+  visually stack.
+
+  Per-repo colors (2026-05-27 rewrite): assigned by sorted-position
+  through an 8-slot palette so distinct repos in the same render
+  never collide. Hash-based fallback only kicks in past the 8th
+  service (rare).
+
+  Legend chips are CLICKABLE — clicking a chip filters the canvas
+  to just that service's intervals. Click the same chip again to
+  deselect; click a second/third chip to AND-multi-select. The
+  filtered-out bars dim to a low-contrast trace so the silhouette
+  of the day stays visible, but only the selected repos are
+  fully painted.
 
   Hovering a bar opens a small styled floating tooltip (instant —
   not the native ~1s `title`) showing the repo, duration, and the
   clock time range. The tooltip is portaled to <body> so it isn't
   trapped by the dashboard `.page` element's fadeUp animation
-  containing block (same root cause as the modal portal fix).
+  containing block.
 -->
 <script lang="ts">
   import type { ProductivitySessionStat } from '$lib/api.js';
@@ -28,20 +34,80 @@
   }
   let { sessions, since, until }: Props = $props();
 
-  // Stable per-repo color from a small palette. Hashes the repo name so
-  // the same repo always lands on the same color across reloads without
-  // hardcoding any project's names (OSS — the old fallback to
-  // `--fg-dim` rendered every unrecognised repo as low-contrast grey,
-  // which is the only experience anyone outside our team would have).
-  const REPO_PALETTE = ['--ok', '--info', '--warn', '--accent', '--ad-claude', '--ad-codex'] as const;
+  // Per-repo color palette (2026-05-27 v2 rewrite): hand-picked OKLCH
+  // values with hues spaced ≥40° apart on the color wheel so adjacent
+  // services are PERCEPTUALLY distinct, not just nominally different.
+  // The previous palette routed three services through warm tones in a
+  // 20° hue band (--warn:75 / --accent:80 / --ad-claude:60), which read
+  // as the same color to most users. These slots stay stable across
+  // reloads because assignment is by sorted-repo index.
+  //
+  // Hues chosen (in render order):
+  //   150 green · 230 blue · 290 purple · 30 red ·
+  //    75 yellow · 330 magenta · 190 cyan · 15 coral
+  const REPO_PALETTE = [
+    'oklch(0.74 0.13 150)',  // green   — slot 0
+    'oklch(0.75 0.13 230)',  // blue    — slot 1
+    'oklch(0.78 0.14 290)',  // purple  — slot 2
+    'oklch(0.70 0.16  30)',  // red     — slot 3
+    'oklch(0.82 0.15  90)',  // yellow  — slot 4 (slightly more saturated than --warn)
+    'oklch(0.74 0.16 330)',  // magenta — slot 5
+    'oklch(0.75 0.12 190)',  // cyan    — slot 6
+    'oklch(0.72 0.14  15)',  // coral   — slot 7
+  ] as const;
+
+  const palette = $derived.by(() => {
+    const repos = new Set<string>();
+    for (const s of sessions ?? []) {
+      const r = (s.repo || '').toLowerCase();
+      if (r) repos.add(r);
+    }
+    const sorted = Array.from(repos).sort();
+    const map = new Map<string, string>();
+    sorted.forEach((r, i) => {
+      const slot = i < REPO_PALETTE.length
+        ? REPO_PALETTE[i]
+        // Past the 8-slot palette, hash to distribute the overflow.
+        : REPO_PALETTE[hashSlot(r)];
+      map.set(r, slot);
+    });
+    return map;
+  });
+
+  function hashSlot(s: string): number {
+    let h = 5381;
+    for (let i = 0; i < s.length; i++) h = (((h << 5) + h) + s.charCodeAt(i)) | 0;
+    return Math.abs(h) % REPO_PALETTE.length;
+  }
   function repoColor(repo: string): string {
     const r = (repo || '').toLowerCase();
     if (!r) return 'var(--fg-dim)';
-    // djb2 — small, stable, decent distribution for short strings.
-    let h = 5381;
-    for (let i = 0; i < r.length; i++) h = (((h << 5) + h) + r.charCodeAt(i)) | 0;
-    const idx = Math.abs(h) % REPO_PALETTE.length;
-    return `var(${REPO_PALETTE[idx]})`;
+    return palette.get(r) ?? 'var(--fg-dim)';
+  }
+
+  // ── Selection state ──────────────────────────────────────────────
+  // Empty set = "no filter, show all repos at full opacity."
+  // Non-empty set = "only these repos are highlighted; everything else
+  // drops to a low-contrast trace."
+  let selected = $state<Set<string>>(new Set());
+
+  function toggleSelected(repo: string): void {
+    const next = new Set(selected);
+    const key = repo.toLowerCase();
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    selected = next;
+  }
+  function clearSelected(): void {
+    if (selected.size > 0) selected = new Set();
+  }
+  function isSelected(repo: string): boolean {
+    return selected.has((repo || '').toLowerCase());
+  }
+  // True when the filter is active AND the repo is NOT in the
+  // selection — controls bar dimming.
+  function isFiltered(repo: string): boolean {
+    return selected.size > 0 && !isSelected(repo);
   }
 
   // Lane layout: 7 lanes, each 11px tall (6 + 5 gap), session-index modulo.
@@ -88,6 +154,15 @@
     return out;
   });
 
+  // Visible bar count under the active filter — drives the header
+  // "N active intervals" so the user can see the filter taking effect.
+  const visibleCount = $derived.by(() => {
+    if (selected.size === 0) return bars.length;
+    let n = 0;
+    for (const b of bars) if (!isFiltered(b.repo)) n++;
+    return n;
+  });
+
   // Hour ticks across the window.
   const ticks = $derived.by(() => {
     if (until <= since) return [] as { pct: number; label: string }[];
@@ -122,11 +197,6 @@
   });
 
   // ── Floating tooltip ──────────────────────────────────────────────
-  // Anchored to the hovered bar via fixed positioning + boundingClientRect.
-  // Portaled to <body> so position:fixed resolves to the viewport rather
-  // than .page (which has `animation: fadeUp … both` whose end-frame
-  // transform creates a containing block — same root cause as the
-  // ConfirmDeleteProjectModal / ThreadPeekModal anchor bug).
   interface Tip {
     bar: Bar;
     x: number;
@@ -174,7 +244,14 @@
 
 <div class="ctl">
   <header class="ctl-h">
-    <span class="ctl-meta mono">{bars.length} active interval{bars.length === 1 ? '' : 's'}</span>
+    <span class="ctl-meta mono">
+      {#if selected.size > 0}
+        {visibleCount} of {bars.length} active interval{bars.length === 1 ? '' : 's'}
+        <span class="ctl-filter-hint">· filtered by {selected.size} service{selected.size === 1 ? '' : 's'}</span>
+      {:else}
+        {bars.length} active interval{bars.length === 1 ? '' : 's'}
+      {/if}
+    </span>
     <span class="ctl-range mono">{rangeLabel}</span>
   </header>
   <div class="ctl-canvas" style="height: {canvasHeight}px;">
@@ -182,8 +259,10 @@
       <div class="ctl-tick" style="left: {t.pct}%;"></div>
     {/each}
     {#each bars as b, i (i)}
+      {@const filtered = isFiltered(b.repo)}
       <div class="ctl-bar"
-        style="top: {TOP_PAD + b.lane * LANE_HEIGHT}px; height: {BAR_HEIGHT}px; left: {b.startPct}%; width: {b.widthPct}%; background: {b.color}; opacity: {b.faded ? 0.55 : 1};"
+        class:ctl-bar-filtered={filtered}
+        style="top: {TOP_PAD + b.lane * LANE_HEIGHT}px; height: {BAR_HEIGHT}px; left: {b.startPct}%; width: {b.widthPct}%; background: {b.color}; opacity: {filtered ? 0.18 : (b.faded ? 0.55 : 1)};"
         onmouseenter={(e) => showTip(b, e)}
         onmouseleave={hideTip}
         role="presentation">
@@ -201,8 +280,30 @@
   {#if legend.length > 0}
     <div class="ctl-legend">
       {#each legend as l (l.repo)}
-        <span class="ctl-legend-item"><span class="ctl-swatch" style="background: {l.color};"></span><span class="mono">{l.repo}</span></span>
+        {@const sel = isSelected(l.repo)}
+        {@const dim = selected.size > 0 && !sel}
+        <button
+          type="button"
+          class="ctl-legend-item"
+          class:ctl-legend-selected={sel}
+          class:ctl-legend-dim={dim}
+          onclick={() => toggleSelected(l.repo)}
+          title={sel ? `Click to deselect ${l.repo}` : `Click to show only ${l.repo}` + (selected.size > 0 ? ` (and selected)` : '')}
+        >
+          <span class="ctl-swatch" style="background: {l.color};"></span>
+          <span class="mono">{l.repo}</span>
+        </button>
       {/each}
+      {#if selected.size > 0}
+        <button
+          type="button"
+          class="ctl-legend-clear mono"
+          onclick={clearSelected}
+          title="Clear filter — show all services"
+        >
+          show all
+        </button>
+      {/if}
     </div>
   {/if}
 </div>
@@ -238,6 +339,7 @@
   .ctl-h .mono, .ctl-meta, .ctl-range { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
   .ctl-meta  { font-size: 11.5px; color: var(--fg-soft); }
   .ctl-range { font-size: 11px; color: var(--fg-dim); }
+  .ctl-filter-hint { color: var(--accent); margin-left: 4px; }
   .ctl-canvas {
     position: relative;
     background: var(--bg-inset);
@@ -249,26 +351,82 @@
     position: absolute;
     border-radius: 2px;
     cursor: pointer;
-    transition: filter 120ms ease, transform 120ms ease;
+    transition: filter 120ms ease, transform 120ms ease, opacity 160ms ease;
   }
   .ctl-bar:hover {
     filter: brightness(1.18);
     transform: scaleY(1.18);
   }
+  .ctl-bar-filtered { cursor: default; }
+  .ctl-bar-filtered:hover {
+    /* When filtered out the bar shouldn't grow on hover — it's
+       deliberately dimmed for context only. */
+    transform: none;
+    filter: none;
+  }
   .ctl-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--fg-muted); font-size: 12px; }
   .ctl-axis  { position: relative; height: 14px; }
   .ctl-axis span { position: absolute; top: 0; transform: translateX(-50%); font-size: 10px; color: var(--fg-dim); }
-  .ctl-legend { display: flex; flex-wrap: wrap; gap: 12px; }
-  .ctl-legend-item { display: inline-flex; align-items: center; gap: 6px; }
-  .ctl-legend-item .mono { font-size: 10.5px; color: var(--fg-muted); }
-  .ctl-swatch { width: 10px; height: 4px; background: var(--fg-dim); border-radius: 1px; display: inline-block; }
+
+  /* ── Legend (clickable filter chips) ─────────────────────────── */
+  .ctl-legend { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .ctl-legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: transparent;
+    border: 1px solid var(--border-hair);
+    border-radius: 999px;
+    padding: 3px 9px 3px 7px;
+    cursor: pointer;
+    transition: background var(--t-fast), border-color var(--t-fast), opacity var(--t-fast);
+    color: var(--fg-muted);
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+  }
+  .ctl-legend-item:hover {
+    background: var(--bg-card);
+    border-color: var(--border-soft);
+    color: var(--fg-soft);
+  }
+  .ctl-legend-item:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: 1px;
+  }
+  .ctl-legend-selected {
+    background: var(--bg-card);
+    border-color: var(--accent);
+    color: var(--fg);
+  }
+  .ctl-legend-dim {
+    opacity: 0.45;
+  }
+  .ctl-legend-item .mono { font-size: 10.5px; color: inherit; }
+  .ctl-swatch {
+    width: 10px;
+    height: 4px;
+    background: var(--fg-dim);
+    border-radius: 1px;
+    display: inline-block;
+  }
+  .ctl-legend-clear {
+    background: transparent;
+    border: 1px dashed var(--border-soft);
+    color: var(--fg-muted);
+    border-radius: 999px;
+    padding: 3px 10px;
+    font-size: 10px;
+    cursor: pointer;
+    letter-spacing: 0.04em;
+    text-transform: lowercase;
+  }
+  .ctl-legend-clear:hover {
+    color: var(--fg);
+    border-color: var(--fg-muted);
+  }
 
   /* ── Tooltip ──────────────────────────────────────────────────── */
-  .ctl-tip-host {
-    /* display: contents keeps this wrapper transparent to layout so the
-       portaled tooltip renders at body level with position: fixed. */
-    display: contents;
-  }
+  .ctl-tip-host { display: contents; }
   .ctl-tip {
     position: fixed;
     transform: translate(-50%, calc(-100% - 10px));
@@ -283,54 +441,17 @@
     pointer-events: none;
     animation: ctl-tip-in 90ms ease-out both;
   }
-  .ctl-tip--below {
-    transform: translate(-50%, 10px);
-  }
+  .ctl-tip--below { transform: translate(-50%, 10px); }
   @keyframes ctl-tip-in {
     from { opacity: 0; }
     to   { opacity: 1; }
   }
-  .ctl-tip-hd {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 6px;
-  }
-  .ctl-tip-swatch {
-    width: 10px;
-    height: 10px;
-    border-radius: 3px;
-    flex-shrink: 0;
-  }
-  .ctl-tip-repo {
-    font-size: 13px;
-    color: var(--fg);
-  }
-  .ctl-tip-rows {
-    margin: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-  .ctl-tip-row {
-    display: flex;
-    align-items: baseline;
-    gap: 6px;
-    font-size: 11.5px;
-    color: var(--fg-soft);
-  }
-  .ctl-tip-row dt {
-    color: var(--fg-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    font-size: 10px;
-  }
-  .ctl-tip-row dd {
-    margin: 0;
-    color: var(--fg);
-  }
-  .ctl-tip-time {
-    color: var(--fg-muted);
-    font-size: 11px;
-  }
+  .ctl-tip-hd { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .ctl-tip-swatch { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
+  .ctl-tip-repo { font-size: 13px; color: var(--fg); }
+  .ctl-tip-rows { margin: 0; display: flex; flex-direction: column; gap: 2px; }
+  .ctl-tip-row { display: flex; align-items: baseline; gap: 6px; font-size: 11.5px; color: var(--fg-soft); }
+  .ctl-tip-row dt { color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.04em; font-size: 10px; }
+  .ctl-tip-row dd { margin: 0; color: var(--fg); }
+  .ctl-tip-time { color: var(--fg-muted); font-size: 11px; }
 </style>

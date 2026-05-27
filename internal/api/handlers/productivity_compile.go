@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -43,8 +44,10 @@ type ProductivityCompileHandler struct {
 	db *store.DB
 	// runCmd is the subprocess factory. Tests inject a stub here so
 	// the handler can be exercised without a real `claude` binary on
-	// the test runner.
-	runCmd func(ctx context.Context, projectPath, day string) ([]byte, error)
+	// the test runner. The second return is a parsed result envelope
+	// (text + token usage) extracted from the CLI's
+	// `--output-format=json` output.
+	runCmd func(ctx context.Context, projectPath, day string) (claudeRunResult, error)
 }
 
 // NewProductivityCompileHandler constructs a handler that shells out
@@ -116,17 +119,20 @@ func (h *ProductivityCompileHandler) Run(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
+	// Opus 4.7 on a 24-card service can run 5-7 minutes. Bumped from 5m
+	// → 10m so large services (klyne itself most notably) finish without
+	// a context-deadline kill.
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
 	defer cancel()
 
 	start := time.Now()
-	out, runErr := h.runCmd(ctx, req.ProjectPath, dayStr)
+	result, runErr := h.runCmd(ctx, req.ProjectPath, dayStr)
 	dur := time.Since(start).Milliseconds()
 
 	resp := productivityCompileResponse{
 		ProjectPath: req.ProjectPath,
 		Day:         dayStr,
-		Output:      string(out),
+		Output:      result.Output,
 		DurationMs:  dur,
 	}
 	switch {
@@ -134,11 +140,18 @@ func (h *ProductivityCompileHandler) Run(w http.ResponseWriter, r *http.Request)
 		resp.Status = "ok"
 	case ctx.Err() == context.DeadlineExceeded:
 		resp.Status = "timeout"
-		resp.Error = "subprocess exceeded 5m budget"
+		resp.Error = "subprocess exceeded 10m budget"
 	default:
 		resp.Status = "error"
 		resp.Error = runErr.Error()
 	}
+
+	// Record token usage for the dashboard's "Klyne is X% of today's
+	// Claude usage" tile. Persist regardless of subprocess status —
+	// failed/timeout runs still consumed tokens up to the cut-off and
+	// the user should see them.
+	persistKlyneUsage(r.Context(), h.db, req.ProjectPath, dayStr,
+		"productivity_sync", result, resp.Status, dur)
 
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -152,10 +165,15 @@ func (h *ProductivityCompileHandler) Run(w http.ResponseWriter, r *http.Request)
 // the slash command name. Claude Code resolves the slash command file
 // and the model sees the args inline; we also include them in the
 // prompt explicitly so they survive any front-matter trimming.
-func spawnClaudeProductivitySync(ctx context.Context, projectPath, day string) ([]byte, error) {
+//
+// Output format is `--output-format=json` so the CLI emits a single
+// JSON envelope to stdout (assistant text + usage block). The handler
+// parses it via parseClaudeRunResult so the dashboard's Klyne-usage
+// tile can record the per-run token spend.
+func spawnClaudeProductivitySync(ctx context.Context, projectPath, day string) (claudeRunResult, error) {
 	klyneBin, err := os.Executable()
 	if err != nil {
-		return nil, fmt.Errorf("productivity-compile: locate klyne binary: %w", err)
+		return claudeRunResult{}, fmt.Errorf("productivity-compile: locate klyne binary: %w", err)
 	}
 	mcpConfig, err := json.Marshal(map[string]any{
 		"mcpServers": map[string]any{
@@ -167,25 +185,29 @@ func spawnClaudeProductivitySync(ctx context.Context, projectPath, day string) (
 		},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("productivity-compile: build mcp-config: %w", err)
+		return claudeRunResult{}, fmt.Errorf("productivity-compile: build mcp-config: %w", err)
 	}
 
 	f, err := os.CreateTemp("", "klyne-productivity-sync-mcp-*.json")
 	if err != nil {
-		return nil, fmt.Errorf("productivity-compile: create mcp-config temp: %w", err)
+		return claudeRunResult{}, fmt.Errorf("productivity-compile: create mcp-config temp: %w", err)
 	}
 	defer os.Remove(f.Name()) //nolint:errcheck
 	if _, err := f.Write(mcpConfig); err != nil {
 		f.Close() //nolint:errcheck
-		return nil, fmt.Errorf("productivity-compile: write mcp-config temp: %w", err)
+		return claudeRunResult{}, fmt.Errorf("productivity-compile: write mcp-config temp: %w", err)
 	}
 	if err := f.Close(); err != nil {
-		return nil, fmt.Errorf("productivity-compile: close mcp-config temp: %w", err)
+		return claudeRunResult{}, fmt.Errorf("productivity-compile: close mcp-config temp: %w", err)
 	}
 
-	// Pin the model to Sonnet 4.6 — same rationale as reflect: structured
-	// output, deterministic schema, cheaper than Opus.
-	const syncModel = "claude-sonnet-4-6"
+	// Pin the model to Opus 4.7 (2026-05-27 narrative-card redesign). The
+	// v2 prompt asks for outcome-led titles + 2-4 sentence narrative
+	// bodies + a synthesized service summary — a step-change in synthesis
+	// quality over the v1 verb-led one-liners. Sonnet 4.6 reliably under-
+	// performs on the narrative voice; Opus matches the hand-edited
+	// example the user gave as the target. Cost trade is intentional.
+	const syncModel = "claude-opus-4-7"
 
 	// The slash command body reads `project_path=<...> day=<...>` from
 	// the user prompt to drive its tool calls. Pass them inline.
@@ -194,13 +216,19 @@ func spawnClaudeProductivitySync(ctx context.Context, projectPath, day string) (
 	cmd := exec.CommandContext(ctx, "claude",
 		"-p",
 		"--model", syncModel,
+		"--output-format", "json",
 		"--permission-mode", "bypassPermissions",
 		"--mcp-config", f.Name(),
 		"--",
 		prompt,
 	)
 	cmd.Dir = projectPath
-	return cmd.CombinedOutput()
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	runErr := cmd.Run()
+	res := parseClaudeRunResult(stdout.Bytes(), stderr.Bytes(), syncModel)
+	return res, runErr
 }
 
 // Compile-time guard against silent contract drift on the route const.

@@ -325,6 +325,116 @@ func TestRecordReflectionTyped_RoundTrip(t *testing.T) {
 	}
 }
 
+// TestRecordReflectionTyped_UpsertsByProjectDayService confirms the
+// 2026-05-26 idempotency fix: re-running RecordReflectionTyped for the
+// same (project, day, service) REPLACES the prior typed payload instead
+// of appending a second row. Pre-fix, a re-reflect would accumulate
+// ghost rows and the dashboard would merge stale details from earlier
+// runs into the latest card. The DELETE-before-INSERT path leaves
+// prose-only rows for the same day untouched so the legacy panel keeps
+// its insights.
+func TestRecordReflectionTyped_UpsertsByProjectDayService(t *testing.T) {
+	db := newRecorderTestDB(t)
+	ctx := context.Background()
+	day := time.Date(2026, 5, 26, 0, 0, 0, 0, time.UTC)
+
+	first := WWDPayload{
+		Service: "operations-app",
+		Details: []WWDDetail{
+			{Kind: DetailKindMajor, When: "16:35", Text: "Stale first detail.", Evidence: []string{"PR #432", "sess-x"}, SessionID: "sess-x"},
+		},
+	}
+	if _, err := RecordReflectionTyped(ctx, db, "/p", day, first); err != nil {
+		t.Fatalf("first record: %v", err)
+	}
+
+	second := WWDPayload{
+		Service: "operations-app",
+		Details: []WWDDetail{
+			{Kind: DetailKindShipped, When: "11:26", Text: "Shipped CLI-1473 PaymentStep canManage fix.", Evidence: []string{"CLI-1473", "sess-a"}, SessionID: "sess-a"},
+			{Kind: DetailKindShipped, When: "12:17", Text: "Opened PR #428 for CLI-1340 cancelled-bill modal.", Evidence: []string{"PR #428", "CLI-1340", "sess-b"}, SessionID: "sess-b"},
+		},
+	}
+	if _, err := RecordReflectionTyped(ctx, db, "/p", day, second); err != nil {
+		t.Fatalf("second record (idempotent rewrite): %v", err)
+	}
+
+	rows, err := store.ListReflectionsForProjectDay(ctx, db, "/p", "2026-05-26")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	typedRows := 0
+	for _, r := range rows {
+		if strings.TrimSpace(r.BodyJSON) != "" {
+			typedRows++
+		}
+	}
+	if typedRows != 1 {
+		t.Fatalf("expected exactly 1 typed row after re-reflect (idempotent), got %d (total rows=%d)", typedRows, len(rows))
+	}
+	parsed, err := store.ParseBodyJSON(rows[len(rows)-1])
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(parsed.Details) != 2 {
+		t.Fatalf("expected the latest payload's 2 details to win, got %d", len(parsed.Details))
+	}
+	if !strings.Contains(parsed.Details[0].Text+parsed.Details[1].Text, "CLI-1473") {
+		t.Errorf("expected the second payload to win the row; got details:\n%+v", parsed.Details)
+	}
+}
+
+// TestRecordReflectionTyped_PreservesProseRowsOnUpsert confirms the
+// upsert path only deletes TYPED same-day same-service rows, not
+// prose-only rows. The prose panel needs to survive a typed re-reflect.
+func TestRecordReflectionTyped_PreservesProseRowsOnUpsert(t *testing.T) {
+	db := newRecorderTestDB(t)
+	ctx := context.Background()
+	day := time.Date(2026, 5, 26, 0, 0, 0, 0, time.UTC)
+
+	// Seed a prose-only row for the same project + day.
+	proseInsights := []Insight{
+		{Text: "Investigated CLI-1340 subscription dropdown.", Evidence: []string{"sess-prose"}},
+	}
+	if _, err := RecordReflection(ctx, db, "/p", day, proseInsights); err != nil {
+		t.Fatalf("seed prose: %v", err)
+	}
+
+	// Then write the typed payload.
+	typed := WWDPayload{
+		Service: "operations-app",
+		Details: []WWDDetail{
+			{Kind: DetailKindShipped, When: "16:35", Text: "Shipped CLI-1452 rebase + PR #432.", Evidence: []string{"PR #432", "sess-rebase"}, SessionID: "sess-rebase"},
+		},
+	}
+	if _, err := RecordReflectionTyped(ctx, db, "/p", day, typed); err != nil {
+		t.Fatalf("typed record: %v", err)
+	}
+
+	rows, err := store.ListReflectionsForProjectDay(ctx, db, "/p", "2026-05-26")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(rows) < 2 {
+		t.Fatalf("expected prose + typed = 2 rows after typed re-reflect, got %d", len(rows))
+	}
+	var hasProse, hasTyped bool
+	for _, r := range rows {
+		if strings.TrimSpace(r.BodyJSON) == "" && strings.TrimSpace(r.BodyMD) != "" {
+			hasProse = true
+		}
+		if strings.TrimSpace(r.BodyJSON) != "" {
+			hasTyped = true
+		}
+	}
+	if !hasProse {
+		t.Errorf("prose-only row was clobbered by typed upsert — should have been preserved")
+	}
+	if !hasTyped {
+		t.Errorf("typed row missing after upsert")
+	}
+}
+
 // TestRecordReflectionTyped_RejectsEmptyEvidence is the citation-
 // invariant guard for the typed path: any detail with empty evidence is
 // rejected and no row is written. Spec §5.

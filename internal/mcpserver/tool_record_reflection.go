@@ -36,7 +36,7 @@ type RecordReflectionInput struct {
 	ProjectPath string              `json:"project_path" jsonschema:"absolute project path"`
 	Day         string              `json:"day,omitempty" jsonschema:"calendar day this reflection covers, YYYY-MM-DD (UTC); strongly recommended (omitting it files under today UTC which is wrong for multi-day catch-up)"`
 	Insights    []worklog.Insight   `json:"insights,omitempty" jsonschema:"synthesized insights (prose path) — each must cite at least one entry session_id. Omit when sending body_json."`
-	BodyJSON    *worklog.WWDPayload `json:"body_json,omitempty" jsonschema:"typed What-was-done payload (spec §1.1) — one service per call, ≤6 details with kind∈{SHIPPED,MAJOR,FIXED,DECISION,INVESTIGATED,IN_PROGRESS}, HH:MM when, ≤200-char text, non-empty evidence drawn literally from source stop_summaries"`
+	BodyJSON    *worklog.WWDPayload `json:"body_json,omitempty" jsonschema:"typed What-was-done payload. Two generations: v2 narrative cards (preferred — service_summary + cards[] with kind/ticket_id/title/body/refs) or v1 legacy details. See worklog.WWDPayload doc-comment for both shapes."`
 }
 
 // RecordReflectionOutput surfaces the persisted id and a citation count

@@ -84,16 +84,21 @@ func LoadPendingEntries(ctx context.Context, db *store.DB, projectPath string, t
              ORDER BY ts ASC LIMIT 100`,
 			projectPath, cursor)
 	} else {
-		// Per-day backfill mode.
+		// Per-day backfill mode. The day window is the bound — we
+		// intentionally IGNORE the prior cursor here so a re-reflect of
+		// the same day always sees every visible entry. The reflection
+		// recorder upserts on (project_path, day) so each run rewrites
+		// the day's typed payload from scratch; threading the cursor in
+		// would create a permanent "covered but not synthesized" gap
+		// whenever an earlier reflect under-cited (the operations-app
+		// 2026-05-26 1-detail card bug).
 		loc = day.Location()
 		dayBound = true
 		dayStart := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, loc)
 		dayEnd := dayStart.Add(24 * time.Hour)
-		dayStr := dayStart.Format("2006-01-02")
-		cursor, err = store.MaxReflectionCursorForDay(ctx, db, projectPath, dayStr)
-		if err != nil {
-			return nil, "", err
-		}
+		// cursor stays at its zero default so the reason classifier still
+		// reports "nothing new since …" correctly when entries == 0.
+		_ = cursor
 		rows, err = db.Read().QueryContext(ctx,
 			`SELECT session_id, cli, COALESCE(recap_topic,''), COALESCE(ai_drafted_summary,''),
                     COALESCE(last_user,''), ts, importance
@@ -101,9 +106,8 @@ func LoadPendingEntries(ctx context.Context, db *store.DB, projectPath string, t
              WHERE project_path = ?
                AND recap_visible = 1
                AND ts >= ? AND ts < ?
-               AND ts > ?
-             ORDER BY ts ASC LIMIT 100`,
-			projectPath, dayStart.UnixMilli(), dayEnd.UnixMilli(), cursor)
+             ORDER BY ts ASC LIMIT 200`,
+			projectPath, dayStart.UnixMilli(), dayEnd.UnixMilli())
 	}
 	_ = dayBound // reserved for future debug logging
 	if err != nil {

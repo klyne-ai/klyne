@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -42,15 +43,17 @@ type WorklogReflectRunHandler struct {
 	db *store.DB
 	// runCmd is the subprocess factory. Tests inject a stub here so
 	// the handler can be exercised without a real `claude` binary on
-	// the test runner.
-	runCmd func(ctx context.Context, projectPath string) ([]byte, error)
+	// the test runner. Returns the parsed JSON envelope (text + token
+	// usage) so the handler can record per-run usage into
+	// klyne_llm_usage.
+	runCmd func(ctx context.Context, projectPath string) (claudeRunResult, error)
 	// runSyncCmd spawns the SECOND LLM pass (/klyne:productivity-sync)
 	// after a successful reflect so the dashboard's "Run /klyne:reflect
 	// now" button does reflect → sync invisibly. Tests override this to
 	// avoid the real `claude` binary; nil means "skip the second pass"
 	// (which keeps tests focused on the first pass without forcing
 	// every test to stub two spawns).
-	runSyncCmd func(ctx context.Context, projectPath, day string) ([]byte, error)
+	runSyncCmd func(ctx context.Context, projectPath, day string) (claudeRunResult, error)
 }
 
 // NewWorklogReflectRunHandler constructs a handler that shells out via
@@ -145,12 +148,12 @@ func (h *WorklogReflectRunHandler) Run(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	start := time.Now()
-	out, runErr := h.runCmd(ctx, req.ProjectPath)
+	result, runErr := h.runCmd(ctx, req.ProjectPath)
 	dur := time.Since(start).Milliseconds()
 
 	resp := reflectRunResponse{
 		ProjectPath: req.ProjectPath,
-		Output:      string(out),
+		Output:      result.Output,
 		DurationMs:  dur,
 	}
 	switch {
@@ -163,6 +166,20 @@ func (h *WorklogReflectRunHandler) Run(w http.ResponseWriter, r *http.Request) {
 		resp.Status = "error"
 		resp.Error = runErr.Error()
 	}
+
+	// Token usage for the "Klyne is X% of today's Claude usage" tile.
+	// Day defaults to today (server-local) when the request omits it,
+	// mirroring the chained-recompose day-resolution below — keeps the
+	// klyne_llm_usage row bucketed under the same local day the rest
+	// of the reflect run targets.
+	usageDay := strings.TrimSpace(req.Day)
+	if usageDay == "" {
+		usageDay = time.Now().Local().Format("2006-01-02")
+	} else if _, err := time.ParseInLocation("2006-01-02", usageDay, time.Local); err != nil {
+		usageDay = time.Now().Local().Format("2006-01-02")
+	}
+	persistKlyneUsage(r.Context(), h.db, req.ProjectPath, usageDay,
+		"reflect", result, resp.Status, dur)
 
 	// On success, chain a typed What-was-done recompose for the day
 	// the reflect covered so the dashboard shows the new cards on the
@@ -223,10 +240,10 @@ func (h *WorklogReflectRunHandler) Run(w http.ResponseWriter, r *http.Request) {
 // record_reflection tools. We pass --mcp-config inline pointing at
 // THIS klyne binary (os.Executable) so the child always uses the same
 // build the daemon is running.
-func spawnClaudeReflect(ctx context.Context, projectPath string) ([]byte, error) {
+func spawnClaudeReflect(ctx context.Context, projectPath string) (claudeRunResult, error) {
 	klyneBin, err := os.Executable()
 	if err != nil {
-		return nil, fmt.Errorf("reflect-run: locate klyne binary: %w", err)
+		return claudeRunResult{}, fmt.Errorf("reflect-run: locate klyne binary: %w", err)
 	}
 	mcpConfig, err := json.Marshal(map[string]any{
 		"mcpServers": map[string]any{
@@ -238,7 +255,7 @@ func spawnClaudeReflect(ctx context.Context, projectPath string) ([]byte, error)
 		},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("reflect-run: build mcp-config: %w", err)
+		return claudeRunResult{}, fmt.Errorf("reflect-run: build mcp-config: %w", err)
 	}
 
 	// claude's --mcp-config flag is VARIADIC (<configs...>) and greedily
@@ -249,15 +266,15 @@ func spawnClaudeReflect(ctx context.Context, projectPath string) ([]byte, error)
 	// it by then.
 	f, err := os.CreateTemp("", "klyne-reflect-mcp-*.json")
 	if err != nil {
-		return nil, fmt.Errorf("reflect-run: create mcp-config temp: %w", err)
+		return claudeRunResult{}, fmt.Errorf("reflect-run: create mcp-config temp: %w", err)
 	}
 	defer os.Remove(f.Name()) //nolint:errcheck
 	if _, err := f.Write(mcpConfig); err != nil {
 		f.Close() //nolint:errcheck
-		return nil, fmt.Errorf("reflect-run: write mcp-config temp: %w", err)
+		return claudeRunResult{}, fmt.Errorf("reflect-run: write mcp-config temp: %w", err)
 	}
 	if err := f.Close(); err != nil {
-		return nil, fmt.Errorf("reflect-run: close mcp-config temp: %w", err)
+		return claudeRunResult{}, fmt.Errorf("reflect-run: close mcp-config temp: %w", err)
 	}
 
 	// Pin the model to Sonnet 4.6 for reflection synthesis. Reflection is
@@ -279,16 +296,26 @@ func spawnClaudeReflect(ctx context.Context, projectPath string) ([]byte, error)
 	// before the prompt. claude treats --mcp-config as variadic
 	// (<configs...>) and will greedily swallow every following token
 	// — including /klyne:reflect — unless `--` forces an end of flags.
+	//
+	// --output-format=json so we can extract per-run token usage from the
+	// CLI's result envelope (.usage block) for the productivity dashboard's
+	// "Klyne is X% of today's Claude usage" tile.
 	cmd := exec.CommandContext(ctx, "claude",
 		"-p",
 		"--model", reflectModel,
+		"--output-format", "json",
 		"--permission-mode", "bypassPermissions",
 		"--mcp-config", f.Name(),
 		"--",
 		"/klyne:reflect",
 	)
 	cmd.Dir = projectPath
-	return cmd.CombinedOutput()
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	runErr := cmd.Run()
+	res := parseClaudeRunResult(stdout.Bytes(), stderr.Bytes(), reflectModel)
+	return res, runErr
 }
 
 // sameOriginOK returns true when the request either has no Origin/

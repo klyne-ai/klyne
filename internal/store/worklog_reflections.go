@@ -53,22 +53,73 @@ type Reflection struct {
 }
 
 // WWDPayload is the parsed shape of Reflection.BodyJSON — the typed
-// "What was done" detail payload defined in §1.1 of
-// docs/plan/2026-05-26-wwd-typed-cards.md.
+// "What was done" payload for the productivity dashboard.
 //
-// A single payload covers ONE service and carries one or more details.
-// ParseBodyJSON returns this shape; the productivity composer
-// (internal/productivity.ComposeWWD) groups Details across rows by
-// Service to build the per-service dashboard card.
+// Two generations of schema coexist on disk:
+//
+//   - v1 (legacy, docs/plan/2026-05-26-wwd-typed-cards.md): Details[]
+//     with kind/when:HH:MM/text≤200/evidence — what /klyne:productivity-
+//     sync wrote before the narrative-card redesign. Old rows still
+//     parse and render via the legacy path.
+//
+//   - v2 (2026-05-27 narrative redesign): ServiceSummary + Cards[] with
+//     ticket-grouped title/body (markdown) + typed refs. Drives the
+//     stat-tile + per-ticket-card dashboard layout that matches what the
+//     user actually wants to read at standup. New writes use Cards;
+//     Details stays nil.
+//
+// ParseBodyJSON returns this shape unchanged for both generations; the
+// productivity composer (internal/productivity.ComposeWWD) prefers
+// Cards when present and falls back to Details otherwise.
 type WWDPayload struct {
-	Service string      `json:"service"`
-	Details []WWDDetail `json:"details"`
+	Service        string      `json:"service"`
+	ServiceSummary string      `json:"service_summary,omitempty"`
+	Stats          *WWDStats   `json:"stats,omitempty"`
+	Cards          []WWDCard   `json:"cards,omitempty"`
+	Followup       string      `json:"followup,omitempty"`
+	// Legacy v1 — kept for backward-compat reads. New writes leave this
+	// nil and populate Cards instead.
+	Details []WWDDetail `json:"details,omitempty"`
 }
 
-// WWDDetail is one typed entry in a reflection's What-was-done payload.
-// The field set mirrors the §1.1 schema literally — Kind enum, HH:MM
-// When, ≤200-char Text, non-empty Evidence drawn LITERALLY from the
-// source stop_summary, and the SessionID back-pointer to that source.
+// WWDStats are the derived per-kind counts shown as stat tiles on the
+// dashboard. Computed mechanically from Cards by the composer, but the
+// writer may populate them defensively for legacy reads.
+type WWDStats struct {
+	Shipped      int `json:"shipped"`
+	Fixed        int `json:"fixed"`
+	Decisions    int `json:"decisions"`
+	Investigated int `json:"investigated"`
+	InProgress   int `json:"in_progress,omitempty"`
+}
+
+// WWDCard is one narrative card on a service's dashboard panel. ONE
+// card per (ticket, kind) pair — a single ticket can produce multiple
+// cards under different sections (e.g. CLI-1452 with a SHIPPED card AND
+// a FIXED card for a dead-code revert).
+//
+// Body is markdown prose (2-4 sentences), not a verb-led one-liner.
+// Refs are typed so the UI can style file paths / branches / PRs /
+// commits differently — file paths get monospace inline, PR/branch
+// names get a distinct chip.
+type WWDCard struct {
+	Kind     string   `json:"kind"`               // SHIPPED|FIXED|DECISION|INVESTIGATED|MAJOR|IN_PROGRESS
+	TicketID string   `json:"ticket_id,omitempty"` // e.g. CLI-1473; omit for ticket-less work
+	Title    string   `json:"title"`              // ≤120 chars, outcome-led (not verb-led)
+	Body     string   `json:"body"`               // ≤800 chars, markdown prose narrative
+	Refs     []WWDRef `json:"refs,omitempty"`
+}
+
+// WWDRef is one typed reference token shown in the card's footer.
+// Type lets the UI pick styling (file path → monospace inline,
+// PR/commit/branch/ticket → chip with subtle background).
+type WWDRef struct {
+	Type string `json:"type"` // file|branch|pr|commit|ticket|test|session
+	Text string `json:"text"`
+}
+
+// WWDDetail is the legacy v1 detail shape. Retained for back-compat
+// reads of pre-2026-05-27 rows. New writers use Cards.
 type WWDDetail struct {
 	Kind      string   `json:"kind"`
 	When      string   `json:"when"`
@@ -195,6 +246,81 @@ func ListReflectionsForProject(ctx context.Context, db *DB, projectPath string, 
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// DeleteTypedReflectionsForProjectDayService removes every typed
+// worklog_reflections row scoped to (projectPath, day) whose
+// body_json.service matches `service`. The typed-cards composer
+// (productivity.ComposeWWD) reads ALL rows for a (project, day) and
+// merges details by service — without this delete-before-insert, a
+// re-reflect of the same day would accumulate stale typed payloads and
+// the dashboard would show ghost details from earlier runs. Prose-only
+// rows (body_json NULL) are left UNTOUCHED so the legacy prose panel
+// retains its insights even when a typed pass overwrites the day.
+//
+// Returns the count of rows removed for caller telemetry. Errors when
+// the DELETE itself fails — the caller should fail the whole reflection
+// write rather than risk ghost rows.
+func DeleteTypedReflectionsForProjectDayService(
+	ctx context.Context, db *DB, projectPath, day, service string,
+) (int, error) {
+	if strings.TrimSpace(projectPath) == "" || strings.TrimSpace(day) == "" {
+		return 0, errors.New("store: delete typed reflections: project_path and day required")
+	}
+	if strings.TrimSpace(service) == "" {
+		return 0, errors.New("store: delete typed reflections: service required")
+	}
+	// SQLite has no JSON path operator in older builds and we don't want
+	// to assume json1 is loaded; scan candidate rows and delete by id.
+	const selectQ = `
+SELECT id, COALESCE(body_json, '')
+  FROM worklog_reflections
+ WHERE project_path = ?
+   AND day = ?
+   AND body_json IS NOT NULL`
+	rows, err := db.Read().QueryContext(ctx, selectQ, projectPath, day)
+	if err != nil {
+		return 0, fmt.Errorf("store: select typed reflections for delete: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+	var idsToDelete []string
+	for rows.Next() {
+		var id, bodyJSON string
+		if err := rows.Scan(&id, &bodyJSON); err != nil {
+			return 0, fmt.Errorf("store: scan typed reflection: %w", err)
+		}
+		if strings.TrimSpace(bodyJSON) == "" {
+			continue
+		}
+		var p WWDPayload
+		if err := json.Unmarshal([]byte(bodyJSON), &p); err != nil {
+			// Malformed row: skip rather than crash the upsert.
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(p.Service), strings.TrimSpace(service)) {
+			idsToDelete = append(idsToDelete, id)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("store: iterate typed reflections: %w", err)
+	}
+	if len(idsToDelete) == 0 {
+		return 0, nil
+	}
+	tx, err := db.Write().BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("store: begin delete typed reflections tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+	for _, id := range idsToDelete {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM worklog_reflections WHERE id = ?`, id); err != nil {
+			return 0, fmt.Errorf("store: delete typed reflection %s: %w", id, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("store: commit delete typed reflections: %w", err)
+	}
+	return len(idsToDelete), nil
 }
 
 // MaxReflectionCursor returns the largest "covered up through ts"

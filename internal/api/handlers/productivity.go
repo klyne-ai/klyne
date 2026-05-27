@@ -423,7 +423,45 @@ func (h *ProductivityHandler) tryReadSnapshotDay(
 	// single-day Report — same shape as the live path would produce.
 	day := productivity.AggregateReports(perProject, dayStr)
 	day.Day = dayStr
+
+	// Barebones-snapshot detection (2026-05-27 fix): PersistLLMCompiledCard
+	// can land a reflection-source snapshot with only the narrative card
+	// populated when no live snapshot existed yet for the day (e.g. the
+	// first sync of a freshly-rolled-over date). That snapshot has zero
+	// AI minutes, zero branches, zero sessions — but it'd block the live
+	// recompute path. Signal ok=false so the caller falls through to
+	// computeLiveReport, then hydrateWhatWasDone overlays the LLM card on
+	// top of the live-computed time/branches/sessions data.
+	if isSnapshotBarebones(day) {
+		log.Printf("productivity: snapshot for %s has no substantive data — falling through to live recompute (WWD cards will still overlay)", dayStr)
+		return productivity.Report{}, false, nil
+	}
 	return day, true, nil
+}
+
+// isSnapshotBarebones returns true when the aggregated snapshot has no
+// substantive measured activity (no minutes, no sessions, no branches,
+// no merged PRs). That's the shape PersistLLMCompiledCard produces when
+// it writes the FIRST snapshot for a (project, day) without a prior
+// live-path row to merge into.
+func isSnapshotBarebones(rep productivity.Report) bool {
+	if rep.TotalActiveMinutes > 0 {
+		return false
+	}
+	if len(rep.Sessions) > 0 {
+		return false
+	}
+	for _, s := range rep.Services {
+		if len(s.Branches) > 0 || len(s.MergedPRs) > 0 {
+			return false
+		}
+		for _, m := range s.MinutesByCLI {
+			if m > 0 {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // hydrateSnapshotReflections refreshes the per-service ReflectionGroups,
@@ -579,6 +617,26 @@ func hydrateWhatWasDone(
 			svc.WhatWasDone = &cardCopy
 		} else {
 			svc.WhatWasDone = nil
+		}
+
+		// L1 floor merge (2026-05-26 fix): regardless of whether an LLM
+		// card landed, compute the deterministic floor from L1
+		// stop_summaries and merge in any ticket the LLM/L3 layer missed.
+		// This is the dashboard's safety net — over-aggressive upstream
+		// suppression or an under-citing LLM can no longer produce a
+		// 1-detail card for a day that touched 7 tickets.
+		floor, ferr := productivity.BuildFloorFromStopSummaries(ctx, db.Read(), svc.ProjectPath, dayStr)
+		if ferr != nil {
+			log.Printf("productivity: l1 floor for %s/%s: %v", svc.ProjectPath, dayStr, ferr)
+		} else if len(floor) > 0 {
+			serviceKey := key
+			if serviceKey == "" {
+				serviceKey = basePath(svc.ProjectPath)
+			}
+			merged := productivity.MergeFloorIntoCard(serviceKey, svc.WhatWasDone, floor)
+			if merged != nil {
+				svc.WhatWasDone = merged
+			}
 		}
 	}
 }

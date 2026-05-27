@@ -24,14 +24,17 @@
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
-  import { fetchProductivityDates, runReflect, compileProductivity, type ProductivityReport, type ProductivityService, type ProductivitySessionStat } from '$lib/api.js';
+  import { fetchProductivityDates, runReflect, compileProductivity, fetchKlyneUsage, type ProductivityReport, type ProductivityService, type ProductivitySessionStat, type KlyneUsageResponse } from '$lib/api.js';
   import { applyHiddenFilter, hiddenSessionIds, hideMany, clearHidden } from '$lib/hidden-sessions.svelte';
   import ConcurrencyTimeline from '$lib/components/productivity/ConcurrencyTimeline.svelte';
   import WhatWasDoneCard from '$lib/dashboard/pages/productivity/WhatWasDoneCard.svelte';
   import { sessionUrl } from '$lib/dashboard/url-state.js';
 
   const STORAGE_KEY = 'klyne.productivity.range';
-  const REPORT_KEY  = 'klyne.productivity.lastReport';
+  // v2 cache key (2026-05-27): the schema gained a `narrative` field and
+  // some persisted snapshots were written barebones-of-data — bumping the
+  // key bypasses the old cached payloads in every user's localStorage.
+  const REPORT_KEY  = 'klyne.productivity.lastReport.v2';
 
   let rep = $state<ProductivityReport | null>(null);
   let loading = $state(true);
@@ -40,6 +43,12 @@
   let since = $state<number>(0);
   let until = $state<number>(0);
   let copied = $state(false);
+
+  // Klyne LLM-usage tile — tokens spent by klyne's own subprocesses
+  // (productivity-sync, reflect) for the loaded day, alongside the
+  // user's full-day Claude total. Tokens only; no USD by design.
+  let klyneUsage = $state<KlyneUsageResponse | null>(null);
+  let klyneUsageExpanded = $state(false);
   // Reflect-run state: drives the inline "Run /klyne:reflect now" button
   // surfaced when reflection_status != "current". We track per-project
   // progress so a multi-project window (e.g. "today" spanning klyne +
@@ -226,6 +235,9 @@
       rep = json;
       loadedAt = Date.now();
       saveCached(rep, since, until, loadedAt);
+      // Fan-out: klyne LLM-usage tile for the report's day. Best-effort
+      // — failures here never block the productivity render.
+      void loadKlyneUsage(rep.day);
     } catch (e) {
       if ((e as Error).name === 'AbortError') {
         error = 'Request timed out (30s). The daemon may be processing a large window — click Retry or pick a shorter range.';
@@ -248,6 +260,35 @@
     void load();
   }
   function refresh() { void load({ refresh: true }); }
+
+  // Fetch the day's klyne LLM-usage breakdown for the transparency
+  // tile. Best-effort: failures clear the tile rather than surfacing
+  // an error in the dashboard chrome.
+  async function loadKlyneUsage(day: string) {
+    if (!day) { klyneUsage = null; return; }
+    try {
+      klyneUsage = await fetchKlyneUsage(day);
+    } catch {
+      klyneUsage = null;
+    }
+  }
+
+  // Format a raw token count as a human-readable abbreviation:
+  // <1k → bare integer, ≥1k → k with one decimal, ≥1m → m with one decimal.
+  function fmtTokens(n: number): string {
+    if (!Number.isFinite(n) || n <= 0) return '0';
+    if (n < 1_000) return String(n);
+    if (n < 1_000_000) return `${(n / 1_000).toFixed(n < 10_000 ? 1 : 0)}k`;
+    return `${(n / 1_000_000).toFixed(1)}m`;
+  }
+
+  // Human-readable label for klyne operation names persisted by the
+  // two subprocess handlers. Falls back to the raw operation string.
+  function klyneOpLabel(op: string): string {
+    if (op === 'productivity_sync') return 'Productivity sync';
+    if (op === 'reflect') return 'Reflect';
+    return op;
+  }
 
   function localDateKey(ms: number): string {
     const d = new Date(ms);
@@ -696,6 +737,84 @@
     }
     return { uncommitted, unpushedSignal, drifted, unpushedNoise };
   }
+
+  // RiskSourceEntry is what the All-Risks info popover shows per item —
+  // one row per underlying svc.risks entry that contributed to the count
+  // shown next to a label. The popover surfaces the concrete branch /
+  // worktree / file list / commit SHAs so the user can see WHERE the
+  // signal came from, instead of just trusting the rolled-up number.
+  interface RiskSourceEntry {
+    repo: string;
+    branch: string;
+    worktree: string;
+    kind: string;
+    detail: string;
+    files: string[];
+    commits: { sha: string; subject: string }[];
+    ageMinutes: number;
+  }
+  function risksFor(svcs: ProductivityService[], predicate: (kind: string, commits: number) => boolean): RiskSourceEntry[] {
+    const out: RiskSourceEntry[] = [];
+    for (const s of svcs ?? []) {
+      for (const r of s.risks ?? []) {
+        if (!predicate(r.kind, (r.commits ?? []).length)) continue;
+        out.push({
+          repo: s.repo,
+          branch: r.branch || '',
+          worktree: r.worktree_path || '',
+          kind: r.kind,
+          detail: r.detail || '',
+          files: r.files ?? [],
+          commits: (r.commits ?? []).map(c => ({ sha: c.sha, subject: c.subject })),
+          ageMinutes: r.age_minutes ?? 0,
+        });
+      }
+    }
+    return out;
+  }
+  // Per-label predicate map — mirrors the row list in the All-Risks
+  // panel so the info popover always shows the SAME underlying rows
+  // the count in the visible row was derived from. Keep these in sync
+  // with the inline risks-list <li> above; the labels are the lookup keys.
+  type RiskLabel = 'Credential exposure' | 'Stalled migration' | 'Uncommitted edits' | 'Unpushed · signal' | 'Drifted from main' | 'Ephemeral worktrees';
+  const RISK_PREDICATES: Record<RiskLabel, (kind: string, commits: number) => boolean> = {
+    'Credential exposure':  (k) => k === 'done-uncommitted',
+    'Stalled migration':    (k) => k === 'unpushed',
+    'Uncommitted edits':    (k) => k === 'done-uncommitted',
+    'Unpushed · signal':    (k, c) => k === 'unpushed' && c > 0,
+    'Drifted from main':    (k) => k.includes('drift'),
+    'Ephemeral worktrees':  (k, c) => k === 'unpushed' && c === 0,
+  };
+  // Human-readable provenance per label: WHERE this signal comes from in
+  // the dashboard's data pipeline. Shown above the source-row list inside
+  // the info popover so the user can trust + verify the count.
+  const RISK_PROVENANCE: Record<RiskLabel, string> = {
+    'Credential exposure':
+      'Top alerts where the working tree has uncommitted edits at session end (kind: done-uncommitted). ' +
+      'Source: git status --porcelain at session-end snapshot time.',
+    'Stalled migration':
+      'Top alerts where local commits exist but the branch is not pushed to origin (kind: unpushed). ' +
+      'Source: git rev-list origin/<branch>..HEAD.',
+    'Uncommitted edits':
+      'Every working tree with uncommitted/untracked files at session-end. ' +
+      'Source: git status --porcelain captured by CaptureSessionSnapshots.',
+    'Unpushed · signal':
+      'Branches with at least one local commit ahead of origin AND a non-empty commit list. ' +
+      'Source: git rev-list origin/<branch>..HEAD per discovered repo.',
+    'Drifted from main':
+      'Branches whose merge-base with the default branch is older than the configured drift threshold. ' +
+      'Source: git merge-base + age comparison per branch scan.',
+    'Ephemeral worktrees':
+      'Unpushed branches with no commits — usually leftover worktree shells from cancelled work. ' +
+      'Source: git branch + git rev-list (zero result) per repo.',
+  };
+  // Open-popover state for the All-Risks info button. Holds the row
+  // label so the template can re-derive the source list reactively.
+  let openRiskInfo = $state<RiskLabel | null>(null);
+  function toggleRiskInfo(label: RiskLabel): void {
+    openRiskInfo = openRiskInfo === label ? null : label;
+  }
+  function closeRiskInfo(): void { openRiskInfo = null; }
   // Fallback bullets when reflection_markdown is empty. Builds a
   // session-level evidence list so the page is never blank.
   function fallbackSessionBullets(rep: ProductivityReport): ReflectionBullet[] {
@@ -1004,17 +1123,81 @@
           <hr class="hr" />
           <ul class="risks-list">
             {#each [
-              { level:'alert', count: alerts.filter(a=>a.level==='alert').length, label:'Credential exposure' },
-              { level:'alert', count: alerts.filter(a=>a.level==='warn').length,  label:'Stalled migration' },
-              { level:'warn',  count: hist.uncommitted,       label:'Uncommitted edits' },
-              { level:'warn',  count: hist.unpushedSignal,    label:'Unpushed · signal' },
-              { level:'info',  count: hist.drifted,           label:'Drifted from main' },
-              { level:'muted', count: hist.unpushedNoise,     label:'Ephemeral worktrees' },
+              { level:'alert', count: alerts.filter(a=>a.level==='alert').length, label:'Credential exposure' as RiskLabel },
+              { level:'alert', count: alerts.filter(a=>a.level==='warn').length,  label:'Stalled migration' as RiskLabel },
+              { level:'warn',  count: hist.uncommitted,       label:'Uncommitted edits' as RiskLabel },
+              { level:'warn',  count: hist.unpushedSignal,    label:'Unpushed · signal' as RiskLabel },
+              { level:'info',  count: hist.drifted,           label:'Drifted from main' as RiskLabel },
+              { level:'muted', count: hist.unpushedNoise,     label:'Ephemeral worktrees' as RiskLabel },
             ] as row (row.label)}
-              <li>
+              {@const isOpen = openRiskInfo === row.label}
+              {@const sources = isOpen ? risksFor(v.services, RISK_PREDICATES[row.label]) : []}
+              <li class="risks-li" class:risks-li-open={isOpen}>
                 <span class="num-sm" class:alert={row.level==='alert'} class:warn={row.level==='warn'} class:info={row.level==='info'} class:dim={row.level==='muted'}>{row.count}</span>
-                <span class="mono soft">{row.label}</span>
+                <span class="mono soft risks-label">{row.label}</span>
+                <button
+                  type="button"
+                  class="risks-info-btn"
+                  class:risks-info-btn-open={isOpen}
+                  onclick={() => toggleRiskInfo(row.label)}
+                  aria-label="Show source data for {row.label}"
+                  aria-expanded={isOpen}
+                  title="Where did this number come from?"
+                >i</button>
                 <span class="risks-dot" class:alert={row.level==='alert'} class:warn={row.level==='warn'} class:info={row.level==='info'}></span>
+                {#if isOpen}
+                  <div class="risks-info-pop" role="region" aria-label="Source data for {row.label}">
+                    <header class="risks-info-pop-head">
+                      <span class="kick">Source · {row.label}</span>
+                      <button type="button" class="risks-info-close mono" onclick={closeRiskInfo} aria-label="Close">×</button>
+                    </header>
+                    <p class="risks-info-pop-prov">{RISK_PROVENANCE[row.label]}</p>
+                    {#if sources.length === 0}
+                      <p class="risks-info-pop-empty mono">No active sources for this signal in this window.</p>
+                    {:else}
+                      <ul class="risks-info-pop-list">
+                        {#each sources as src, i (src.repo + src.branch + src.worktree + i)}
+                          <li class="risks-info-pop-item">
+                            <div class="risks-info-pop-item-hd">
+                              <span class="mono risks-info-pop-repo">{src.repo}</span>
+                              {#if src.branch}<span class="mono dim">·</span><span class="mono risks-info-pop-branch">{src.branch}</span>{/if}
+                              <span class="risks-info-pop-kind mono">{src.kind}</span>
+                            </div>
+                            {#if src.detail}<p class="risks-info-pop-detail">{src.detail}</p>{/if}
+                            {#if src.files.length > 0}
+                              <div class="risks-info-pop-evlabel mono">files ({src.files.length})</div>
+                              <ul class="risks-info-pop-files">
+                                {#each src.files.slice(0, 8) as f}
+                                  <li class="mono dim">{f}</li>
+                                {/each}
+                                {#if src.files.length > 8}
+                                  <li class="mono dim">… and {src.files.length - 8} more</li>
+                                {/if}
+                              </ul>
+                            {/if}
+                            {#if src.commits.length > 0}
+                              <div class="risks-info-pop-evlabel mono">commits ahead ({src.commits.length})</div>
+                              <ul class="risks-info-pop-files">
+                                {#each src.commits.slice(0, 6) as c}
+                                  <li class="mono"><span class="dim">{c.sha.slice(0,7)}</span> {c.subject}</li>
+                                {/each}
+                                {#if src.commits.length > 6}
+                                  <li class="mono dim">… and {src.commits.length - 6} more</li>
+                                {/if}
+                              </ul>
+                            {/if}
+                            {#if src.worktree && src.worktree !== src.repo}
+                              <div class="risks-info-pop-meta mono dim">worktree: {src.worktree}</div>
+                            {/if}
+                            {#if src.ageMinutes > 0}
+                              <div class="risks-info-pop-meta mono dim">first observed {fmtMinutes(src.ageMinutes)} ago</div>
+                            {/if}
+                          </li>
+                        {/each}
+                      </ul>
+                    {/if}
+                  </div>
+                {/if}
               </li>
             {/each}
           </ul>
@@ -1105,6 +1288,72 @@
           </div>
         {/each}
       </section>
+
+      <!-- ── 5b. Klyne usage transparency tile ───────────────────── -->
+      {#if klyneUsage && klyneUsage.klyne.runs > 0}
+        <section class="card klyne-usage">
+          <button
+            type="button"
+            class="ku-row"
+            onclick={() => klyneUsageExpanded = !klyneUsageExpanded}
+            aria-expanded={klyneUsageExpanded}
+            title="How much of today's Claude usage was spent by klyne itself"
+          >
+            <span class="ku-icon" aria-hidden="true">◆</span>
+            <span class="ku-text">
+              <strong>Klyne overhead:</strong>
+              <span class="mono">{fmtTokens(klyneUsage.klyne.total_tokens)}</span>
+              <span class="mono dim">tokens</span>
+              {#if klyneUsage.user_total.total_tokens > 0}
+                <span class="ku-sep">·</span>
+                <span class="mono">{klyneUsage.share_pct.toFixed(1)}%</span>
+                <span class="mono dim">of today's Claude usage</span>
+              {/if}
+              <span class="ku-sep">·</span>
+              <span class="mono dim">{klyneUsage.klyne.runs} run{klyneUsage.klyne.runs === 1 ? '' : 's'}</span>
+            </span>
+            <span class="ku-caret">{klyneUsageExpanded ? '▾' : '▸'}</span>
+          </button>
+          {#if klyneUsageExpanded}
+            <div class="ku-detail">
+              <div class="ku-tot">
+                <div class="ku-tot-cell">
+                  <span class="kick">Input</span>
+                  <span class="num-m mono">{fmtTokens(klyneUsage.klyne.input_tokens)}</span>
+                </div>
+                <div class="ku-tot-cell">
+                  <span class="kick">Output</span>
+                  <span class="num-m mono">{fmtTokens(klyneUsage.klyne.output_tokens)}</span>
+                </div>
+                <div class="ku-tot-cell">
+                  <span class="kick">Cache read</span>
+                  <span class="num-m mono">{fmtTokens(klyneUsage.klyne.cache_read_tokens)}</span>
+                </div>
+                <div class="ku-tot-cell">
+                  <span class="kick">Cache write</span>
+                  <span class="num-m mono">{fmtTokens(klyneUsage.klyne.cache_write_tokens)}</span>
+                </div>
+              </div>
+              {#if klyneUsage.klyne.by_operation.length > 0}
+                <div class="ku-ops">
+                  {#each klyneUsage.klyne.by_operation as op (op.operation)}
+                    <div class="ku-op">
+                      <span class="ku-op-name">{klyneOpLabel(op.operation)}</span>
+                      <span class="mono dim">{op.runs} run{op.runs === 1 ? '' : 's'}</span>
+                      <span class="mono">{fmtTokens(op.total_tokens)} tokens</span>
+                    </div>
+                  {/each}
+                </div>
+              {/if}
+              <p class="ku-note mono dim">
+                Tokens only · klyne never tracks USD ·
+                denominator is every Claude message landed today
+                ({fmtTokens(klyneUsage.user_total.total_tokens)} total).
+              </p>
+            </div>
+          {/if}
+        </section>
+      {/if}
 
       <!-- ── 6. Services table ───────────────────────────────────── -->
       <section class="card services">
@@ -1511,12 +1760,162 @@
   .risks-head { display: flex; align-items: baseline; justify-content: space-between; }
   .risks-num-row { display: flex; align-items: baseline; gap: 8px; }
   .risks-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 5px; }
-  .risks-list li { display: grid; grid-template-columns: 24px 1fr auto; align-items: center; gap: 8px; }
+  .risks-li {
+    display: grid;
+    grid-template-columns: 24px 1fr auto auto;
+    align-items: center;
+    gap: 8px;
+    position: relative;
+  }
+  .risks-li-open {
+    background: var(--bg-inset);
+    border-radius: 6px;
+    padding: 4px 6px;
+    margin: -4px -6px;
+  }
   .risks-list .mono { font-size: 11px; }
+  .risks-label { min-width: 0; }
   .risks-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--fg-muted); opacity: 0.7; }
   .risks-dot.alert { background: var(--alert); }
   .risks-dot.warn  { background: var(--warn); }
   .risks-dot.info  { background: var(--info); }
+
+  /* "i" info button + provenance popover (2026-05-27) — exposes the
+     concrete source data behind each rolled-up risk count so the user
+     can verify the signal instead of having to trust the label. */
+  .risks-info-btn {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    border: 1px solid var(--border-soft);
+    background: transparent;
+    color: var(--fg-muted);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-style: italic;
+    line-height: 1;
+    padding: 0;
+    cursor: pointer;
+    transition: color var(--t-fast), border-color var(--t-fast), background var(--t-fast);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .risks-info-btn:hover {
+    color: var(--fg);
+    border-color: var(--fg-muted);
+    background: var(--bg-card);
+  }
+  .risks-info-btn-open {
+    color: var(--accent);
+    border-color: var(--accent);
+    background: color-mix(in oklch, var(--accent) 10%, var(--bg-card-2));
+  }
+  .risks-info-pop {
+    grid-column: 1 / -1;
+    margin-top: 8px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-soft);
+    border-radius: 8px;
+    padding: 10px 12px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .risks-info-pop-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .risks-info-close {
+    background: transparent;
+    border: none;
+    color: var(--fg-muted);
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+  .risks-info-close:hover { color: var(--fg); background: var(--bg-inset); }
+  .risks-info-pop-prov {
+    margin: 0;
+    font-size: 11px;
+    line-height: 1.45;
+    color: var(--fg-soft);
+  }
+  .risks-info-pop-empty {
+    margin: 4px 0 0;
+    font-size: 11px;
+    color: var(--fg-muted);
+    font-style: italic;
+  }
+  .risks-info-pop-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .risks-info-pop-item {
+    border-left: 2px solid var(--border-soft);
+    padding: 4px 0 4px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .risks-info-pop-item-hd {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    font-size: 11.5px;
+  }
+  .risks-info-pop-repo { color: var(--fg); font-weight: 600; }
+  .risks-info-pop-branch { color: var(--info); }
+  .risks-info-pop-kind {
+    margin-left: auto;
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: var(--bg-inset);
+    border: 1px solid var(--border-hair);
+    color: var(--fg-muted);
+    font-size: 9.5px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+  .risks-info-pop-detail {
+    margin: 0;
+    font-size: 11px;
+    color: var(--fg-soft);
+    line-height: 1.45;
+  }
+  .risks-info-pop-evlabel {
+    font-size: 9.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--fg-muted);
+    margin-top: 2px;
+  }
+  .risks-info-pop-files {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .risks-info-pop-files li {
+    font-size: 11px;
+    line-height: 1.4;
+    word-break: break-all;
+  }
+  .risks-info-pop-meta {
+    font-size: 10px;
+    color: var(--fg-dim);
+  }
 
   /* ── 4. Hero ─────────────────────────────────────────────── */
   .hero { padding: 24px 26px; display: flex; flex-direction: column; gap: 18px; }
@@ -1623,6 +2022,28 @@
   .metric  { padding: 2px 18px; border-right: 1px solid var(--border-hair); display: flex; flex-direction: column; gap: 4px; min-width: 0; }
   .metric.no-bar { border-right: none; }
   .metric-k { font-size: 10px; }
+
+  /* ── 5b. Klyne usage transparency tile ───────────────────── */
+  .klyne-usage { padding: 0; overflow: hidden; }
+  .ku-row {
+    display: flex; align-items: center; gap: 10px;
+    width: 100%; padding: 12px 18px;
+    background: transparent; border: 0; cursor: pointer;
+    color: var(--fg); font: inherit; text-align: left;
+  }
+  .ku-row:hover { background: var(--bg-card-hover, rgba(255,255,255,0.02)); }
+  .ku-icon { color: var(--accent); font-size: 11px; flex-shrink: 0; }
+  .ku-text { flex: 1; display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; font-size: 13px; }
+  .ku-text strong { font-weight: 600; }
+  .ku-sep { color: var(--fg-dim); }
+  .ku-caret { color: var(--fg-dim); font-size: 11px; flex-shrink: 0; }
+  .ku-detail { padding: 4px 18px 16px; border-top: 1px solid var(--border-hair); display: flex; flex-direction: column; gap: 14px; }
+  .ku-tot { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; padding-top: 12px; }
+  .ku-tot-cell { display: flex; flex-direction: column; gap: 4px; }
+  .ku-ops { display: flex; flex-direction: column; gap: 6px; }
+  .ku-op { display: flex; align-items: baseline; gap: 12px; font-size: 12px; }
+  .ku-op-name { flex: 1; color: var(--fg); }
+  .ku-note { font-size: 10.5px; line-height: 1.5; margin: 0; }
 
   /* ── 6. Services ─────────────────────────────────────────── */
   .services { padding: 0; overflow: hidden; }

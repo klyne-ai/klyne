@@ -27,9 +27,9 @@ type compileCall struct {
 	Day         string
 }
 
-func (s *stubCompileRunner) run(ctx context.Context, projectPath, day string) ([]byte, error) {
+func (s *stubCompileRunner) run(ctx context.Context, projectPath, day string) (claudeRunResult, error) {
 	s.calls = append(s.calls, compileCall{ProjectPath: projectPath, Day: day})
-	return s.output, s.err
+	return claudeRunResult{Output: string(s.output), Model: "stub"}, s.err
 }
 
 func newCompileRouter(t *testing.T, db *store.DB, runner *stubCompileRunner) http.Handler {

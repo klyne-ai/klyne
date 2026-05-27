@@ -55,6 +55,7 @@ func TestMigrationsApply(t *testing.T) {
 		"021_daily_productivity_snapshot.sql",    // per-(project,day) snapshot for deterministic dashboard rendering
 		"022_worklog_reflections_day.sql",        // explicit covered-day column so catch-up reflections surface under the day they cover
 		"023_worklog_reflections_body_json.sql",  // typed What-was-done payload column (NULLable, parsed by ComposeWWD)
+		"024_klyne_llm_usage.sql",                // per-run token usage for klyne-spawned claude subprocesses
 	}
 	if len(sqlFiles) != len(expected) {
 		t.Fatalf("expected %d migrations, found %d: %v", len(expected), len(sqlFiles), sqlFiles)

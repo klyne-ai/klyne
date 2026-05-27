@@ -105,6 +105,13 @@ const (
 	// /worklog/reflect/run so the UI's existing "Run /klyne:reflect now"
 	// button does reflect → sync in one round-trip.
 	RouteProductivityCompile = "/api/productivity/compile"
+	// RouteKlyneUsage: GET /api/klyne-usage?day=YYYY-MM-DD.
+	// Returns the day's klyne LLM-subprocess token totals (productivity-
+	// sync + reflect runs) alongside the user's full-day Claude usage
+	// summed from messages.ts, so the dashboard tile can render
+	// "Klyne: <total_tokens> · <share>% of today's Claude usage".
+	// Tokens only — never USD; see internal/store/klyne_llm_usage.go.
+	RouteKlyneUsage = "/api/klyne-usage"
 	// RouteProjectDelete: DELETE /api/projects?path=<abs>&dry_run=true|false.
 	// Wipes (or counts, in dry-run mode) every project-scoped row across
 	// stop_summaries, worklog_reflections, decisions, runbook_dismissals,
@@ -144,6 +151,7 @@ func AllRoutes() []string {
 		RouteProductivityDates,
 		RouteProductivityRecompose,
 		RouteProductivityCompile,
+		RouteKlyneUsage,
 		RouteProjectDelete,
 	}
 }
@@ -158,6 +166,26 @@ func AllRoutes() []string {
 type ProjectDeleteResponse struct {
 	Deleted bool                      `json:"deleted"`
 	Counts  store.ProjectDeleteCounts `json:"counts"`
+}
+
+// ---------------------------------------------------------------------------
+// /api/klyne-usage
+// ---------------------------------------------------------------------------
+
+// KlyneUsageResponse is GET /api/klyne-usage?day=YYYY-MM-DD.
+//
+// Klyne carries the per-operation breakdown + totals for klyne-spawned
+// subprocesses on that day. UserTotal is the user's full-day Claude
+// usage summed from messages.ts — INCLUDES klyne's own runs (because the
+// daemon ingests every claude session) so SharePct = Klyne.TotalTokens /
+// UserTotal.TotalTokens directly answers "how much of my Claude usage
+// is klyne". Zero when UserTotal.TotalTokens == 0 (no traffic yet).
+type KlyneUsageResponse struct {
+	Day       string                     `json:"day"`
+	Klyne     store.KlyneLLMUsageDay     `json:"klyne"`
+	UserTotal store.DailyUserTokenTotals `json:"user_total"`
+	// SharePct is rounded to one decimal place (e.g. 2.3 means 2.3%).
+	SharePct float64 `json:"share_pct"`
 }
 
 // ---------------------------------------------------------------------------

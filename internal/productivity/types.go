@@ -280,6 +280,47 @@ type WhatWasDoneCard struct {
 		Details []WWDDetail `json:"details"`
 	} `json:"tier2"`
 	LLMCompiled bool `json:"llm_compiled"`
+	// Narrative (v2 — 2026-05-27): when the writer used the new
+	// productivity-sync schema, these fields drive a richer dashboard
+	// layout with a service summary paragraph, stat tiles, and per-
+	// ticket narrative cards grouped into sections. The UI prefers
+	// Narrative when present and falls back to Tier1/Tier2 otherwise.
+	Narrative *WWDNarrative `json:"narrative,omitempty"`
+}
+
+// WWDNarrative is the v2 narrative payload for a service's card on the
+// dashboard. ONE card per (ticket, kind); same ticket can appear under
+// SHIPPED and FIXED. The body field is markdown prose; refs are typed
+// tokens the UI styles by Type.
+type WWDNarrative struct {
+	Summary  string      `json:"summary,omitempty"`  // 1-2 sentence service-level paragraph
+	Stats    WWDStats    `json:"stats"`              // derived per-kind counts shown as tiles
+	Cards    []WWDCard   `json:"cards"`              // narrative cards
+	Followup string      `json:"followup,omitempty"` // optional "open question for tomorrow"
+}
+
+// WWDStats mirrors store.WWDStats — per-kind counts as stat tiles.
+type WWDStats struct {
+	Shipped      int `json:"shipped"`
+	Fixed        int `json:"fixed"`
+	Decisions    int `json:"decisions"`
+	Investigated int `json:"investigated"`
+	InProgress   int `json:"in_progress,omitempty"`
+}
+
+// WWDCard mirrors store.WWDCard — one narrative card.
+type WWDCard struct {
+	Kind     string   `json:"kind"`
+	TicketID string   `json:"ticket_id,omitempty"`
+	Title    string   `json:"title"`
+	Body     string   `json:"body"`
+	Refs     []WWDRef `json:"refs,omitempty"`
+}
+
+// WWDRef mirrors store.WWDRef — one typed reference token.
+type WWDRef struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
 }
 
 // ReflectionGroup is one worklog_reflections row in the

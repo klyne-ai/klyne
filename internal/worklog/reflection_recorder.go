@@ -81,24 +81,133 @@ var detailKindOrder = []string{
 // digit shape).
 var detailWhenRe = regexp.MustCompile(`^[0-2][0-9]:[0-5][0-9]$`)
 
-// WWDPayload is the typed What-was-done payload the MCP tool receives
-// on record_reflection. It mirrors store.WWDPayload exactly — keeping a
-// worklog-package copy lets the recorder validate without importing the
-// store package's parsing-side helpers and keeps the wire contract
-// authored in one place per layer.
+// WWDPayload is the typed What-was-done payload the MCP tool receives.
+// Mirrors store.WWDPayload exactly — see that type's doc-comment for
+// the v1/v2 generation distinction (legacy Details vs new Cards). The
+// recorder accepts either or both; ValidateWWDPayload picks the right
+// rule set per generation.
 type WWDPayload struct {
-	Service string      `json:"service"`
-	Details []WWDDetail `json:"details"`
+	Service        string      `json:"service"`
+	ServiceSummary string      `json:"service_summary,omitempty"`
+	Stats          *WWDStats   `json:"stats,omitempty"`
+	Cards          []WWDCard   `json:"cards,omitempty"`
+	Followup       string      `json:"followup,omitempty"`
+	// Legacy v1 — kept for back-compat. New writers populate Cards.
+	Details []WWDDetail `json:"details,omitempty"`
 }
 
-// WWDDetail is one typed detail in a WWDPayload. Field order + tags
-// match store.WWDDetail so the wire JSON is identical on both sides.
+// WWDStats are the per-kind counts shown as stat tiles on the dashboard.
+// The composer can compute these from Cards mechanically, but the
+// recorder accepts an explicit value when the writer wants to surface
+// custom phrasing (e.g. lumping MAJOR into "shipped" for UX).
+type WWDStats struct {
+	Shipped      int `json:"shipped"`
+	Fixed        int `json:"fixed"`
+	Decisions    int `json:"decisions"`
+	Investigated int `json:"investigated"`
+	InProgress   int `json:"in_progress,omitempty"`
+}
+
+// WWDCard is one narrative card on the dashboard. ONE card per
+// (ticket, kind) — same ticket can appear under SHIPPED AND FIXED. Body
+// is markdown prose (2-4 sentences); refs are typed tokens the UI styles
+// by kind.
+type WWDCard struct {
+	Kind     string   `json:"kind"`
+	TicketID string   `json:"ticket_id,omitempty"`
+	Title    string   `json:"title"`
+	Body     string   `json:"body"`
+	Refs     []WWDRef `json:"refs,omitempty"`
+}
+
+// WWDRef is a typed reference token shown in the card footer.
+type WWDRef struct {
+	Type string `json:"type"` // file|branch|pr|commit|ticket|test|session
+	Text string `json:"text"`
+}
+
+// WWDDetail is the legacy v1 detail shape. Retained for back-compat.
 type WWDDetail struct {
 	Kind      string   `json:"kind"`
 	When      string   `json:"when"`
 	Text      string   `json:"text"`
 	Evidence  []string `json:"evidence"`
 	SessionID string   `json:"session_id,omitempty"`
+}
+
+// validRefTypes is the closed enum of WWDRef.Type values. Anything else
+// is rejected so the UI can render every ref it sees.
+var validRefTypes = map[string]bool{
+	"file":    true,
+	"branch":  true,
+	"pr":      true,
+	"commit":  true,
+	"ticket":  true,
+	"test":    true,
+	"session": true,
+}
+
+// validateWWDCards checks the v2 narrative-card payload. Independent
+// from the legacy Details path so each generation can evolve.
+func validateWWDCards(p WWDPayload) error {
+	if len(p.Cards) == 0 {
+		return errors.New("worklog: wwd payload: at least one card required")
+	}
+	if len(p.Cards) > 20 {
+		return fmt.Errorf("worklog: wwd payload: at most 20 cards per service, got %d", len(p.Cards))
+	}
+	if len(p.ServiceSummary) > 600 {
+		return fmt.Errorf("worklog: wwd payload: service_summary %d chars > 600", len(p.ServiceSummary))
+	}
+	if len(p.Followup) > 400 {
+		return fmt.Errorf("worklog: wwd payload: followup %d chars > 400", len(p.Followup))
+	}
+	for i, c := range p.Cards {
+		if !validDetailKinds[c.Kind] {
+			return fmt.Errorf("worklog: wwd payload: card %d kind %q not in {SHIPPED,MAJOR,FIXED,DECISION,INVESTIGATED,IN_PROGRESS}", i, c.Kind)
+		}
+		if strings.TrimSpace(c.Title) == "" {
+			return fmt.Errorf("worklog: wwd payload: card %d title empty", i)
+		}
+		if len(c.Title) > 160 {
+			return fmt.Errorf("worklog: wwd payload: card %d title %d chars > 160", i, len(c.Title))
+		}
+		if strings.TrimSpace(c.Body) == "" {
+			return fmt.Errorf("worklog: wwd payload: card %d body empty", i)
+		}
+		if len(c.Body) > 1200 {
+			return fmt.Errorf("worklog: wwd payload: card %d body %d chars > 1200", i, len(c.Body))
+		}
+		for j, r := range c.Refs {
+			if !validRefTypes[r.Type] {
+				return fmt.Errorf("worklog: wwd payload: card %d ref[%d] type %q not in {file,branch,pr,commit,ticket,test,session}", i, j, r.Type)
+			}
+			if strings.TrimSpace(r.Text) == "" {
+				return fmt.Errorf("worklog: wwd payload: card %d ref[%d] text empty", i, j)
+			}
+		}
+		// PR-ref invariant: any "PR #<n>" mentioned in body MUST appear in
+		// some ref with type=pr (or in the title). Prevents fabricated
+		// PR numbers on the dashboard.
+		if matches := prRefRe.FindAllStringSubmatch(c.Body+" "+c.Title, -1); len(matches) > 0 {
+			haystack := strings.ToLower(c.Title + "\n")
+			for _, r := range c.Refs {
+				haystack += strings.ToLower(r.Text) + "\n"
+			}
+			for _, m := range matches {
+				if len(m) < 2 {
+					continue
+				}
+				num := m[1]
+				if !strings.Contains(haystack, "#"+num) &&
+					!strings.Contains(haystack, "pr "+num) &&
+					!strings.Contains(haystack, "pr#"+num) {
+					return fmt.Errorf("worklog: wwd payload: card %d references PR #%s not present in refs", i, num)
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // ValidateWWDPayload enforces the §1.1 invariants the MCP tool surfaces
@@ -123,8 +232,14 @@ func ValidateWWDPayload(p WWDPayload) error {
 	if strings.TrimSpace(p.Service) == "" {
 		return errors.New("worklog: wwd payload: service required")
 	}
+	// v2 narrative-card path. When Cards is populated we run the v2
+	// validator and ignore Details (the caller chose the new generation).
+	if len(p.Cards) > 0 {
+		return validateWWDCards(p)
+	}
+	// v1 legacy path (Details). Same rules as before — kept verbatim.
 	if len(p.Details) == 0 {
-		return errors.New("worklog: wwd payload: at least one detail required")
+		return errors.New("worklog: wwd payload: at least one card or detail required")
 	}
 	if len(p.Details) > 6 {
 		return fmt.Errorf("worklog: wwd payload: at most 6 details per (day, service) bucket, got %d", len(p.Details))
@@ -195,8 +310,51 @@ func ValidateWWDPayload(p WWDPayload) error {
 func renderWWDPayloadMarkdown(p WWDPayload) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "## What was done — %s\n\n", p.Service)
-	// Group by kind, in §1.2 render order, preserving input order within
-	// a kind. Unknown kinds are filtered upstream by ValidateWWDPayload.
+	if p.ServiceSummary != "" {
+		b.WriteString(p.ServiceSummary)
+		b.WriteString("\n\n")
+	}
+	// v2 narrative cards: group by kind with section headers.
+	if len(p.Cards) > 0 {
+		sectionLabel := map[string]string{
+			"SHIPPED":      "Features shipped",
+			"MAJOR":        "Major work",
+			"FIXED":        "Bugs fixed",
+			"DECISION":     "Decisions",
+			"INVESTIGATED": "Investigated · no fix landed",
+			"IN_PROGRESS":  "In progress",
+		}
+		byKind := map[string][]WWDCard{}
+		for _, c := range p.Cards {
+			byKind[c.Kind] = append(byKind[c.Kind], c)
+		}
+		for _, k := range detailKindOrder {
+			cs := byKind[k]
+			if len(cs) == 0 {
+				continue
+			}
+			fmt.Fprintf(&b, "### %s\n\n", sectionLabel[k])
+			for _, c := range cs {
+				head := c.Kind
+				if c.TicketID != "" {
+					head = fmt.Sprintf("%s · %s", c.Kind, c.TicketID)
+				}
+				fmt.Fprintf(&b, "**%s** — %s\n\n%s\n\n", head, c.Title, c.Body)
+				if len(c.Refs) > 0 {
+					tokens := make([]string, 0, len(c.Refs))
+					for _, r := range c.Refs {
+						tokens = append(tokens, r.Text)
+					}
+					fmt.Fprintf(&b, "_refs: %s_\n\n", strings.Join(tokens, " · "))
+				}
+			}
+		}
+		if p.Followup != "" {
+			fmt.Fprintf(&b, "### Open question for tomorrow\n\n%s\n", p.Followup)
+		}
+		return b.String()
+	}
+	// v1 legacy details path.
 	byKind := make(map[string][]WWDDetail, len(detailKindOrder))
 	for _, d := range p.Details {
 		byKind[d.Kind] = append(byKind[d.Kind], d)
@@ -218,7 +376,7 @@ func renderWWDPayloadMarkdown(p WWDPayload) string {
 // `evidence` list is exclusively commit SHAs / file paths / test names.
 func collectTypedEvidence(p WWDPayload) []string {
 	seen := map[string]bool{}
-	out := make([]string, 0, len(p.Details))
+	out := make([]string, 0)
 	add := func(s string) {
 		if strings.TrimSpace(s) == "" || seen[s] {
 			return
@@ -226,6 +384,16 @@ func collectTypedEvidence(p WWDPayload) []string {
 		seen[s] = true
 		out = append(out, s)
 	}
+	// v2 cards: ticket id + each ref's text.
+	for _, c := range p.Cards {
+		if c.TicketID != "" {
+			add(c.TicketID)
+		}
+		for _, r := range c.Refs {
+			add(r.Text)
+		}
+	}
+	// v1 details: session_id + each evidence token.
 	for _, d := range p.Details {
 		add(d.SessionID)
 		for _, ev := range d.Evidence {
@@ -328,12 +496,23 @@ func RecordReflectionTyped(ctx context.Context, db *store.DB, projectPath string
 	}
 	dayLabel := day.Local().Format("2006-01-02")
 
-	// Cursor advancement is identical to the prose path: take MAX(ts)
-	// across the cited session_ids inside this day's local window.
-	cursor, cerr := stopSummaryCursorForCitations(ctx, db, projectPath, day, allEvidence)
-	if cerr != nil {
-		cursor = 0
+	// Idempotency invariant (Fix B+D, 2026-05-26): /klyne:reflect for a
+	// given (project, day, service) MUST be replayable. Earlier same-day
+	// typed payloads are deleted before this insert so the dashboard
+	// always reflects the latest synthesis instead of accumulating ghost
+	// details from prior runs. Prose-only rows (body_json NULL) are left
+	// alone — their insights still surface in the prose panel.
+	if _, derr := store.DeleteTypedReflectionsForProjectDayService(ctx, db, projectPath, dayLabel, payload.Service); derr != nil {
+		return store.Reflection{}, fmt.Errorf("worklog: clear prior typed reflections: %w", derr)
 	}
+
+	// Cursor advancement: cover the FULL day window for this (project,
+	// day) so a future cross-day reflect sees the day as fully synthesized.
+	// Pre-fix this used MAX(ts) of cited session_ids — under-citation by
+	// the LLM left non-cited turns "covered" without ever being
+	// synthesized into a typed detail, which was the operations-app
+	// 2026-05-26 1-detail-card bug.
+	cursor := dayEndCursorMs(day)
 
 	refl := store.Reflection{
 		ID:                  fmt.Sprintf("ref-%s-%d", dayLabel, now.UnixNano()),
@@ -533,6 +712,18 @@ func writeProductivitySnapshot(ctx context.Context, db *store.DB, projectPath st
 		CreatedAt:          now,
 		UpdatedAt:          now,
 	})
+}
+
+// dayEndCursorMs returns the millisecond timestamp of the last instant
+// inside `day`'s local-zone window. Used by the typed-reflection path
+// as the cursor watermark: once a day has been synthesized into a typed
+// payload, every stop_summary inside that day is considered covered for
+// the global "pending entries" UX. Re-reflecting the same day rewrites
+// the typed payload but the cursor stays day-end either way.
+func dayEndCursorMs(day time.Time) int64 {
+	loc := day.Location()
+	dayStart := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, loc)
+	return dayStart.Add(24*time.Hour).UnixMilli() - 1
 }
 
 // stopSummaryCursorForCitations returns MAX(stop_summaries.ts) for the

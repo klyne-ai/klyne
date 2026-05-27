@@ -37,15 +37,15 @@ type stubRunner struct {
 	calls  []string
 	output []byte
 	err    error
-	fn     func(ctx context.Context, projectPath string) ([]byte, error)
+	fn     func(ctx context.Context, projectPath string) (claudeRunResult, error)
 }
 
-func (s *stubRunner) run(ctx context.Context, projectPath string) ([]byte, error) {
+func (s *stubRunner) run(ctx context.Context, projectPath string) (claudeRunResult, error) {
 	s.calls = append(s.calls, projectPath)
 	if s.fn != nil {
 		return s.fn(ctx, projectPath)
 	}
-	return s.output, s.err
+	return claudeRunResult{Output: string(s.output), Model: "stub"}, s.err
 }
 
 func newReflectRunRouter(t *testing.T, db *store.DB, runner *stubRunner) http.Handler {
@@ -209,10 +209,10 @@ func TestReflectRun_ClientCancelKillsSubprocess(t *testing.T) {
 
 	observed := make(chan struct{})
 	runner := &stubRunner{
-		fn: func(ctx context.Context, _ string) ([]byte, error) {
+		fn: func(ctx context.Context, _ string) (claudeRunResult, error) {
 			<-ctx.Done() // block until client disconnects / context cancelled
 			close(observed)
-			return []byte("partial"), ctx.Err()
+			return claudeRunResult{Output: "partial", Model: "stub"}, ctx.Err()
 		},
 	}
 	srv := httptest.NewServer(newReflectRunRouter(t, db, runner))

@@ -62,6 +62,21 @@ func UpsertDailyProductivitySnapshot(ctx context.Context, db *DB, s DailyProduct
 	if s.CreatedAt == 0 {
 		s.CreatedAt = s.UpdatedAt
 	}
+	// Upsert precedence rules:
+	//   1. Reflection-source upserts ALWAYS win (re-running /klyne:reflect
+	//      or productivity-sync produces a fresh authoritative payload).
+	//   2. Live-source upserts only overwrite when the existing row is
+	//      NOT a substantive reflection. A "substantive reflection" is one
+	//      that has measured activity — TotalActiveMinutes > 0. A
+	//      barebones reflection (TotalActiveMinutes = 0, which happens when
+	//      PersistLLMCompiledCard writes the FIRST snapshot for a day
+	//      without a prior live snapshot to merge into) CAN be replaced by
+	//      a live row that has real time/branches/sessions data. The
+	//      WhatWasDone narrative card it carried lives separately in
+	//      productivity_snapshots payload_json under services[].what_was_done,
+	//      and hydrateWhatWasDone re-overlays it from a fresh snapshot
+	//      read on every dashboard request — so the live overwrite is
+	//      lossless for the card.
 	_, err := db.Write().ExecContext(ctx, `
 INSERT INTO daily_productivity_snapshot (
     project_path, day, payload_json, total_active_minutes,
@@ -72,8 +87,9 @@ ON CONFLICT(project_path, day) DO UPDATE SET
     total_active_minutes = excluded.total_active_minutes,
     source               = excluded.source,
     updated_at           = excluded.updated_at
-WHERE daily_productivity_snapshot.source != 'reflection'
-   OR excluded.source = 'reflection'`,
+WHERE excluded.source = 'reflection'
+   OR daily_productivity_snapshot.source != 'reflection'
+   OR daily_productivity_snapshot.total_active_minutes = 0`,
 		s.ProjectPath, s.Day, s.PayloadJSON, s.TotalActiveMinutes,
 		s.Source, s.CreatedAt, s.UpdatedAt)
 	if err != nil {

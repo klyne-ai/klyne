@@ -38,14 +38,22 @@ The output of this command is the input to the productivity dashboard's per-serv
      - a ticket id mentioned in the entry (e.g. `CLI-1396`)
    - **`session_id`** — the originating entry's `session_id`. When a detail aggregates multiple entries, pick the one whose work the detail's text most directly describes.
 
-   **Merging rules — apply BEFORE counting details:**
+   **Coverage + merging rules — apply BEFORE counting details:**
 
-   A "detail" is one **meaningful accomplishment across N turns**, not one turn-per-detail. Aggressively merge before you count toward the cap:
+   A "detail" is one **meaningful accomplishment across N turns**, not one turn-per-detail. Two opposing failure modes you MUST avoid:
 
-   - **Same ticket/branch/feature → ONE detail.** If 2+ entries reference the same ticket id (`CLI-1452`), branch (`feature/CLI-1452-followup-cta-banner`), or feature description, write ONE merged detail that names the outcome and folds all evidence into one `evidence` array. Do NOT emit a separate detail for "Added the helper", "Added the CTA", "Rebased the branch", "Fixed the test" — those are sub-steps of the same shipped feature.
-   - **Plumbing work folds into its parent.** Rebases onto main, merge commits, lint passes, CI green-runs, dependency bumps, test-only updates that exist solely to support a feature ship — do NOT emit as their own detail. Either (a) absorb into the parent feature's detail as part of its `evidence`, or (b) drop entirely. A standalone rebase is never `SHIPPED` — `SHIPPED` is reserved for user-visible code that landed.
-   - **Same file edited multiple times → ONE detail** describing the cumulative outcome, not each touch.
-   - **Quality over completeness:** if 3 cohesive details cover the day's real outcomes, write 3. The cap is `≤6`, not a target.
+   ❌ **Over-splitting** — emitting 3 SHIPPED entries for one ticket (one for the helper, one for the rebase, one for the PR open). All three are sub-steps of the same ship.
+   ❌ **Over-collapsing** — emitting 1 detail for an entire project-day, dropping work on other tickets. If today touched CLI-1452 AND CLI-1340 AND CLI-1485, ONE detail naming only the rebase is a hard failure; the work on CLI-1340 and CLI-1485 simply disappears from the dashboard.
+
+   To stay between those:
+
+   - **Coverage invariant — every distinct ticket / branch / PR you see in the input MUST appear in some detail.** Read the entries. Count distinct ticket IDs (`CLI-1452`, `CLI-1340`, `CLI-1485`, ...) and distinct branch names (`feature/CLI-1452-followup-cta-banner`, `feature/CLI-1340-prevent-pcc-edits-on-cancelled-bill`, ...). Each one owes you at least one detail. Dropping a ticket's work is the failure mode users complain about most.
+   - **Different tickets = different details.** The "same ticket → ONE detail" rule below does NOT mean "same project → ONE detail." Distinct CLI tickets in the same repo on the same day stay SEPARATE.
+   - **Same ticket / branch → merge sub-steps into ONE detail.** Within a single ticket, 2+ entries that describe steps of the same accomplishment (added the helper, wired the CTA, rebased, opened the PR, fixed the test) are ONE SHIPPED detail. Fold every sub-step's evidence (file paths, commit SHAs, PR numbers, session_ids) into that detail's `evidence` list.
+   - **Plumbing folds into the parent feature, never standalone.** Rebases onto main, merge commits, lint passes, CI green-runs, dependency bumps, test-only updates that exist solely to support a feature ship — do NOT emit as their own detail. Either fold into the parent ticket's SHIPPED detail (as evidence), or drop. A standalone rebase is never `SHIPPED` — `SHIPPED` is reserved for user-visible code that landed.
+   - **Distinct kinds on the same ticket get separate details.** A `SHIPPED` outcome plus a `DECISION` made during that ticket's work plus an `INVESTIGATED` finding are 3 distinct details with the same ticket id in their evidence. Don't collapse different kinds together.
+   - **Same file edited multiple times within the same ticket → fold into that ticket's detail.**
+   - **Completeness within the cap:** within the ≤6 cap, write enough details to cover EVERY distinct ticket and EVERY distinct kind of major work. If a day has 5 tickets all touched meaningfully, that's 5 details (one per ticket) and you have 1 detail of budget left for a cross-ticket decision or investigation. If a day has 2 tickets but 4 distinct decisions, that's reasonable too.
 
    **Hard rules the validator enforces:**
 

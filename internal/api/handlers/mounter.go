@@ -158,4 +158,10 @@ func (m *Mounter) Mount(r chi.Router) {
 	// Sessions and messages (the transcript layer) are preserved.
 	hProjectDelete := NewProjectDeleteHandler(m.deps.DB)
 	r.Delete(api.RouteProjectDelete, hProjectDelete.Delete)
+
+	// GET /api/klyne-usage — per-day klyne subprocess token totals +
+	// user's daily Claude denominator, used by the productivity tile
+	// "Klyne is X% of today's Claude usage". Tokens only, never USD.
+	hKlyneUsage := NewKlyneUsageHandler(m.deps.DB)
+	r.Get(api.RouteKlyneUsage, hKlyneUsage.Get)
 }
