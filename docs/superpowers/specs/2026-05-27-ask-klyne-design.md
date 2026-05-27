@@ -105,11 +105,15 @@ posture (no shell interpolation; subprocess args are positional).
 const RouteAsk = "/api/ask"
 
 type AskRequest struct {
-    ProjectPath string       `json:"project_path"`
-    FromMs      int64        `json:"from_ms"` // inclusive
-    ToMs        int64        `json:"to_ms"`   // inclusive
-    Question    string       `json:"question"`
-    History     []AskMessage `json:"history,omitempty"` // prior turns this open of the drawer
+    // Projects: optional filter. Empty/missing = no project filter (all
+    // projects in range). The productivity page passes the list of
+    // projects it is currently rendering so Ask Klyne sees the same
+    // scope the user is looking at.
+    Projects []string     `json:"projects,omitempty"`
+    FromMs   int64        `json:"from_ms"` // inclusive
+    ToMs     int64        `json:"to_ms"`   // inclusive
+    Question string       `json:"question"`
+    History  []AskMessage `json:"history,omitempty"` // prior turns this open of the drawer
 }
 
 type AskMessage struct {
@@ -138,25 +142,36 @@ type AskRow struct {
     WorklogEntryJSON  string // raw JSON; the prompt builder substrings what it needs
 }
 
-func LoadAskContext(ctx context.Context, db *DB, projectPath string, fromMs, toMs int64) ([]AskRow, error)
+func LoadAskContext(ctx context.Context, db *DB, projects []string, fromMs, toMs int64) ([]AskRow, error)
 ```
 
-The query:
+The query (no project filter when `projects` is empty):
 
 ```sql
-SELECT session_id, ts_ms, ai_drafted_summary, worklog_entry_json
+-- projects empty
+SELECT session_id, ts, project_path, ai_drafted_summary, worklog_entry_json
 FROM stop_summaries
-WHERE project_path = ?
-  AND ts_ms BETWEEN ? AND ?
-ORDER BY ts_ms ASC
+WHERE ts BETWEEN ? AND ?
+ORDER BY ts ASC
+
+-- projects = [p1, p2, ...]
+SELECT session_id, ts, project_path, ai_drafted_summary, worklog_entry_json
+FROM stop_summaries
+WHERE ts BETWEEN ? AND ?
+  AND project_path IN (?, ?, ...)
+ORDER BY ts ASC
 ```
+
+(Note: the column is `ts` in milliseconds, per migration 011 — the API
+contract uses `from_ms`/`to_ms` to be unambiguous on the wire, but the
+SQL column name is `ts`.)
 
 ### 4.3 Frontend props
 
 ```ts
 // AskKlyneDrawer.svelte
 export let open: boolean;
-export let projectPath: string;
+export let projects: string[]; // project_paths the page is rendering
 export let fromMs: number;
 export let toMs: number;
 // emits: dispatch('close')
@@ -178,8 +193,8 @@ let error: string | null = null;
    with empty `messages`, focuses the textarea.
 2. User types a question, presses Enter (or Send) → drawer appends
    `{role: "user", content}` to `messages` locally, sets `pending = true`,
-   calls `askKlyne({project_path, from_ms, to_ms, question, history})`.
-3. Handler runs `store.LoadAskContext(ctx, db, projectPath, fromMs, toMs)`.
+   calls `askKlyne({projects, from_ms, to_ms, question, history})`.
+3. Handler runs `store.LoadAskContext(ctx, db, projects, fromMs, toMs)`.
    If zero rows → return 200 with a hard-coded "no sessions in range" answer,
    skip the LLM.
 4. Handler builds the prompt. Template:
@@ -187,8 +202,8 @@ let error: string | null = null;
    ```
    You are Ask Klyne. Answer the user's question using ONLY the sessions below.
 
-   Project: <projectPath>
-   Range:   <from ISO> .. <to ISO>
+   Projects: <comma-joined projects, or "all">
+   Range:    <from ISO> .. <to ISO>
    Sessions: <N>
 
    ## Session 1 — <date>
@@ -254,7 +269,7 @@ project) will not hit this.
 | Empty `question` | 400 `{"error":"question required"}` | Send button is disabled when input is empty; this is a guard only |
 | `question` > 2000 chars | 400 `{"error":"question too long"}` | Inline form error under the textarea |
 | `to_ms < from_ms` | 400 `{"error":"invalid range"}` | Should not happen (page guarantees) — show generic error |
-| No sessions in range | 200 with `answer: "No sessions recorded for <project> between <from> and <to>."` | Render as a normal assistant message |
+| No sessions in range | 200 with `answer: "No sessions recorded in the selected range."` | Render as a normal assistant message |
 | `claude` not on PATH | 500 `{"error":"claude CLI not installed"}` | Red error bubble with Retry button |
 | `claude -p` exits non-zero or times out | 500 `{"error":"<sanitized stderr tail>"}` | Red error bubble with Retry button |
 | Anything unexpected | 500 generic | Red error bubble |
