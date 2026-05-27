@@ -469,6 +469,50 @@ export async function compileProductivity(
 }
 
 // ---------------------------------------------------------------------------
+// /api/ask — Ask Klyne chat drawer
+// ---------------------------------------------------------------------------
+
+export interface AskMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface AskRequest {
+  projects?: string[];
+  from_ms: number;
+  to_ms: number;
+  question: string;
+  history?: AskMessage[];
+}
+
+export interface AskResponse {
+  answer: string;
+  sessions_used: number;
+  truncated_to_n?: number;
+  model: string;
+  duration_ms: number;
+}
+
+/**
+ * POST /api/ask — single-turn chat call for the Ask Klyne drawer.
+ * Stateless: callers pass the running history with each turn so the
+ * drawer stays ephemeral on the server side.
+ */
+export async function askKlyne(req: AskRequest, signal?: AbortSignal): Promise<AskResponse> {
+  const res = await fetch(`${API_BASE}/api/ask`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+    signal,
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new ApiError(res.status, text, `askKlyne failed (${res.status})`);
+  }
+  return (await res.json()) as AskResponse;
+}
+
+// ---------------------------------------------------------------------------
 // /insights/projects
 // ---------------------------------------------------------------------------
 
