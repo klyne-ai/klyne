@@ -53,7 +53,7 @@ type WorklogReflectRunHandler struct {
 	// avoid the real `claude` binary; nil means "skip the second pass"
 	// (which keeps tests focused on the first pass without forcing
 	// every test to stub two spawns).
-	runSyncCmd func(ctx context.Context, projectPath, day string) (claudeRunResult, error)
+	runSyncCmd func(ctx context.Context, projectPath, day, modelKey string) (claudeRunResult, error)
 }
 
 // NewWorklogReflectRunHandler constructs a handler that shells out via

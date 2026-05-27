@@ -47,8 +47,26 @@ type ProductivityCompileHandler struct {
 	// the test runner. The second return is a parsed result envelope
 	// (text + token usage) extracted from the CLI's
 	// `--output-format=json` output.
-	runCmd func(ctx context.Context, projectPath, day string) (claudeRunResult, error)
+	//
+	// modelKey is the caller-supplied model selection from the request
+	// (validated against compileModelAllowlist before reaching this fn).
+	runCmd func(ctx context.Context, projectPath, day, modelKey string) (claudeRunResult, error)
 }
+
+// compileModelAllowlist constrains which models the productivity page's
+// picker may select. The map value is the exact model id passed to the
+// `claude` CLI's --model flag. Adding a new option requires extending
+// this map AND updating the frontend picker — keep them in lockstep.
+var compileModelAllowlist = map[string]string{
+	"sonnet": "claude-sonnet-4-6",
+	"opus":   "claude-opus-4-7",
+}
+
+// defaultCompileModel is what the handler picks when the request omits
+// `model`. Sonnet (2026-05-27): A/B-tested against Opus on the same
+// stop_summaries fixture; structurally identical cards at ~1/7 the
+// cost. Users can opt into Opus from the productivity page header.
+const defaultCompileModel = "sonnet"
 
 // NewProductivityCompileHandler constructs a handler that shells out
 // via the real `claude` CLI. Tests should construct the struct literal
@@ -65,6 +83,10 @@ func NewProductivityCompileHandler(db *store.DB) *ProductivityCompileHandler {
 type productivityCompileRequest struct {
 	ProjectPath string `json:"project_path"`
 	Day         string `json:"day"`
+	// Model is one of compileModelAllowlist's keys ("sonnet" | "opus").
+	// Optional: omitted/empty → defaultCompileModel. Unknown values are
+	// rejected with 400 — never silently coerced.
+	Model string `json:"model,omitempty"`
 }
 
 // productivityCompileResponse mirrors reflectRunResponse so the UI's
@@ -101,6 +123,15 @@ func (h *ProductivityCompileHandler) Run(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	modelKey := strings.TrimSpace(req.Model)
+	if modelKey == "" {
+		modelKey = defaultCompileModel
+	}
+	if _, ok := compileModelAllowlist[modelKey]; !ok {
+		http.Error(w, fmt.Sprintf("unknown model: %s", modelKey), http.StatusBadRequest)
+		return
+	}
+
 	// Allowlist: same gate as /worklog/reflect/run.
 	rollup, err := store.ListWorklogRollup(r.Context(), h.db)
 	if err != nil {
@@ -126,7 +157,7 @@ func (h *ProductivityCompileHandler) Run(w http.ResponseWriter, r *http.Request)
 	defer cancel()
 
 	start := time.Now()
-	result, runErr := h.runCmd(ctx, req.ProjectPath, dayStr)
+	result, runErr := h.runCmd(ctx, req.ProjectPath, dayStr, modelKey)
 	dur := time.Since(start).Milliseconds()
 
 	resp := productivityCompileResponse{
@@ -170,7 +201,7 @@ func (h *ProductivityCompileHandler) Run(w http.ResponseWriter, r *http.Request)
 // JSON envelope to stdout (assistant text + usage block). The handler
 // parses it via parseClaudeRunResult so the dashboard's Klyne-usage
 // tile can record the per-run token spend.
-func spawnClaudeProductivitySync(ctx context.Context, projectPath, day string) (claudeRunResult, error) {
+func spawnClaudeProductivitySync(ctx context.Context, projectPath, day, modelKey string) (claudeRunResult, error) {
 	klyneBin, err := os.Executable()
 	if err != nil {
 		return claudeRunResult{}, fmt.Errorf("productivity-compile: locate klyne binary: %w", err)
@@ -201,13 +232,16 @@ func spawnClaudeProductivitySync(ctx context.Context, projectPath, day string) (
 		return claudeRunResult{}, fmt.Errorf("productivity-compile: close mcp-config temp: %w", err)
 	}
 
-	// Pin the model to Opus 4.7 (2026-05-27 narrative-card redesign). The
-	// v2 prompt asks for outcome-led titles + 2-4 sentence narrative
-	// bodies + a synthesized service summary — a step-change in synthesis
-	// quality over the v1 verb-led one-liners. Sonnet 4.6 reliably under-
-	// performs on the narrative voice; Opus matches the hand-edited
-	// example the user gave as the target. Cost trade is intentional.
-	const syncModel = "claude-opus-4-7"
+	// Model is caller-supplied, validated against compileModelAllowlist
+	// in Run before reaching here. Default is "sonnet" (2026-05-27 —
+	// flipped from Opus after an A/B on the same fixture showed Sonnet
+	// is structurally equivalent at ~1/7 the cost; users can opt into
+	// Opus from the productivity page header picker).
+	syncModel, ok := compileModelAllowlist[modelKey]
+	if !ok {
+		// Defensive — Run should have rejected unknown keys already.
+		return claudeRunResult{}, fmt.Errorf("productivity-compile: unknown model key %q", modelKey)
+	}
 
 	// The slash command body reads `project_path=<...> day=<...>` from
 	// the user prompt to drive its tool calls. Pass them inline.

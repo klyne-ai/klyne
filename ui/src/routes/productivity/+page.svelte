@@ -24,7 +24,7 @@
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
-  import { fetchProductivityDates, runReflect, compileProductivity, fetchKlyneUsage, type ProductivityReport, type ProductivityService, type ProductivitySessionStat, type KlyneUsageResponse } from '$lib/api.js';
+  import { fetchProductivityDates, runReflect, compileProductivity, fetchKlyneUsage, type ProductivityReport, type ProductivityService, type ProductivitySessionStat, type KlyneUsageResponse, type CompileModel } from '$lib/api.js';
   import { applyHiddenFilter, hiddenSessionIds, hideMany, clearHidden } from '$lib/hidden-sessions.svelte';
   import ConcurrencyTimeline from '$lib/components/productivity/ConcurrencyTimeline.svelte';
   import WhatWasDoneCard from '$lib/dashboard/pages/productivity/WhatWasDoneCard.svelte';
@@ -36,6 +36,10 @@
   // some persisted snapshots were written barebones-of-data — bumping the
   // key bypasses the old cached payloads in every user's localStorage.
   const REPORT_KEY  = 'klyne.productivity.lastReport.v2';
+  // Compile-model picker (2026-05-27): persists the user's Sonnet/Opus
+  // choice across reloads. Backend allowlist validates the value on every
+  // request — corrupt/unknown values here are silently dropped to default.
+  const COMPILE_MODEL_KEY = 'klyne.productivity.compile_model';
 
   let rep = $state<ProductivityReport | null>(null);
   let loading = $state(true);
@@ -68,6 +72,15 @@
   let compileDone    = $state(0);
   let compileTotal   = $state(0);
   let compileError   = $state<string | null>(null);
+  // Compile-model picker: Sonnet default, opt-in Opus. Hydrated from
+  // localStorage on mount; written back on every change. Backend has the
+  // canonical allowlist — this just controls which key we send.
+  let compileModel = $state<CompileModel>('sonnet');
+
+  function persistCompileModel(next: CompileModel) {
+    compileModel = next;
+    try { localStorage.setItem(COMPILE_MODEL_KEY, next); } catch { /* private mode: in-memory only */ }
+  }
 
   // Ask Klyne drawer: ephemeral chat with stop_summaries context scoped
   // to the page's current (services → projects, since, until) view.
@@ -99,7 +112,7 @@
     try {
       for (const p of targets) {
         try {
-          await compileProductivity(p, dayStr);
+          await compileProductivity(p, dayStr, compileModel);
         } catch (e) {
           if (!compileError) compileError = e instanceof Error ? e.message : String(e);
         } finally {
@@ -377,6 +390,14 @@
   const canGoNextMonth = $derived(availableDays.length === 0 || monthKey(calendarMonth) < monthKey(parseLocalDay(availableDays[availableDays.length - 1])));
 
   onMount(() => {
+    // Hydrate the compile-model picker. Defensive against corrupted /
+    // future-introduced values: anything other than the two known keys
+    // is dropped and we fall back to the Sonnet default.
+    try {
+      const saved = localStorage.getItem(COMPILE_MODEL_KEY);
+      if (saved === 'sonnet' || saved === 'opus') compileModel = saved;
+    } catch { /* private mode: keep default */ }
+
     // URL params and localStorage only hint at WHICH preset chip should
     // be active. The actual (since, until) window is always recomputed
     // from rangeFor(key) so a stale tuple (e.g. URL saved on May 24
@@ -1097,6 +1118,28 @@
           </span>
         </div>
         <div class="mast-r">
+          <div class="model-picker" role="radiogroup" aria-label="Productivity compile model">
+            <span class="model-picker-label mono">Compile with</span>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={compileModel === 'sonnet'}
+              class="pill model-pill"
+              class:model-pill-active={compileModel === 'sonnet'}
+              onclick={() => persistCompileModel('sonnet')}>
+              Sonnet
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={compileModel === 'opus'}
+              class="pill model-pill"
+              class:model-pill-active={compileModel === 'opus'}
+              onclick={() => persistCompileModel('opus')}>
+              Opus
+            </button>
+            <span class="model-picker-hint mono">{compileModel === 'opus' ? '~7× cost' : 'recommended'}</span>
+          </div>
           <button class="btn-primary" onclick={copyForStandup}>{copied ? '✓ Copied' : 'Copy for standup ⌘C'}</button>
           <span class="mast-sub">{bullets.length} bullets · {bullets.reduce((n,b)=>n+b.title.length+b.body.length, 0)} chars</span>
         </div>
@@ -1767,6 +1810,12 @@
   .mast-pills { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .mast-sub { font-family: var(--font-mono); font-size: 11px; color: var(--fg-dim); }
   .mast-r { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; padding-bottom: 6px; }
+  .model-picker { display: inline-flex; align-items: center; gap: 6px; }
+  .model-picker-label { font-size: 11px; color: var(--fg-dim); }
+  .model-picker-hint  { font-size: 10px; color: var(--fg-dim); margin-left: 2px; }
+  .model-pill { cursor: pointer; padding: 2px 8px; }
+  .model-pill:hover { color: var(--fg); border-color: var(--border-strong, var(--border)); }
+  .model-pill-active { color: var(--fg); border-color: var(--fg); background: var(--bg-card); }
 
   /* ── 3. Triage ───────────────────────────────────────────── */
   .triage { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr) 320px; gap: 12px; }

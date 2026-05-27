@@ -449,16 +449,23 @@ export async function runReflect(
  * for one (project, day). Reads typed worklog_reflections rows and
  * writes an LLM-compiled WhatWasDoneCard with cohesive Tier 1 prose +
  * llm_compiled=true.
+ *
+ * `model` selects which Claude model the backend pins on --model.
+ * Allowlisted server-side; only 'sonnet' and 'opus' accepted today.
+ * Default is 'sonnet' (cheaper; ~1/7 the cost of Opus per A/B).
  */
+export type CompileModel = 'sonnet' | 'opus';
+
 export async function compileProductivity(
   projectPath: string,
   day: string,
+  model: CompileModel = 'sonnet',
   signal?: AbortSignal,
 ): Promise<{ project_path: string; day: string; status: string; output: string; duration_ms: number; error?: string }> {
   const res = await fetch(`${API_BASE}/api/productivity/compile`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ project_path: projectPath, day }),
+    body: JSON.stringify({ project_path: projectPath, day, model }),
     signal,
   });
   if (!res.ok) {
