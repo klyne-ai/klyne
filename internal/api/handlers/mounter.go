@@ -164,4 +164,11 @@ func (m *Mounter) Mount(r chi.Router) {
 	// "Klyne is X% of today's Claude usage". Tokens only, never USD.
 	hKlyneUsage := NewKlyneUsageHandler(m.deps.DB)
 	r.Get(api.RouteKlyneUsage, hKlyneUsage.Get)
+
+	// POST /api/ask — Ask Klyne chat drawer endpoint. Stateless. Each
+	// turn carries (projects, range, question, history); the handler
+	// pulls matching stop_summaries via LoadAskContext, builds a prompt,
+	// and shells out to `claude -p` (60s timeout). No DB writes.
+	hAsk := NewAskHandler(m.deps.DB)
+	r.Post(api.RouteAsk, hAsk.Run)
 }
