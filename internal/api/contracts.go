@@ -118,6 +118,10 @@ const (
 	// work_spans, and git_session_snapshots. Sessions/messages are
 	// intentionally preserved — see store.DeleteProjectScopedRows.
 	RouteProjectDelete = "/api/projects"
+	// RouteAsk: POST /api/ask. Chat endpoint for the Ask Klyne drawer on
+	// the productivity page. Stateless — each request carries the full
+	// context (projects, range, history) so the drawer can be ephemeral.
+	RouteAsk = "/api/ask"
 )
 
 // AllRoutes returns the canonical, ordered list of every HTTP path
@@ -153,6 +157,7 @@ func AllRoutes() []string {
 		RouteProductivityCompile,
 		RouteKlyneUsage,
 		RouteProjectDelete,
+		RouteAsk,
 	}
 }
 
@@ -961,4 +966,45 @@ type WorklogResponse struct {
 type WorklogProjectResponse struct {
 	Project     store.WorklogProjectRollup `json:"project"`
 	Reflections []store.Reflection         `json:"reflections"`
+}
+
+// ---------------------------------------------------------------------------
+// /api/ask — Ask Klyne chat drawer
+// ---------------------------------------------------------------------------
+
+// AskRequest is the POST body for /api/ask. Stateless: every request
+// carries Projects, range, Question, and prior History so the drawer
+// does not need server-side session storage.
+type AskRequest struct {
+	// Projects is an optional project_path filter. Empty/missing means
+	// no filter — query every stop_summaries row in the range. The
+	// productivity page passes the list of projects it is currently
+	// rendering so Ask Klyne sees the same scope the user sees.
+	Projects []string `json:"projects,omitempty"`
+	// FromMs and ToMs are the inclusive range in epoch milliseconds.
+	// Same units as the productivity page's `since`/`until`.
+	FromMs int64 `json:"from_ms"`
+	ToMs   int64 `json:"to_ms"`
+	// Question is the user's prompt for this turn.
+	Question string `json:"question"`
+	// History is the prior conversation (most recent last). The drawer
+	// is ephemeral so this only spans the current open of the drawer.
+	History []AskMessage `json:"history,omitempty"`
+}
+
+// AskMessage is one turn in the chat. Role is "user" or "assistant".
+type AskMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+// AskResponse is the JSON body returned by /api/ask.
+type AskResponse struct {
+	Answer       string `json:"answer"`
+	SessionsUsed int    `json:"sessions_used"`
+	// TruncatedToN is set when the handler capped context (>200 rows).
+	// Drawer shows a small note when present.
+	TruncatedToN int    `json:"truncated_to_n,omitempty"`
+	Model        string `json:"model"`
+	DurationMs   int64  `json:"duration_ms"`
 }
