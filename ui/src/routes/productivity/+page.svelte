@@ -28,6 +28,7 @@
   import { applyHiddenFilter, hiddenSessionIds, hideMany, clearHidden } from '$lib/hidden-sessions.svelte';
   import ConcurrencyTimeline from '$lib/components/productivity/ConcurrencyTimeline.svelte';
   import WhatWasDoneCard from '$lib/dashboard/pages/productivity/WhatWasDoneCard.svelte';
+  import AskKlyneDrawer from '$lib/components/AskKlyneDrawer.svelte';
   import { sessionUrl } from '$lib/dashboard/url-state.js';
 
   const STORAGE_KEY = 'klyne.productivity.range';
@@ -67,6 +68,18 @@
   let compileDone    = $state(0);
   let compileTotal   = $state(0);
   let compileError   = $state<string | null>(null);
+
+  // Ask Klyne drawer: ephemeral chat with stop_summaries context scoped
+  // to the page's current (services → projects, since, until) view.
+  let askOpen = $state(false);
+  const askProjects = $derived(
+    Array.from(new Set(
+      (rep?.services ?? [])
+        .map(s => s.project_path)
+        .filter((p): p is string => !!p && p.trim() !== ''),
+    )),
+  );
+
   async function runCompileForAllPendingServices() {
     if (compileRunning || !rep) return;
     // Only services whose what_was_done exists but is NOT llm_compiled
@@ -965,6 +978,11 @@
     </div>
     <div class="rail-right">
       <span class="rail-ago">{ago(loadedAt)}</span>
+      <button
+        class="btn-ghost ask-btn"
+        onclick={() => (askOpen = true)}
+        title="Ask Klyne about this range"
+      >Ask Klyne ▸</button>
       <button class="btn-ghost" onclick={refresh} title="Refresh">↻</button>
     </div>
   </div>
@@ -1453,6 +1471,13 @@
   {/if}
 </div>
 
+<AskKlyneDrawer
+  bind:open={askOpen}
+  projects={askProjects}
+  fromMs={since}
+  toMs={until}
+/>
+
 <style>
   /* ─── design tokens (V4 Synthesis) — scoped to this page so the
      rest of the app keeps its existing palette ───────────────── */
@@ -1618,6 +1643,10 @@
   .btn-fill  { background: var(--bg-card-2); color: var(--fg); }
   .btn-ghost { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--fg-soft); font-family: var(--font-mono); font-size: 14px; cursor: pointer; }
   .btn-ghost:hover { background: var(--bg-card); color: var(--fg); }
+  /* Ask Klyne pill — overrides the square btn-ghost sizing so the
+     text label fits. Kept as a btn-ghost variant so colour/border
+     stay aligned with the existing rail buttons. */
+  .ask-btn { width: auto; padding: 0 12px; font-size: 11px; gap: 4px; }
   .btn-primary { background: var(--fg); color: var(--bg); border: 1px solid var(--fg); padding: 8px 14px; border-radius: 8px; font-family: var(--font-mono); font-size: 11px; cursor: pointer; }
   .btn-primary:hover { opacity: 0.92; }
 
