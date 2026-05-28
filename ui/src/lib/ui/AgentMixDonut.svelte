@@ -22,9 +22,22 @@
   let canvasEl: HTMLCanvasElement | null = $state(null);
   let chart: Chart | null = null;
 
-  const claudePct = $derived(
-    totals.tokens > 0 ? Math.round((totals.claude_tokens / totals.tokens) * 100) : 0
-  );
+  // Show whole-number percent for clean splits, but never round a
+  // non-zero codex slice away — if claude is ~99.96% we want the user
+  // to see 99.96, not 100, otherwise the legend "codex 206K" reads as a
+  // contradiction.
+  const claudePct = $derived.by<string>(() => {
+    if (totals.tokens <= 0) return '0';
+    const raw = (totals.claude_tokens / totals.tokens) * 100;
+    if (totals.codex_tokens === 0 || raw === 100) return String(Math.round(raw));
+    if (totals.claude_tokens === 0)              return '0';
+    // Adaptive precision: between 99 and 100, two decimals (99.96);
+    // between 1 and 99, one decimal; otherwise integer.
+    if (raw > 99)      return raw.toFixed(2);
+    if (raw < 1)       return raw.toFixed(2);
+    if (raw % 1 < 0.05 || raw % 1 > 0.95) return String(Math.round(raw));
+    return raw.toFixed(1);
+  });
 
   function cssVar(name: string): string {
     return getComputedStyle(document.documentElement).getPropertyValue(name).trim();

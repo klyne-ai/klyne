@@ -47,7 +47,12 @@
     '90d': 90 * 86_400_000,
   };
 
-  const HEATMAP_WEEKS = 14 as const;
+  // Heatmap is a fixed long-range view, decoupled from the page-level
+  // `win` filter so 1d/7d windows don't paint an almost-empty grid.
+  // 12 weeks ≈ 3 months — enough to show weekly rhythm without dwarfing
+  // a new user's cells. Update the label in TabActivity.svelte if this
+  // value changes.
+  const HEATMAP_WEEKS = 12 as const;
 
   // Derive tab from URL
   const activeTab = $derived.by<TabId>(() => {
@@ -79,6 +84,12 @@
   let loadingProjects = $state(true);
   let statsError = $state<string | null>(null);
   let projectsError = $state<string | null>(null);
+  // Per-CLI breakdown by date — backs the tokens-per-day hover tooltip.
+  // DailyRow.total in statsData is filtered by the active `cli`, so it
+  // doesn't expose claude vs. codex split. We fire two extra `/usage/stats`
+  // calls (claude + codex, no heatmap) to assemble a {date → {claude, codex}}
+  // map. Best-effort; tooltip falls back to the aggregate if these fail.
+  let dailyByCli = $state<Record<string, { claude: number; codex: number }>>({});
 
   // Generation counters — stale responses are discarded
   let statsGen = 0;
@@ -102,6 +113,29 @@
       statsData = null;
     } finally {
       if (gen === statsGen) loadingStats = false;
+    }
+
+    // Parallel per-CLI fetches for the bar-chart hover tooltip. We skip
+    // the heatmap here (heatmap_weeks=0) since it's already fetched in
+    // the primary call above. Failures are swallowed — tooltip will
+    // just show the aggregate.
+    try {
+      const [cl, cx] = await Promise.all([
+        fetchUsageStats({ cli: 'claude', days: WIN_DAYS[win], heatmap_weeks: 0 }),
+        fetchUsageStats({ cli: 'codex',  days: WIN_DAYS[win], heatmap_weeks: 0 }),
+      ]);
+      if (gen !== statsGen) return;
+      const map: Record<string, { claude: number; codex: number }> = {};
+      for (const r of cl.daily) map[r.date] = { claude: r.total, codex: 0 };
+      for (const r of cx.daily) {
+        const ex = map[r.date] ?? { claude: 0, codex: 0 };
+        ex.codex = r.total;
+        map[r.date] = ex;
+      }
+      dailyByCli = map;
+    } catch {
+      // best-effort
+      if (gen === statsGen) dailyByCli = {};
     }
   }
 
@@ -283,7 +317,7 @@
     </div>
   {:else}
     {#if activeTab === 'overview'}
-      <TabOverview stats={statsData} projects={projectsData} />
+      <TabOverview stats={statsData} projects={projectsData} {dailyByCli} />
     {:else if activeTab === 'activity'}
       <TabActivity stats={statsData} />
     {:else if activeTab === 'models'}

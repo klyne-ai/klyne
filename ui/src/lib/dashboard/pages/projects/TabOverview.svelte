@@ -55,14 +55,56 @@
     };
   });
 
-  // Daily sparkline bars from ProjectInsight.daily (16 days)
-  const spark = $derived.by(() => {
+  // Daily sparkline bars from ProjectInsight.daily (16 days).
+  // We keep the full {day, tokens} per bar so the hover tooltip can
+  // surface what each bar represents (date + token count + an
+  // approximate claude/codex split derived from the project's
+  // overall mix).
+  const spark = $derived.by<{ day: string; tokens: number }[]>(() => {
     if (!insight?.daily?.length) return [];
     const sorted = [...insight.daily].sort((a, b) => (a.day < b.day ? -1 : 1));
-    return sorted.slice(-16).map((d) => d.tokens);
+    return sorted.slice(-16);
   });
 
-  const sparkMax = $derived(spark.length > 0 ? Math.max(...spark, 1) : 1);
+  const sparkMax = $derived(spark.length > 0 ? Math.max(...spark.map(s => s.tokens), 1) : 1);
+
+  // Project-wide claude/codex token ratio — used to apportion each
+  // day's total token count into a likely claude/codex split. The
+  // backend's DailyPoint only carries `{day, tokens}`, so this is an
+  // ESTIMATE based on the project's all-time mix, not a measured
+  // per-day breakdown. The tooltip labels it "~claude / ~codex" so
+  // the user can see it's approximate.
+  const claudeShare = $derived.by(() => {
+    if (!insight) return 1;
+    const total = insight.claude.tokens + insight.codex.tokens;
+    if (total <= 0) return 1;
+    return insight.claude.tokens / total;
+  });
+
+  // ── tokens-per-day hover tooltip state ─────────────────────────
+  let sparkHoverIdx = $state<number | null>(null);
+  let sparkHoverLeft = $state(0);
+  let sparkHoverTop  = $state(0);
+
+  function onSparkEnter(i: number, ev: MouseEvent): void {
+    sparkHoverIdx = i;
+    const el = ev.currentTarget as HTMLElement;
+    const wrap = el.closest('.spark-bars') as HTMLElement | null;
+    if (!wrap) return;
+    const wr = wrap.getBoundingClientRect();
+    const br = el.getBoundingClientRect();
+    sparkHoverLeft = br.left - wr.left + br.width / 2;
+    sparkHoverTop  = br.top - wr.top;
+  }
+  function onSparkLeave(): void { sparkHoverIdx = null; }
+
+  // Format YYYY-MM-DD into "Mon May 26" for the tooltip header.
+  function fmtDay(day: string): string {
+    if (!day) return '';
+    const d = new Date(day + 'T00:00:00');
+    if (Number.isNaN(d.getTime())) return day;
+    return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+  }
 
   // Recent sessions (up to 3), visible only
   const recentSessions = $derived(
@@ -117,18 +159,48 @@
         <span class="ad-mono" style="font-size: 11px; color: var(--ad-faint); text-transform: uppercase; letter-spacing: 0.06em;">Daily activity · {spark.length}d</span>
         <span class="ad-mono" style="font-size: 10.5px; color: var(--ad-faint);">tokens / day</span>
       </div>
-      <div style="display: flex; align-items: flex-end; gap: 3px; height: 56px;">
-        {#each spark as v, i}
+      <div class="spark-bars" style="position: relative; display: flex; align-items: flex-end; gap: 3px; height: 56px;">
+        {#each spark as point, i (point.day)}
           <div
+            role="img"
+            aria-label="{point.day}: {kfmt(point.tokens)} tokens"
+            onmouseenter={(e) => onSparkEnter(i, e)}
+            onmouseleave={onSparkLeave}
+            class="spark-bar"
+            class:spark-bar-active={sparkHoverIdx === i}
             style="
               flex: 1;
-              height: {Math.max((v / sparkMax) * 100, 3)}%;
+              height: {Math.max((point.tokens / sparkMax) * 100, 3)}%;
               min-height: 2px;
               background: {i === spark.length - 1 ? 'var(--ad-accent)' : 'color-mix(in oklch, var(--ad-accent) 45%, var(--ad-bg-2))'};
               border-radius: 2px;
             "
           ></div>
         {/each}
+
+        {#if sparkHoverIdx !== null && spark[sparkHoverIdx]}
+          {@const p = spark[sparkHoverIdx]}
+          {@const claudeApprox = Math.round(p.tokens * claudeShare)}
+          {@const codexApprox  = Math.max(0, p.tokens - claudeApprox)}
+          <div role="tooltip" class="spark-tt ad-mono" style="left: {sparkHoverLeft}px; top: {sparkHoverTop}px;">
+            <div class="spark-tt-date">{fmtDay(p.day)} <span class="spark-tt-iso">· {p.day}</span></div>
+            <div class="spark-tt-row">
+              <span class="spark-tt-sw" style="background: var(--ad-claude);"></span>
+              <span class="spark-tt-label">~claude</span>
+              <span class="spark-tt-val">{kfmt(claudeApprox)}</span>
+            </div>
+            <div class="spark-tt-row">
+              <span class="spark-tt-sw" style="background: var(--ad-codex);"></span>
+              <span class="spark-tt-label">~codex</span>
+              <span class="spark-tt-val">{kfmt(codexApprox)}</span>
+            </div>
+            <div class="spark-tt-row spark-tt-total">
+              <span class="spark-tt-label">total</span>
+              <span class="spark-tt-val">{kfmt(p.tokens)}</span>
+            </div>
+            <div class="spark-tt-note">split is project-ratio approximation</div>
+          </div>
+        {/if}
       </div>
     </div>
   {/if}
@@ -198,3 +270,88 @@
     <AgentMixDonut totals={donutTotals} />
   {/if}
 </div>
+
+<style>
+  /* Daily-activity sparkline: subtle base opacity + a brighter hover
+     state so the bar that drives the tooltip is visually highlighted. */
+  .spark-bar {
+    cursor: pointer;
+    transition: opacity 120ms ease-out, filter 120ms ease-out;
+  }
+  .spark-bar:hover,
+  .spark-bar-active {
+    filter: brightness(1.18);
+  }
+
+  /* Floating tooltip — absolutely positioned over the chart, centered
+     above the hovered bar. pointer-events: none so the next bar's
+     hover isn't blocked. */
+  .spark-tt {
+    position: absolute;
+    transform: translate(-50%, calc(-100% - 10px));
+    pointer-events: none;
+    background: var(--ad-panel);
+    border: 1px solid var(--ad-border);
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 11px;
+    box-shadow: 0 12px 32px color-mix(in oklch, black 50%, transparent);
+    z-index: 10;
+    min-width: 184px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    white-space: nowrap;
+  }
+  .spark-tt-date {
+    font-size: 11px;
+    color: var(--ad-fg);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    padding-bottom: 4px;
+    margin-bottom: 2px;
+    border-bottom: 1px solid var(--ad-border-soft);
+  }
+  .spark-tt-iso { font-weight: 400; color: var(--ad-faint); }
+  .spark-tt-row {
+    display: grid;
+    grid-template-columns: 9px auto 1fr;
+    gap: 8px;
+    align-items: center;
+    font-variant-numeric: tabular-nums;
+  }
+  .spark-tt-sw {
+    width: 9px;
+    height: 9px;
+    border-radius: 2px;
+  }
+  .spark-tt-label {
+    color: var(--ad-faint);
+    font-size: 11px;
+  }
+  .spark-tt-val {
+    color: var(--ad-fg);
+    text-align: right;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .spark-tt-total {
+    grid-template-columns: auto 1fr;
+    padding-top: 4px;
+    margin-top: 2px;
+    border-top: 1px solid var(--ad-border-soft);
+  }
+  .spark-tt-total .spark-tt-label {
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-size: 10px;
+  }
+  .spark-tt-note {
+    font-size: 9.5px;
+    color: var(--ad-faint);
+    font-style: italic;
+    padding-top: 4px;
+    margin-top: 2px;
+    border-top: 1px dashed var(--ad-border-soft);
+  }
+</style>

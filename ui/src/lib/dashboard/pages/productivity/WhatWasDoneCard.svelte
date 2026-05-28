@@ -21,10 +21,26 @@
     card: WhatWasDoneCard;
     /** Optional click handler — opens the originating worklog entry. */
     onOpenEntry?: (session_id: string) => void;
+    /** Whether the project starts expanded. Default: collapsed (matches
+     *  the 2026-05-28 "compressed by default" redesign — every service
+     *  renders as a one-line header until the user clicks into it). */
+    defaultOpen?: boolean;
   }
-  let { card, onOpenEntry }: Props = $props();
+  let { card, onOpenEntry, defaultOpen = false }: Props = $props();
 
   const hasNarrative = $derived(!!card.narrative && card.narrative.cards.length > 0);
+
+  // --- collapsible state (project + per-section) ------------------------
+  // projectOpen drives the outer disclosure. When false the card renders
+  // as a single tappable row with inline stats; when true the full
+  // narrative body (tiles, summary, sections, followup) renders.
+  let projectOpen = $state(defaultOpen);
+  // sectionsOpen is a per-section flag keyed by section.key (shipped,
+  // fixed, decisions, …). Sections also default collapsed; the user
+  // expands the ones they care about.
+  let sectionsOpen = $state<Record<string, boolean>>({});
+  function toggleProject() { projectOpen = !projectOpen; }
+  function toggleSection(key: string) { sectionsOpen[key] = !sectionsOpen[key]; }
 
   // --- v1 legacy state ---------------------------------------------------
   let expanded = $state(false);
@@ -125,73 +141,120 @@
   function toggle() { expanded = !expanded; }
 </script>
 
-<article class="wwd-card">
+<article class="wwd-card" class:wwd-card-collapsed={!projectOpen}>
   {#if hasNarrative && card.narrative}
     <!-- ==================== V2 NARRATIVE LAYOUT ==================== -->
-    <header class="nv-head">
+    <!-- Project-level toggle. Collapsed = just this row + inline stats.
+         Expanded = full tiles + summary + sections + followup. -->
+    <button
+      type="button"
+      class="nv-head nv-head-toggle"
+      onclick={toggleProject}
+      aria-expanded={projectOpen}
+      title={projectOpen ? 'Collapse this service' : 'Expand this service'}
+    >
+      <span class="nv-caret" class:open={projectOpen} aria-hidden="true">▸</span>
       <span class="mono nv-service">{card.service}</span>
       {#if card.llm_compiled}
         <span class="nv-badge mono" title="Card composed by /klyne:productivity-sync">opus · auto</span>
       {/if}
-    </header>
+      <span class="grow"></span>
+      <!-- At-a-glance stat strip — always visible (in both collapsed and
+           expanded states) so a quick scan tells you what's inside. -->
+      <span class="nv-head-stats">
+        {#if (stats?.shipped ?? 0) > 0}
+          <span class="nv-head-stat nv-head-stat-ok mono">{stats?.shipped} shipped</span>
+        {/if}
+        {#if (stats?.fixed ?? 0) > 0}
+          <span class="nv-head-stat nv-head-stat-alert mono">{stats?.fixed} fixed</span>
+        {/if}
+        {#if (stats?.decisions ?? 0) > 0}
+          <span class="nv-head-stat nv-head-stat-accent mono">{stats?.decisions} decisions</span>
+        {/if}
+        {#if (stats?.investigated ?? 0) > 0}
+          <span class="nv-head-stat nv-head-stat-muted mono">{stats?.investigated} investigated</span>
+        {/if}
+        {#if !stats || (stats.shipped + stats.fixed + stats.decisions + stats.investigated === 0)}
+          <span class="nv-head-stat nv-head-stat-muted mono">no activity</span>
+        {/if}
+      </span>
+    </button>
 
-    <div class="nv-tiles">
-      <div class="nv-tile">
-        <div class="nv-tile-num">{stats?.shipped ?? 0}</div>
-        <div class="nv-tile-label">features shipped</div>
-      </div>
-      <div class="nv-tile">
-        <div class="nv-tile-num">{stats?.fixed ?? 0}</div>
-        <div class="nv-tile-label">bugs fixed</div>
-      </div>
-      <div class="nv-tile">
-        <div class="nv-tile-num">{stats?.decisions ?? 0}</div>
-        <div class="nv-tile-label">decisions</div>
-      </div>
-      <div class="nv-tile">
-        <div class="nv-tile-num">{stats?.investigated ?? 0}</div>
-        <div class="nv-tile-label">investigated</div>
-      </div>
-    </div>
+    {#if projectOpen}
+      <div class="nv-body">
+        <div class="nv-tiles">
+          <div class="nv-tile">
+            <div class="nv-tile-num">{stats?.shipped ?? 0}</div>
+            <div class="nv-tile-label">features shipped</div>
+          </div>
+          <div class="nv-tile">
+            <div class="nv-tile-num">{stats?.fixed ?? 0}</div>
+            <div class="nv-tile-label">bugs fixed</div>
+          </div>
+          <div class="nv-tile">
+            <div class="nv-tile-num">{stats?.decisions ?? 0}</div>
+            <div class="nv-tile-label">decisions</div>
+          </div>
+          <div class="nv-tile">
+            <div class="nv-tile-num">{stats?.investigated ?? 0}</div>
+            <div class="nv-tile-label">investigated</div>
+          </div>
+        </div>
 
-    {#if card.narrative.summary}
-      <p class="nv-summary">{card.narrative.summary}</p>
-    {/if}
+        {#if card.narrative.summary}
+          <p class="nv-summary">{card.narrative.summary}</p>
+        {/if}
 
-    {#each sections as section (section.key)}
-      <section class="nv-section">
-        <h4 class="nv-section-head">{section.label}</h4>
-        {#each section.cards as c, i (c.kind + '|' + (c.ticket_id ?? '') + '|' + i)}
-          {@const tone = kindTone(c.kind)}
-          <article class="nv-card">
-            <div class="nv-card-stripe nv-card-stripe-{tone}"></div>
-            <div class="nv-card-body">
-              <header class="nv-card-head">
-                <span class="nv-card-kind nv-card-kind-{tone}">{c.kind.toLowerCase().replace('_', ' ')}</span>
-                {#if c.ticket_id}
-                  <span class="nv-card-ticket mono">·  {c.ticket_id}</span>
-                {/if}
-              </header>
-              <h5 class="nv-card-title">{c.title}</h5>
-              <div class="nv-card-prose">{@html renderBody(c.body)}</div>
-              {#if c.refs && c.refs.length > 0}
-                <div class="nv-card-refs">
-                  {#each c.refs as r, ri (r.type + '|' + r.text + '|' + ri)}
-                    <span class={refClass(r)}>{r.text}</span>
-                  {/each}
-                </div>
-              {/if}
-            </div>
-          </article>
+        {#each sections as section (section.key)}
+          {@const sopen = sectionsOpen[section.key] ?? false}
+          <section class="nv-section">
+            <button
+              type="button"
+              class="nv-section-head nv-section-toggle"
+              onclick={() => toggleSection(section.key)}
+              aria-expanded={sopen}
+            >
+              <span class="nv-caret nv-caret-sm" class:open={sopen} aria-hidden="true">▸</span>
+              <span>{section.label}</span>
+              <span class="mono dim nv-section-count">({section.cards.length})</span>
+            </button>
+            {#if sopen}
+              <div class="nv-section-body">
+                {#each section.cards as c, i (c.kind + '|' + (c.ticket_id ?? '') + '|' + i)}
+                  {@const tone = kindTone(c.kind)}
+                  <article class="nv-card">
+                    <div class="nv-card-stripe nv-card-stripe-{tone}"></div>
+                    <div class="nv-card-body">
+                      <header class="nv-card-head">
+                        <span class="nv-card-kind nv-card-kind-{tone}">{c.kind.toLowerCase().replace('_', ' ')}</span>
+                        {#if c.ticket_id}
+                          <span class="nv-card-ticket mono">·  {c.ticket_id}</span>
+                        {/if}
+                      </header>
+                      <h5 class="nv-card-title">{c.title}</h5>
+                      <div class="nv-card-prose">{@html renderBody(c.body)}</div>
+                      {#if c.refs && c.refs.length > 0}
+                        <div class="nv-card-refs">
+                          {#each c.refs as r, ri (r.type + '|' + r.text + '|' + ri)}
+                            <span class={refClass(r)}>{r.text}</span>
+                          {/each}
+                        </div>
+                      {/if}
+                    </div>
+                  </article>
+                {/each}
+              </div>
+            {/if}
+          </section>
         {/each}
-      </section>
-    {/each}
 
-    {#if card.narrative.followup}
-      <aside class="nv-followup">
-        <span class="nv-followup-label">Open question for tomorrow</span>
-        <p>{card.narrative.followup}</p>
-      </aside>
+        {#if card.narrative.followup}
+          <aside class="nv-followup">
+            <span class="nv-followup-label">Open question for tomorrow</span>
+            <p>{card.narrative.followup}</p>
+          </aside>
+        {/if}
+      </div>
     {/if}
   {:else}
     <!-- ==================== V1 LEGACY LAYOUT ==================== -->
@@ -316,11 +379,79 @@
   .pill-muted   { color: var(--fg-muted); border-color: var(--border-hair); background: var(--bg-inset); }
 
   /* ============================ v2 narrative ============================ */
+  /* Collapsed-card variant: tighter padding so the page reads as a stack
+     of one-line service rows until the user expands them. */
+  .wwd-card.wwd-card-collapsed {
+    padding: 4px 6px;
+    gap: 0;
+  }
+
+  /* Toggle button: looks like the old header but is keyboard- + screen-
+     reader-accessible. Transparent + full-width with hover affordance. */
   .nv-head {
     display: flex;
     align-items: center;
     gap: 10px;
   }
+  .nv-head-toggle {
+    width: 100%;
+    margin: 0;
+    padding: 8px 10px;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: background var(--t-fast);
+  }
+  .nv-head-toggle:hover { background: var(--bg-inset); }
+  .nv-head-toggle:focus-visible {
+    outline: none;
+    background: var(--bg-inset);
+    box-shadow: 0 0 0 1px var(--border-soft) inset;
+  }
+  /* Body block — gap is owned here so the collapsed card stays tight. */
+  .nv-body {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 0 4px 4px;
+  }
+  .grow { flex: 1; }
+  .nv-caret {
+    display: inline-block;
+    width: 12px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--fg-muted);
+    transition: transform 120ms ease-out;
+  }
+  .nv-caret.open { transform: rotate(90deg); }
+  .nv-caret-sm { font-size: 10px; width: 10px; }
+  .nv-head-stats {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+  .nv-head-stat {
+    padding: 1px 7px;
+    border-radius: 999px;
+    border: 1px solid var(--border-hair);
+    background: var(--bg-inset);
+    font-size: 10.5px;
+    line-height: 1.4;
+    letter-spacing: 0.01em;
+    white-space: nowrap;
+  }
+  .nv-head-stat-ok      { color: var(--ok);     border-color: color-mix(in oklch, var(--ok)     30%, transparent); background: color-mix(in oklch, var(--ok)     8%, var(--bg-inset)); }
+  .nv-head-stat-alert   { color: var(--alert);  border-color: color-mix(in oklch, var(--alert)  30%, transparent); background: color-mix(in oklch, var(--alert)  8%, var(--bg-inset)); }
+  .nv-head-stat-accent  { color: var(--accent); border-color: color-mix(in oklch, var(--accent) 30%, transparent); background: color-mix(in oklch, var(--accent) 8%, var(--bg-inset)); }
+  .nv-head-stat-muted   { color: var(--fg-muted); }
+
   .nv-service {
     color: var(--fg);
     font-size: 15px;
@@ -387,14 +518,40 @@
     flex-direction: column;
     gap: 10px;
   }
-  .nv-section-head {
+  .nv-section-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     margin: 4px 0 0;
+    padding: 6px 8px;
     color: var(--fg-muted);
     font-family: var(--font-mono);
     font-size: 10.5px;
     font-weight: 500;
     text-transform: uppercase;
     letter-spacing: 0.08em;
+    background: transparent;
+    border: 1px solid var(--border-hair);
+    border-radius: 6px;
+    cursor: pointer;
+    text-align: left;
+    width: 100%;
+    transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
+  }
+  .nv-section-toggle:hover {
+    background: var(--bg-inset);
+    color: var(--fg-soft);
+    border-color: var(--border-soft);
+  }
+  .nv-section-toggle:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 1px var(--border-soft) inset;
+  }
+  .nv-section-count { text-transform: none; letter-spacing: 0; font-size: 10.5px; }
+  .nv-section-body {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
   }
 
   .nv-card {
