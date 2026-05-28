@@ -2,18 +2,18 @@
 
 **The local productivity layer for engineers who code with AI.**
 
-Claude Code and Codex CLI already write the raw record of your work. klyne turns those local transcripts into a worklog, productivity dashboard, weekly reflection, runbooks, and context-rescue tools without proxying your chats or running a second model.
+klyne installs a one-line hook in Claude Code, Codex CLI, and Cursor so the assistant ends each useful reply with a `KLYNE_SUMMARY` line. klyne captures those summaries into local SQLite and turns them into a worklog, productivity dashboard, weekly reflection, runbooks, and context-rescue tools — without proxying your chats or running a second model.
 
 [Install](#install-in-60-seconds) | [Dashboard](#dashboard) | [How it works](#how-it-works) | [Privacy](#privacy-model) | [Contributing](#contributing)
 
-![klyne productivity dashboard](docs/assets/readme/dashboard-productivity.jpg)
+![klyne dashboard walkthrough](docs/assets/readme/klyne-dashboard-demo.gif)
 
 ## What you get
 
 | Surface | What it answers |
 |---|---|
 | **Productivity** | What did I actually ship today, what is risky, and what can I copy into standup? |
-| **Worklog** | Which Claude and Codex sessions mattered, with AI-written summaries and importance scores? |
+| **Worklog** | Which Claude, Codex, and Cursor sessions mattered, with AI-written summaries and importance scores? |
 | **Insights** | Which projects, models, tools, and hidden subagents burned the time and tokens? |
 | **Runbooks** | What should the AI remember before it runs operational commands in this project? |
 | **Rescue tools** | What did `/compact` hide, and what should the next fresh session know? |
@@ -24,7 +24,7 @@ AI coding made parallel work normal: multiple agents, multiple repos, long sessi
 
 klyne gives you that story locally:
 
-- **One timeline for Claude + Codex** instead of separate terminal histories.
+- **One timeline for Claude, Codex, and Cursor** instead of separate terminal histories.
 - **AI-written summaries** captured inline from the same assistant reply you were already getting.
 - **Deterministic scoring** for commits, PRs, decisions, migrations, security work, fixes, and low-signal sessions.
 - **Cost and activity rollups** from local JSONL plus SQLite.
@@ -39,7 +39,7 @@ klyne runs at `http://127.0.0.1:7878` and stays local to your machine.
 | Tab | Snapshot |
 |---|---|
 | **Productivity** | Standup digest, uncommitted work, risk flags, and "what was done" bullets. URL: `/productivity`. |
-| **Worklog** | Important sessions from Claude and Codex, interleaved by time. |
+| **Worklog** | Important sessions from Claude, Codex, and Cursor, interleaved by time. |
 | **Insights** | Token economics, model mix, project ranking, activity rhythm, and cache behavior. |
 | **Runbooks** | Project/global memories the AI can recall before risky commands. |
 
@@ -82,9 +82,9 @@ make build
 ./bin/klyne
 ```
 
-Open `http://127.0.0.1:7878`, then finish one Claude Code or Codex CLI session. The first useful row appears after the session writes transcript data.
+Open `http://127.0.0.1:7878`, then finish one Claude Code, Codex CLI, or Cursor session. The first useful row appears after the session writes transcript data (Claude / Codex) or fires `afterAgentResponse` (Cursor).
 
-> Restart Claude Code and Codex CLI after `klyne mcp install`; hooks attach when a new session starts.
+> Restart Claude Code, Codex CLI, and Cursor after `klyne mcp install`; hooks attach when a new session starts.
 
 ### What `klyne mcp install` wires up
 
@@ -142,17 +142,19 @@ If you installed klyne before this version, the installer also migrates the lega
 
 ## How it works
 
-The daemon reads files your tools already create:
+The daemon reads files your tools already create (Claude, Codex) and receives Cursor turns in-process through the `afterAgentResponse` hook:
 
 ```mermaid
 flowchart LR
   Claude["Claude Code JSONL<br/>~/.claude/projects"] --> Engine
   Codex["Codex JSONL<br/>~/.codex/sessions"] --> Engine
-  Start["SessionStart hook"] --> Chat["Claude / Codex<br/>your normal chat"]
+  Cursor["Cursor turn<br/>(via afterAgentResponse hook)"] --> Engine
+  Start["SessionStart hook"] --> Chat["Claude / Codex / Cursor<br/>your normal chat"]
   Prompt["UserPromptSubmit hook"] --> Chat
-  Stop["Stop hook"] --> Engine["klyne engine<br/>deterministic processing"]
+  Stop["Stop / afterAgentResponse hook"] --> Engine["klyne engine<br/>deterministic processing"]
   Chat --> Claude
   Chat --> Codex
+  Chat --> Cursor
   Engine --> DB[("SQLite<br/>~/.klyne/klyne.db")]
   Engine --> Web["Web dashboard<br/>127.0.0.1:7878"]
   Engine --> MCP["MCP tools<br/>reflect, handoff, precompact, runbooks"]
@@ -162,26 +164,23 @@ flowchart LR
   classDef purple fill:#ede9fe,stroke:#7c3aed,color:#4c1d95
   classDef green fill:#dcfce7,stroke:#16a34a,color:#14532d
   classDef amber fill:#fef3c7,stroke:#f97316,color:#7c2d12
-  class Claude,Codex blue
+  class Claude,Codex,Cursor blue
   class Start,Prompt,Stop purple
   class Engine,DB amber
   class Web,MCP green
 ```
 
-<details>
-<summary>Hook flow, token cost, and why there is no extra AI call</summary>
+### Hook flow — why there is no extra AI call
 
-klyne uses standard Claude Code hook events:
+klyne uses standard Claude Code, Codex, and Cursor hook events:
 
-1. `UserPromptSubmit` injects one short instruction asking the assistant to end useful replies with `KLYNE_SUMMARY: <100 words or less>`.
+1. `UserPromptSubmit` (Claude/Codex) or `sessionStart` (Cursor) injects one short instruction asking the assistant to end useful replies with `KLYNE_SUMMARY: <100 words or less>`.
 2. The assistant writes the reply in the same chat, on the same subscription you were already using.
-3. `Stop` reads the just-written JSONL, extracts the summary, computes deterministic event tags, assigns an importance score, and writes SQLite.
+3. `Stop` (Claude/Codex) reads the just-written JSONL, or `afterAgentResponse` (Cursor) receives the turn in-process; klyne extracts the summary, computes deterministic event tags, assigns an importance score, and writes SQLite.
 
 Typical marginal cost is roughly `80` input tokens plus `50` output tokens per turn. The daemon does not spawn `claude --print`, `codex`, `ollama`, or any API client.
 
 For one-shot Claude runs that skip `UserPromptSubmit`, klyne uses `SessionStart` to inject the same instruction.
-
-</details>
 
 ## Rescue and memory
 
@@ -208,10 +207,10 @@ klyne is designed around four hard boundaries:
 
 | Boundary | Meaning |
 |---|---|
-| **Local-first** | Reads `~/.claude/projects/*.jsonl` and `~/.codex/sessions/*.jsonl`; stores SQLite under `~/.klyne/`. |
+| **Local-first** | Reads `~/.claude/projects/*.jsonl` and `~/.codex/sessions/*.jsonl`; Cursor data arrives in-process via the `afterAgentResponse` hook (no Cursor file is read). Stores SQLite under `~/.klyne/`. |
 | **No network calls** | The web UI binds to `127.0.0.1`; the daemon does not phone home. |
 | **No telemetry** | There is no opt-out because there is no opt-in. |
-| **No daemon-side LM subprocesses** | Synthesis happens inside your normal Claude or Codex turn, not in a background model runner. |
+| **No daemon-side LM subprocesses** | Synthesis happens inside your normal Claude, Codex, or Cursor turn, not in a background model runner. |
 
 See [docs/SECURITY.md](docs/SECURITY.md) for the threat model.
 
@@ -239,8 +238,7 @@ All commands read local JSONL and SQLite. None of these call a model.
 
 ## Proof
 
-<details>
-<summary>Reproducible claim tests</summary>
+Every README claim maps to a reproducible test:
 
 ```bash
 make proof
@@ -251,8 +249,6 @@ node test/e2e/harness.mjs trivial
 ```
 
 The end-to-end scenarios assert that daemon-side AI subprocesses stay at zero. If a future change reintroduces a hidden model runner, the tests fail.
-
-</details>
 
 ## How klyne is different
 
@@ -269,12 +265,16 @@ The end-to-end scenarios assert that daemon-side AI subprocesses stay at zero. I
 <details>
 <summary>Planned releases</summary>
 
-- **v0.1** - Homebrew tap, one-line installer, signed binaries.
-- ~~**v0.2** - Codex `SessionStart` parity when the Codex API supports it.~~ ✓ Shipped — codex-cli 0.133+ exposes the same SessionStart / UserPromptSubmit / PreToolUse / Stop hook surface as Claude Code; `klyne mcp install` now wires both.
+**Shipped**
+
+- ~~**v0.2** - Codex `SessionStart` parity when the Codex API supports it.~~ ✓ codex-cli 0.133+ exposes the same SessionStart / UserPromptSubmit / PreToolUse / Stop hook surface as Claude Code; `klyne mcp install` now wires both.
 - ~~**v0.5** - Hooks for more coding agents using the same `KLYNE_SUMMARY` contract.~~ ✓ Shipped for Cursor (`klyne mcp install --platform cursor`); event dispatch is in-process via `klyne-hook cursor`. Continue / OpenCode / Gemini next.
+
+**Planned**
+
+- **v0.1** - Homebrew tap, one-line installer, signed binaries.
 - **v0.3** - VSCode / JetBrains extension for worklog and advisor signals in the editor.
 - **v0.4** - Team-mode opt-in, aggregated locally on each user's machine.
-- **v0.5** - Hooks for more coding agents (Cursor, Continue, …) using the same `KLYNE_SUMMARY` contract.
 
 </details>
 
@@ -286,7 +286,7 @@ The bar:
 
 - **Deterministic.** No new daemon-side LM calls.
 - **Local-first.** No new outbound network calls unless explicitly configured off by default.
-- **Cross-CLI.** Features should cover Claude Code and Codex CLI, or document the gap.
+- **Cross-CLI.** Features should cover Claude Code, Codex CLI, and Cursor, or document the gap.
 - **Tested.** README claims should map to reproducible tests.
 
 Start with:
@@ -298,7 +298,7 @@ Start with:
 
 ## What klyne does not claim
 
-- It does not reduce your interactive Claude or Codex token cost.
+- It does not reduce your interactive Claude, Codex, or Cursor token cost.
 - It does not predict exact turns remaining before a cap.
 - It does not replace `/compact`; it helps you survive the information loss.
 - It does not replace a general focus tracker for non-AI work.
