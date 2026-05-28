@@ -8,14 +8,14 @@
     1. TopRail — KLYNE/ productivity · date pills · loaded ago + refresh
     2. Masthead — weekday · standup digest · big mono date · reflection
        pills + sub-line · Copy-for-standup button + bullet count
-    3. Triage — two urgent alert cards + ALL RISKS sidebar (3-col)
+    3. Triage — two urgent alert cards (2-col)
     4. Hero — kicker + marked-prose headline + numbered evidence bullets
     5. Metrics — 6-col strip with vertical borders
     6. Services — sortable table + collapsible ephemeral row
     7. Timeline — 240px sidebar + timeline canvas
 
   Data: drives off the existing /api/productivity payload. All
-  derivations (risks histogram, important-session count, top-bullets,
+  derivations (important-session count, top-bullets,
   peak parallelism) computed client-side. Reflection/credential-flag
   meta is best-effort; Phase 2 (Go-side) will populate the
   worklog-entries-pending + next-scheduled fields directly.
@@ -759,96 +759,6 @@
     for (const p of pts) { if (cur >= 2) overlap += p.t - lastT; cur += p.d; if (cur > peak) peak = cur; lastT = p.t; }
     return { peak, overlapMinutes: Math.round(overlap/60000) };
   }
-  function risksHistogram(svcs: ProductivityService[]) {
-    let uncommitted=0, unpushedSignal=0, drifted=0, unpushedNoise=0;
-    for (const s of svcs ?? []) for (const r of s.risks ?? []) {
-      if (r.kind === 'done-uncommitted') uncommitted++;
-      else if (r.kind === 'unpushed') {
-        // crude signal/noise split — branches authored by user with subjects ≥ 1 word are "signal"
-        if ((r.commits ?? []).length > 0) unpushedSignal++; else unpushedNoise++;
-      }
-      else if (r.kind.includes('drift')) drifted++;
-    }
-    return { uncommitted, unpushedSignal, drifted, unpushedNoise };
-  }
-
-  // RiskSourceEntry is what the All-Risks info popover shows per item —
-  // one row per underlying svc.risks entry that contributed to the count
-  // shown next to a label. The popover surfaces the concrete branch /
-  // worktree / file list / commit SHAs so the user can see WHERE the
-  // signal came from, instead of just trusting the rolled-up number.
-  interface RiskSourceEntry {
-    repo: string;
-    branch: string;
-    worktree: string;
-    kind: string;
-    detail: string;
-    files: string[];
-    commits: { sha: string; subject: string }[];
-    ageMinutes: number;
-  }
-  function risksFor(svcs: ProductivityService[], predicate: (kind: string, commits: number) => boolean): RiskSourceEntry[] {
-    const out: RiskSourceEntry[] = [];
-    for (const s of svcs ?? []) {
-      for (const r of s.risks ?? []) {
-        if (!predicate(r.kind, (r.commits ?? []).length)) continue;
-        out.push({
-          repo: s.repo,
-          branch: r.branch || '',
-          worktree: r.worktree_path || '',
-          kind: r.kind,
-          detail: r.detail || '',
-          files: r.files ?? [],
-          commits: (r.commits ?? []).map(c => ({ sha: c.sha, subject: c.subject })),
-          ageMinutes: r.age_minutes ?? 0,
-        });
-      }
-    }
-    return out;
-  }
-  // Per-label predicate map — mirrors the row list in the All-Risks
-  // panel so the info popover always shows the SAME underlying rows
-  // the count in the visible row was derived from. Keep these in sync
-  // with the inline risks-list <li> above; the labels are the lookup keys.
-  type RiskLabel = 'Credential exposure' | 'Stalled migration' | 'Uncommitted edits' | 'Unpushed · signal' | 'Drifted from main' | 'Ephemeral worktrees';
-  const RISK_PREDICATES: Record<RiskLabel, (kind: string, commits: number) => boolean> = {
-    'Credential exposure':  (k) => k === 'done-uncommitted',
-    'Stalled migration':    (k) => k === 'unpushed',
-    'Uncommitted edits':    (k) => k === 'done-uncommitted',
-    'Unpushed · signal':    (k, c) => k === 'unpushed' && c > 0,
-    'Drifted from main':    (k) => k.includes('drift'),
-    'Ephemeral worktrees':  (k, c) => k === 'unpushed' && c === 0,
-  };
-  // Human-readable provenance per label: WHERE this signal comes from in
-  // the dashboard's data pipeline. Shown above the source-row list inside
-  // the info popover so the user can trust + verify the count.
-  const RISK_PROVENANCE: Record<RiskLabel, string> = {
-    'Credential exposure':
-      'Top alerts where the working tree has uncommitted edits at session end (kind: done-uncommitted). ' +
-      'Source: git status --porcelain at session-end snapshot time.',
-    'Stalled migration':
-      'Top alerts where local commits exist but the branch is not pushed to origin (kind: unpushed). ' +
-      'Source: git rev-list origin/<branch>..HEAD.',
-    'Uncommitted edits':
-      'Every working tree with uncommitted/untracked files at session-end. ' +
-      'Source: git status --porcelain captured by CaptureSessionSnapshots.',
-    'Unpushed · signal':
-      'Branches with at least one local commit ahead of origin AND a non-empty commit list. ' +
-      'Source: git rev-list origin/<branch>..HEAD per discovered repo.',
-    'Drifted from main':
-      'Branches whose merge-base with the default branch is older than the configured drift threshold. ' +
-      'Source: git merge-base + age comparison per branch scan.',
-    'Ephemeral worktrees':
-      'Unpushed branches with no commits — usually leftover worktree shells from cancelled work. ' +
-      'Source: git branch + git rev-list (zero result) per repo.',
-  };
-  // Open-popover state for the All-Risks info button. Holds the row
-  // label so the template can re-derive the source list reactively.
-  let openRiskInfo = $state<RiskLabel | null>(null);
-  function toggleRiskInfo(label: RiskLabel): void {
-    openRiskInfo = openRiskInfo === label ? null : label;
-  }
-  function closeRiskInfo(): void { openRiskInfo = null; }
   // Fallback bullets when reflection_markdown is empty. Builds a
   // session-level evidence list so the page is never blank.
   function fallbackSessionBullets(rep: ProductivityReport): ReflectionBullet[] {
@@ -1047,7 +957,6 @@
     {@const dp = dayParts(v.day)}
     {@const realSessions = meaningfulSessions(v, 1)}
     {@const peak = peakSweep(realSessions)}
-    {@const hist = risksHistogram(v.services)}
     {@const parsedBullets = gatherProjectBullets(v)}
     {@const bullets = parsedBullets.length > 0 ? parsedBullets : fallbackSessionBullets(v)}
     {@const wwdServices = (v.services ?? []).filter(s => s.what_was_done != null)}
@@ -1057,7 +966,6 @@
     {@const needsSync = v.reflection_status !== 'current' || pendingNew > 0}
     {@const pendingCompileCount = v.pending_compile ?? 0}
     {@const alerts = topAlerts(v.services)}
-    {@const totalRisks = hist.uncommitted + hist.unpushedSignal + hist.drifted + hist.unpushedNoise + alerts.length}
     {@const claudeM = v.minutes_by_cli?.claude ?? 0}
     {@const codexM  = v.minutes_by_cli?.codex ?? 0}
     {@const branches = totalBranches(v.services)}
@@ -1172,97 +1080,6 @@
         <!-- Pad to 2 cards so the grid is stable -->
         {#if alerts.length === 1}<div></div>{/if}
 
-        <aside class="risks">
-          <div class="risks-head">
-            <span class="kick">All risks</span>
-            <span class="mono dim">{hist.uncommitted + hist.unpushedSignal} actionable</span>
-          </div>
-          <div class="risks-num-row">
-            <span class="num-xl alert">{totalRisks || 0}</span>
-            <span class="mono dim">open · {hist.unpushedNoise} noise · {hist.drifted} drifted</span>
-          </div>
-          <hr class="hr" />
-          <ul class="risks-list">
-            {#each [
-              { level:'alert', count: alerts.filter(a=>a.level==='alert').length, label:'Credential exposure' as RiskLabel },
-              { level:'alert', count: alerts.filter(a=>a.level==='warn').length,  label:'Stalled migration' as RiskLabel },
-              { level:'warn',  count: hist.uncommitted,       label:'Uncommitted edits' as RiskLabel },
-              { level:'warn',  count: hist.unpushedSignal,    label:'Unpushed · signal' as RiskLabel },
-              { level:'info',  count: hist.drifted,           label:'Drifted from main' as RiskLabel },
-              { level:'muted', count: hist.unpushedNoise,     label:'Ephemeral worktrees' as RiskLabel },
-            ] as row (row.label)}
-              {@const isOpen = openRiskInfo === row.label}
-              {@const sources = isOpen ? risksFor(v.services, RISK_PREDICATES[row.label]) : []}
-              <li class="risks-li" class:risks-li-open={isOpen}>
-                <span class="num-sm" class:alert={row.level==='alert'} class:warn={row.level==='warn'} class:info={row.level==='info'} class:dim={row.level==='muted'}>{row.count}</span>
-                <span class="mono soft risks-label">{row.label}</span>
-                <button
-                  type="button"
-                  class="risks-info-btn"
-                  class:risks-info-btn-open={isOpen}
-                  onclick={() => toggleRiskInfo(row.label)}
-                  aria-label="Show source data for {row.label}"
-                  aria-expanded={isOpen}
-                  title="Where did this number come from?"
-                >i</button>
-                <span class="risks-dot" class:alert={row.level==='alert'} class:warn={row.level==='warn'} class:info={row.level==='info'}></span>
-                {#if isOpen}
-                  <div class="risks-info-pop" role="region" aria-label="Source data for {row.label}">
-                    <header class="risks-info-pop-head">
-                      <span class="kick">Source · {row.label}</span>
-                      <button type="button" class="risks-info-close mono" onclick={closeRiskInfo} aria-label="Close">×</button>
-                    </header>
-                    <p class="risks-info-pop-prov">{RISK_PROVENANCE[row.label]}</p>
-                    {#if sources.length === 0}
-                      <p class="risks-info-pop-empty mono">No active sources for this signal in this window.</p>
-                    {:else}
-                      <ul class="risks-info-pop-list">
-                        {#each sources as src, i (src.repo + src.branch + src.worktree + i)}
-                          <li class="risks-info-pop-item">
-                            <div class="risks-info-pop-item-hd">
-                              <span class="mono risks-info-pop-repo">{src.repo}</span>
-                              {#if src.branch}<span class="mono dim">·</span><span class="mono risks-info-pop-branch">{src.branch}</span>{/if}
-                              <span class="risks-info-pop-kind mono">{src.kind}</span>
-                            </div>
-                            {#if src.detail}<p class="risks-info-pop-detail">{src.detail}</p>{/if}
-                            {#if src.files.length > 0}
-                              <div class="risks-info-pop-evlabel mono">files ({src.files.length})</div>
-                              <ul class="risks-info-pop-files">
-                                {#each src.files.slice(0, 8) as f}
-                                  <li class="mono dim">{f}</li>
-                                {/each}
-                                {#if src.files.length > 8}
-                                  <li class="mono dim">… and {src.files.length - 8} more</li>
-                                {/if}
-                              </ul>
-                            {/if}
-                            {#if src.commits.length > 0}
-                              <div class="risks-info-pop-evlabel mono">commits ahead ({src.commits.length})</div>
-                              <ul class="risks-info-pop-files">
-                                {#each src.commits.slice(0, 6) as c}
-                                  <li class="mono"><span class="dim">{c.sha.slice(0,7)}</span> {c.subject}</li>
-                                {/each}
-                                {#if src.commits.length > 6}
-                                  <li class="mono dim">… and {src.commits.length - 6} more</li>
-                                {/if}
-                              </ul>
-                            {/if}
-                            {#if src.worktree && src.worktree !== src.repo}
-                              <div class="risks-info-pop-meta mono dim">worktree: {src.worktree}</div>
-                            {/if}
-                            {#if src.ageMinutes > 0}
-                              <div class="risks-info-pop-meta mono dim">first observed {fmtMinutes(src.ageMinutes)} ago</div>
-                            {/if}
-                          </li>
-                        {/each}
-                      </ul>
-                    {/if}
-                  </div>
-                {/if}
-              </li>
-            {/each}
-          </ul>
-        </aside>
       </section>
 
       <!-- ── 4. Hero — what was done ─────────────────────────────── -->
@@ -1818,7 +1635,7 @@
   .model-pill-active { color: var(--fg); border-color: var(--fg); background: var(--bg-card); }
 
   /* ── 3. Triage ───────────────────────────────────────────── */
-  .triage { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr) 320px; gap: 12px; }
+  .triage { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 12px; }
   .tc {
     position: relative; overflow: hidden;
     background: var(--bg-card); border: 1px solid var(--border-soft); border-radius: 10px;
@@ -1833,167 +1650,6 @@
   .tc-title { margin: 0; padding-left: 6px; font-size: 15px; color: var(--fg); font-weight: 500; line-height: 1.3; letter-spacing: -0.01em; }
   .tc-body  { margin: 0; padding-left: 6px; font-size: 12.5px; color: var(--fg-soft); line-height: 1.5; }
   .tc-actions { display: flex; gap: 6px; padding-left: 6px; margin-top: auto; }
-
-  .risks { background: var(--bg-card-2); border: 1px solid var(--border-soft); border-radius: 10px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
-  .risks-head { display: flex; align-items: baseline; justify-content: space-between; }
-  .risks-num-row { display: flex; align-items: baseline; gap: 8px; }
-  .risks-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 5px; }
-  .risks-li {
-    display: grid;
-    grid-template-columns: 24px 1fr auto auto;
-    align-items: center;
-    gap: 8px;
-    position: relative;
-  }
-  .risks-li-open {
-    background: var(--bg-inset);
-    border-radius: 6px;
-    padding: 4px 6px;
-    margin: -4px -6px;
-  }
-  .risks-list .mono { font-size: 11px; }
-  .risks-label { min-width: 0; }
-  .risks-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--fg-muted); opacity: 0.7; }
-  .risks-dot.alert { background: var(--alert); }
-  .risks-dot.warn  { background: var(--warn); }
-  .risks-dot.info  { background: var(--info); }
-
-  /* "i" info button + provenance popover (2026-05-27) — exposes the
-     concrete source data behind each rolled-up risk count so the user
-     can verify the signal instead of having to trust the label. */
-  .risks-info-btn {
-    width: 16px;
-    height: 16px;
-    border-radius: 50%;
-    border: 1px solid var(--border-soft);
-    background: transparent;
-    color: var(--fg-muted);
-    font-family: var(--font-mono);
-    font-size: 10px;
-    font-style: italic;
-    line-height: 1;
-    padding: 0;
-    cursor: pointer;
-    transition: color var(--t-fast), border-color var(--t-fast), background var(--t-fast);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-  }
-  .risks-info-btn:hover {
-    color: var(--fg);
-    border-color: var(--fg-muted);
-    background: var(--bg-card);
-  }
-  .risks-info-btn-open {
-    color: var(--accent);
-    border-color: var(--accent);
-    background: color-mix(in oklch, var(--accent) 10%, var(--bg-card-2));
-  }
-  .risks-info-pop {
-    grid-column: 1 / -1;
-    margin-top: 8px;
-    background: var(--bg-card);
-    border: 1px solid var(--border-soft);
-    border-radius: 8px;
-    padding: 10px 12px 12px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-  .risks-info-pop-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-  }
-  .risks-info-close {
-    background: transparent;
-    border: none;
-    color: var(--fg-muted);
-    font-size: 14px;
-    line-height: 1;
-    cursor: pointer;
-    padding: 2px 6px;
-    border-radius: 4px;
-  }
-  .risks-info-close:hover { color: var(--fg); background: var(--bg-inset); }
-  .risks-info-pop-prov {
-    margin: 0;
-    font-size: 11px;
-    line-height: 1.45;
-    color: var(--fg-soft);
-  }
-  .risks-info-pop-empty {
-    margin: 4px 0 0;
-    font-size: 11px;
-    color: var(--fg-muted);
-    font-style: italic;
-  }
-  .risks-info-pop-list {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-  .risks-info-pop-item {
-    border-left: 2px solid var(--border-soft);
-    padding: 4px 0 4px 10px;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-  .risks-info-pop-item-hd {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex-wrap: wrap;
-    font-size: 11.5px;
-  }
-  .risks-info-pop-repo { color: var(--fg); font-weight: 600; }
-  .risks-info-pop-branch { color: var(--info); }
-  .risks-info-pop-kind {
-    margin-left: auto;
-    padding: 1px 6px;
-    border-radius: 3px;
-    background: var(--bg-inset);
-    border: 1px solid var(--border-hair);
-    color: var(--fg-muted);
-    font-size: 9.5px;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-  }
-  .risks-info-pop-detail {
-    margin: 0;
-    font-size: 11px;
-    color: var(--fg-soft);
-    line-height: 1.45;
-  }
-  .risks-info-pop-evlabel {
-    font-size: 9.5px;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--fg-muted);
-    margin-top: 2px;
-  }
-  .risks-info-pop-files {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-  .risks-info-pop-files li {
-    font-size: 11px;
-    line-height: 1.4;
-    word-break: break-all;
-  }
-  .risks-info-pop-meta {
-    font-size: 10px;
-    color: var(--fg-dim);
-  }
 
   /* ── 4. Hero ─────────────────────────────────────────────── */
   .hero { padding: 24px 26px; display: flex; flex-direction: column; gap: 18px; }
@@ -2166,8 +1822,6 @@
   @media (max-width: 1180px) {
     .rail { grid-template-columns: 1fr auto auto; padding: 10px 16px; }
     .body { padding: 16px; }
-    .triage { grid-template-columns: 1fr 1fr; }
-    .triage .risks { grid-column: 1 / -1; }
     .metrics { grid-template-columns: repeat(3, 1fr); }
     .metric:nth-child(3n) { border-right: none; }
     .timeline { grid-template-columns: 1fr; }
