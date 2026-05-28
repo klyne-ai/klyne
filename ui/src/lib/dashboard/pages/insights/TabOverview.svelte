@@ -7,12 +7,42 @@
   interface Props {
     stats: UsageStatsResponse | null;
     projects: ProjectInsightsResponse | null;
+    /** Per-date claude/codex token breakdown — drives the bar hover
+     *  tooltip. Best-effort: empty object means "no per-CLI data, fall
+     *  back to the aggregate total only". */
+    dailyByCli?: Record<string, { claude: number; codex: number }>;
   }
-  const { stats, projects }: Props = $props();
+  const { stats, projects, dailyByCli = {} }: Props = $props();
+
+  // ── tokens-per-day hover tooltip state ─────────────────────────
+  // We render our own tooltip instead of the native `title` attribute
+  // so we can show the per-CLI breakdown + reformat the date nicely.
+  // hoverDate gates visibility; hoverX/Y are absolute coords relative
+  // to the chart container so the tooltip positions over the bar.
+  let hoverDate = $state<string | null>(null);
+  let hoverLeft = $state(0);
+  let hoverBarTop = $state(0);
+
+  function onBarEnter(date: string, ev: MouseEvent): void {
+    hoverDate = date;
+    const el = ev.currentTarget as HTMLElement;
+    const wrapEl = el.closest('.tpd-bars') as HTMLElement | null;
+    if (!wrapEl) return;
+    const wrapRect = wrapEl.getBoundingClientRect();
+    const barRect = el.getBoundingClientRect();
+    hoverLeft = barRect.left - wrapRect.left + barRect.width / 2;
+    hoverBarTop = barRect.top - wrapRect.top;
+  }
+  function onBarLeave(): void { hoverDate = null; }
 
   // Chronological daily rows for chart (server gives newest-first, reverse for chart)
   const dailyChrono = $derived<DailyRow[]>(stats ? [...stats.daily].reverse() : []);
   const maxDailyTokens = $derived(dailyChrono.reduce((m, r) => (r.total > m ? r.total : m), 1));
+
+  const hoverBreakdown = $derived(hoverDate ? dailyByCli[hoverDate] : undefined);
+  const hoverTotal = $derived(
+    hoverDate ? dailyChrono.find(d => d.date === hoverDate)?.total ?? 0 : 0
+  );
 
   // Top 5 projects by tokens
   const topProjects = $derived(
@@ -40,28 +70,63 @@
     <div class="ad-card" style="padding: 16px;">
       <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px;">
         <div class="ad-section-h">Tokens per day</div>
-        <div style="display: flex; gap: 12px; font-size: 11px; color: var(--ad-faint);">
-          <span style="display: flex; align-items: center; gap: 4px;">
-            <span style="width: 10px; height: 6px; background: var(--ad-claude); border-radius: 1px; display: inline-block;"></span>
-            <span class="mono">claude</span>
-          </span>
-          <span style="display: flex; align-items: center; gap: 4px;">
-            <span style="width: 10px; height: 6px; background: var(--ad-codex); border-radius: 1px; display: inline-block;"></span>
-            <span class="mono">codex</span>
-          </span>
+        <!-- Legend simplified to one item: DailyRow.total is a per-day
+             sum across whatever CLI filter is active, NOT a per-CLI
+             breakdown. Showing claude+codex chips here implied the bars
+             were stacked, which they aren't. -->
+        <div style="display: flex; gap: 6px; font-size: 11px; color: var(--ad-faint); align-items: center;">
+          <span style="width: 10px; height: 6px; background: var(--ad-claude); border-radius: 1px; display: inline-block;"></span>
+          <span class="mono">tokens / day</span>
         </div>
       </div>
       {#if dailyChrono.length === 0}
         <div style="color: var(--ad-faint); font-size: 13px; padding: 24px 0; text-align: center;">No activity in this window.</div>
       {:else}
-        <div style="display: flex; gap: 2px; align-items: flex-end; height: 140px; overflow-x: auto;">
+        <!-- Bars distribute across the full container width with flex:1.
+             min-width keeps single-day windows from collapsing to a
+             hairline; max-width keeps a 90d window from looking like a
+             pile of skyscrapers. -->
+        <div class="tpd-bars" style="position: relative; display: flex; gap: 4px; align-items: flex-end; height: 140px;">
           {#each dailyChrono as d (d.date)}
             {@const h = Math.max(2, Math.round((d.total / maxDailyTokens) * 130))}
             <div
-              title="{d.date} · {kfmt(d.total)} tokens"
-              style="width: 14px; flex-shrink: 0; background: var(--ad-claude); height: {h}px; opacity: 0.85; border-radius: 2px 2px 0 0;"
+              role="img"
+              aria-label="{d.date}: {kfmt(d.total)} tokens"
+              onmouseenter={(e) => onBarEnter(d.date, e)}
+              onmouseleave={onBarLeave}
+              class="tpd-bar"
+              class:tpd-bar-active={hoverDate === d.date}
+              style="flex: 1 1 0; min-width: 6px; max-width: 48px; background: var(--ad-claude); height: {h}px; border-radius: 2px 2px 0 0;"
             ></div>
           {/each}
+
+          {#if hoverDate}
+            <!-- Floating tooltip — absolutely positioned over the chart
+                 area, translated to sit centered above the hovered bar.
+                 pointer-events:none so it doesn't steal hover from the
+                 next bar over. -->
+            <div
+              role="tooltip"
+              class="tpd-tt mono"
+              style="left: {hoverLeft}px; top: {hoverBarTop}px;"
+            >
+              <div class="tpd-tt-date">{hoverDate}</div>
+              <div class="tpd-tt-row">
+                <span class="tpd-tt-swatch" style="background: var(--ad-claude);"></span>
+                <span class="tpd-tt-label">claude</span>
+                <span class="tpd-tt-val">{hoverBreakdown ? kfmt(hoverBreakdown.claude) : '—'}</span>
+              </div>
+              <div class="tpd-tt-row">
+                <span class="tpd-tt-swatch" style="background: var(--ad-codex);"></span>
+                <span class="tpd-tt-label">codex</span>
+                <span class="tpd-tt-val">{hoverBreakdown ? kfmt(hoverBreakdown.codex) : '—'}</span>
+              </div>
+              <div class="tpd-tt-row tpd-tt-total">
+                <span class="tpd-tt-label">total</span>
+                <span class="tpd-tt-val">{kfmt(hoverTotal)}</span>
+              </div>
+            </div>
+          {/if}
         </div>
         <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--ad-faint); margin-top: 6px; font-family: var(--ad-font-mono);">
           <span>{dailyChrono[0]?.date ?? ''}</span>
@@ -126,5 +191,85 @@
 <style>
   .hover-row:hover {
     background: var(--ad-bg-2);
+  }
+
+  /* Tokens-per-day bars: subtle opacity by default, full on hover so
+     the active bar visibly highlights along with the tooltip. */
+  .tpd-bar {
+    opacity: 0.78;
+    cursor: pointer;
+    transition: opacity 120ms ease-out, filter 120ms ease-out;
+  }
+  .tpd-bar:hover,
+  .tpd-bar-active {
+    opacity: 1;
+    filter: brightness(1.1);
+  }
+  .tpd-bar:focus-visible {
+    outline: 1px solid var(--ad-fg);
+    outline-offset: 2px;
+  }
+
+  /* Floating tooltip — sits above the hovered bar, centered horizontally
+     on the bar's center. pointer-events: none so adjacent bars stay
+     hoverable while the tooltip is rendered over them. */
+  .tpd-tt {
+    position: absolute;
+    transform: translate(-50%, calc(-100% - 10px));
+    pointer-events: none;
+    background: var(--ad-panel);
+    border: 1px solid var(--ad-border);
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 11px;
+    box-shadow: 0 12px 32px color-mix(in oklch, black 50%, transparent);
+    z-index: 10;
+    min-width: 168px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .tpd-tt-date {
+    font-size: 11px;
+    color: var(--ad-fg);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    padding-bottom: 4px;
+    margin-bottom: 2px;
+    border-bottom: 1px solid var(--ad-border-soft);
+  }
+  .tpd-tt-row {
+    display: grid;
+    grid-template-columns: 9px auto 1fr;
+    gap: 8px;
+    align-items: center;
+    font-variant-numeric: tabular-nums;
+  }
+  .tpd-tt-swatch {
+    width: 9px;
+    height: 9px;
+    border-radius: 2px;
+  }
+  .tpd-tt-label {
+    color: var(--ad-faint);
+    font-size: 11px;
+    letter-spacing: 0.01em;
+  }
+  .tpd-tt-val {
+    color: var(--ad-fg);
+    text-align: right;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .tpd-tt-total {
+    grid-template-columns: auto 1fr;
+    padding-top: 4px;
+    margin-top: 2px;
+    border-top: 1px solid var(--ad-border-soft);
+  }
+  .tpd-tt-total .tpd-tt-label {
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-size: 10px;
   }
 </style>

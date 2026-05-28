@@ -50,8 +50,11 @@
 <div style="display: flex; flex-direction: column; gap: 16px;">
   <!-- Heatmap -->
   <div class="ad-card" style="padding: 16px;">
-    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px;">
-      <div class="ad-section-h">Activity heatmap <span style="font-weight: 400; color: var(--ad-faint);">last 14 weeks</span></div>
+    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+      <div class="ad-section-h">
+        Activity heatmap
+        <span style="font-weight: 400; color: var(--ad-faint);">· rolling 12-week view</span>
+      </div>
       <div style="display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--ad-faint);">
         <span>Less</span>
         {#each [0, 1, 2, 3, 4] as lvl (lvl)}
@@ -59,6 +62,13 @@
         {/each}
         <span>More</span>
       </div>
+    </div>
+    <!-- The heatmap is a long-range pattern view and is intentionally
+         pinned to the past 12 weeks regardless of the date window the
+         user picked at the top of the page. Without this note the
+         mostly-empty cells read as a bug when the window is short. -->
+    <div style="font-size: 11px; color: var(--ad-faint); margin-bottom: 12px;">
+      Always shows the past 12 weeks · independent of the window above.
     </div>
     {#if heatmap.length === 0}
       <div style="color: var(--ad-faint); font-size: 13px; padding: 24px 0; text-align: center;">No activity to plot.</div>

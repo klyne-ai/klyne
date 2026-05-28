@@ -878,6 +878,71 @@
   function plural(n: number, s: string, p?: string): string {
     return `${n} ${n === 1 ? s : (p ?? s + 's')}`;
   }
+
+  // ── per-kind alert lists (2026-05-28 redesign) ────────────────
+  // The 70/30 cockpit now surfaces unpushed + uncommitted as their
+  // own project-level feeds instead of a top-2 "topAlerts" digest.
+  // These return EVERY matching risk, sorted by the same weighting
+  // topAlerts used so the most-urgent rows sit at the top of each
+  // feed and can be scanned in a glance.
+  interface UnpushedCard {
+    rank: string;
+    repo: string;
+    branch: string;
+    title: string;
+    commits: { sha: string; subject: string }[];
+    ageMinutes: number;
+    extraCommits: number;
+  }
+  interface UncommittedCard {
+    rank: string;
+    repo: string;
+    branch: string;
+    title: string;
+    files: string[];
+    ageMinutes: number;
+    extraFiles: number;
+  }
+  function unpushedAlerts(svcs: ProductivityService[]): UnpushedCard[] {
+    const items: (UnpushedCard & { weight: number })[] = [];
+    for (const svc of svcs ?? []) for (const r of svc.risks ?? []) {
+      if (r.kind !== 'unpushed') continue;
+      const commitsAll = r.commits ?? [];
+      const commits = commitsAll.slice(0, 5).map(c => ({ sha: c.sha, subject: c.subject }));
+      items.push({
+        weight: 50 + commitsAll.length * 5,
+        rank: '',
+        repo: svc.repo,
+        branch: r.branch || 'main',
+        title: r.detail || `${commitsAll.length} commit(s) ahead, not on origin`,
+        commits,
+        ageMinutes: r.age_minutes ?? 0,
+        extraCommits: Math.max(0, commitsAll.length - commits.length),
+      });
+    }
+    items.sort((a, b) => b.weight - a.weight);
+    return items.map((it, i) => ({ ...it, rank: (i + 1).toString().padStart(2, '0') }));
+  }
+  function uncommittedAlerts(svcs: ProductivityService[]): UncommittedCard[] {
+    const items: (UncommittedCard & { weight: number })[] = [];
+    for (const svc of svcs ?? []) for (const r of svc.risks ?? []) {
+      if (r.kind !== 'done-uncommitted') continue;
+      const filesAll = r.files ?? [];
+      const files = filesAll.slice(0, 5);
+      items.push({
+        weight: 90 + (r.age_minutes ?? 0) / 60,
+        rank: '',
+        repo: svc.repo,
+        branch: r.branch || 'main',
+        title: r.detail || `${filesAll.length} uncommitted file(s) since last session ended`,
+        files,
+        ageMinutes: r.age_minutes ?? 0,
+        extraFiles: Math.max(0, filesAll.length - files.length),
+      });
+    }
+    items.sort((a, b) => b.weight - a.weight);
+    return items.map((it, i) => ({ ...it, rank: (i + 1).toString().padStart(2, '0') }));
+  }
   // Reflection status enum → display label. The handler emits
   // 'missing' | 'stale' | 'current'; anything else (including ''/null
   // for a single-day report that never set it) renders as a generic
@@ -914,83 +979,122 @@
 
 <svelte:head><title>klyne — Productivity</title></svelte:head>
 
-<div class="page">
-  <!-- ── 1. Top rail ───────────────────────────────────────────── -->
-  <div class="rail">
-    <div class="rail-brand">
-      <span class="rail-logo">KLYNE/</span>
-      <span class="rail-app">productivity</span>
+<div class="page-cockpit">
+  <!-- ── compact header ─────────────────────────────────────── -->
+  <header class="hdr">
+    <div class="hdr-l">
+      <span class="kick kick-accent">KLYNE / PRODUCTIVITY</span>
+      <span class="sep">·</span>
+      {#if visible}
+        {@const dp = dayParts(visible.day)}
+        <span class="mono muted">{dp.weekday}</span>
+        <h1 class="hdr-date mono">{dp.pretty}</h1>
+      {:else}
+        <span class="mono muted">—</span>
+        <h1 class="hdr-date mono">{rangeLabel(rangeKey)}</h1>
+      {/if}
     </div>
-    <div class="seg">
-      {#each RANGE_KEYS as k (k)}
-        <button class="seg-btn" class:on={rangeKey === k} onclick={() => pickRange(k)}>{RANGE_LABELS[k]}</button>
-      {/each}
-      <div class="cal-wrap">
-        <button
-          class="seg-btn cal-trigger"
-          class:on={rangeKey === 'custom' || calendarOpen}
-          onclick={() => { calendarOpen = !calendarOpen; if (calendarOpen && availableDays.length === 0) void loadAvailableDays(); }}
-          title="Pick a specific day"
-          aria-haspopup="dialog"
-          aria-expanded={calendarOpen}
-        >
-          calendar
-        </button>
-        {#if calendarOpen}
-          <div class="cal-pop" role="dialog" aria-label="Pick productivity date">
-            <div class="cal-head">
-              <button class="cal-nav" onclick={() => shiftCalendarMonth(-1)} disabled={!canGoPrevMonth} aria-label="Previous month">‹</button>
-              <span>{monthLabel(calendarMonth)}</span>
-              <button class="cal-nav" onclick={() => shiftCalendarMonth(1)} disabled={!canGoNextMonth} aria-label="Next month">›</button>
-            </div>
-            <div class="cal-week" aria-hidden="true">
-              {#each ['S','M','T','W','T','F','S'] as d}
-                <span>{d}</span>
-              {/each}
-            </div>
-            <div class="cal-grid">
-              {#each calendarCells as cell (cell.key)}
-                <button
-                  class="cal-day"
-                  class:calDayMuted={!cell.inMonth}
-                  class:calDayData={cell.hasData}
-                  class:selected={cell.selected}
-                  disabled={!cell.hasData}
-                  onclick={() => selectCalendarDay(cell.day)}
-                  aria-label={cell.hasData ? `Show productivity for ${cell.day}` : `No productivity data for ${cell.day}`}
-                >
-                  {cell.label}
-                </button>
-              {/each}
-            </div>
-            <div class="cal-foot">
-              {#if datesError}
-                <span class="alert">dates unavailable</span>
-              {:else if availableDays.length > 0}
-                <span>{availableDays[0]} → {availableDays[availableDays.length - 1]}</span>
-              {:else}
-                <span>no dated data yet</span>
-              {/if}
-            </div>
-          </div>
-        {/if}
-      </div>
-    </div>
-    <div class="rail-right">
-      <span class="rail-ago">{ago(loadedAt)}</span>
-      <button
-        class="btn-ghost ask-btn"
-        onclick={() => (askOpen = true)}
-        title="Ask Klyne about this range"
-      >Ask Klyne ▸</button>
-      <button class="btn-ghost" onclick={refresh} title="Refresh">↻</button>
-    </div>
-  </div>
 
-  <!-- Banners (independent of the body render). Show the small range-
-       switching status when we already have data, the full loader when
-       we don't, and the error banner inline above the body when an
-       error fires with stale data already on screen. -->
+    <div class="hdr-m">
+      <div class="seg">
+        {#each RANGE_KEYS as k (k)}
+          <button class="seg-btn" class:on={rangeKey === k} onclick={() => pickRange(k)}>{RANGE_LABELS[k]}</button>
+        {/each}
+        <div class="cal-wrap">
+          <button
+            class="seg-btn cal-trigger"
+            class:on={rangeKey === 'custom' || calendarOpen}
+            onclick={() => { calendarOpen = !calendarOpen; if (calendarOpen && availableDays.length === 0) void loadAvailableDays(); }}
+            title="Pick a specific day"
+            aria-haspopup="dialog"
+            aria-expanded={calendarOpen}
+          >calendar</button>
+          {#if calendarOpen}
+            <div class="cal-pop" role="dialog" aria-label="Pick productivity date">
+              <div class="cal-head">
+                <button class="cal-nav" onclick={() => shiftCalendarMonth(-1)} disabled={!canGoPrevMonth} aria-label="Previous month">‹</button>
+                <span>{monthLabel(calendarMonth)}</span>
+                <button class="cal-nav" onclick={() => shiftCalendarMonth(1)} disabled={!canGoNextMonth} aria-label="Next month">›</button>
+              </div>
+              <div class="cal-week" aria-hidden="true">
+                {#each ['S','M','T','W','T','F','S'] as d}<span>{d}</span>{/each}
+              </div>
+              <div class="cal-grid">
+                {#each calendarCells as cell (cell.key)}
+                  <button
+                    class="cal-day"
+                    class:calDayMuted={!cell.inMonth}
+                    class:calDayData={cell.hasData}
+                    class:selected={cell.selected}
+                    disabled={!cell.hasData}
+                    onclick={() => selectCalendarDay(cell.day)}
+                    aria-label={cell.hasData ? `Show productivity for ${cell.day}` : `No productivity data for ${cell.day}`}
+                  >{cell.label}</button>
+                {/each}
+              </div>
+              <div class="cal-foot">
+                {#if datesError}
+                  <span class="alert">dates unavailable</span>
+                {:else if availableDays.length > 0}
+                  <span>{availableDays[0]} → {availableDays[availableDays.length - 1]}</span>
+                {:else}
+                  <span>no dated data yet</span>
+                {/if}
+              </div>
+            </div>
+          {/if}
+        </div>
+      </div>
+
+      {#if visible}
+        {@const v = visible}
+        {@const pendingNew = v.pending_entries ?? 0}
+        {@const needsSync = v.reflection_status !== 'current' || pendingNew > 0}
+        {@const pendingCompileCount = v.pending_compile ?? 0}
+        {@const alerts = topAlerts(v.services)}
+        <span class="pill pill-{v.reflection_status === 'current' ? 'ok' : v.reflection_status === 'stale' ? 'warn' : 'alert'} pill-sm">
+          <span class="dot dot-{v.reflection_status === 'current' ? 'ok' : v.reflection_status === 'stale' ? 'warn' : 'alert'}"></span>{reflectionLabel(v.reflection_status)}
+        </span>
+        <button
+          class="pill pill-action pill-sm"
+          class:is-highlighted={needsSync}
+          onclick={runReflectForAllProjects}
+          disabled={reflectRunning}
+          title="Spawn /klyne:reflect for every project in this window">
+          {#if reflectRunning}
+            {reflectDone}/{reflectTotal}…
+          {:else}
+            ▶ Reflect
+            {#if needsSync && pendingNew > 0}<span class="pill-action-badge mono">{pendingNew}</span>{/if}
+          {/if}
+        </button>
+        {#if pendingCompileCount > 0}
+          <button
+            class="pill pill-action pill-sm is-highlighted"
+            onclick={runCompileForAllPendingServices}
+            disabled={compileRunning}
+            title="Spawn /klyne:productivity-sync to compile cohesive Tier 1 prose from this day's typed reflections">
+            {#if compileRunning}
+              {compileDone}/{compileTotal}…
+            {:else}
+              ✨ Compile<span class="pill-action-badge mono">{pendingCompileCount}</span>
+            {/if}
+          </button>
+        {/if}
+        {#if alerts.length > 0}
+          <span class="pill pill-alert pill-sm"><span class="dot dot-alert"></span>{plural(alerts.length, 'flag')}</span>
+        {/if}
+      {/if}
+    </div>
+
+    <div class="hdr-r">
+      <span class="mono dim hdr-ago">{ago(loadedAt)}</span>
+      <button class="btn-ghost" onclick={() => (askOpen = true)} title="Ask Klyne about this range">Ask ▸</button>
+      <button class="btn-ghost btn-square" onclick={refresh} title="Refresh">↻</button>
+      <button class="btn-primary" onclick={copyForStandup}>{copied ? '✓ Copied' : 'Copy ⌘C'}</button>
+    </div>
+  </header>
+
   {#if loading && rep}
     <div class="range-loading mono" role="status" aria-live="polite">
       <span class="range-spinner"></span>
@@ -1023,7 +1127,6 @@
     </div>
   {:else if visible}
     {@const v = visible}
-    {@const dp = dayParts(v.day)}
     {@const realSessions = meaningfulSessions(v, 1)}
     {@const peak = peakSweep(realSessions)}
     {@const hist = risksHistogram(v.services)}
@@ -1032,10 +1135,10 @@
     {@const wwdServices = (v.services ?? []).filter(s => s.what_was_done != null)}
     {@const wwdRepos = new Set(wwdServices.map(s => (s.repo || '').toLowerCase()))}
     {@const legacyBullets = bullets.filter(b => !wwdRepos.has((b.repo || '').toLowerCase()))}
-    {@const pendingNew = v.pending_entries ?? 0}
-    {@const needsSync = v.reflection_status !== 'current' || pendingNew > 0}
-    {@const pendingCompileCount = v.pending_compile ?? 0}
     {@const alerts = topAlerts(v.services)}
+    {@const unpushedList = unpushedAlerts(v.services)}
+    {@const uncommittedList = uncommittedAlerts(v.services)}
+    {@const actionable = hist.uncommitted + hist.unpushedSignal}
     {@const totalRisks = hist.uncommitted + hist.unpushedSignal + hist.drifted + hist.unpushedNoise + alerts.length}
     {@const claudeM = v.minutes_by_cli?.claude ?? 0}
     {@const codexM  = v.minutes_by_cli?.codex ?? 0}
@@ -1043,271 +1146,570 @@
     {@const commits  = totalCommits(v.services)}
     {@const pushed   = totalShippedPushed(v.services)}
     {@const merged   = totalShippedMerged(v.services)}
+    {@const totalMin = v.total_active_minutes ?? 0}
+    {@const rawMin   = rawSumMinutes(v.sessions)}
+    {@const aiTimeMax = Math.max(totalMin, 480)}
+    {@const aiFill = Math.min(1, totalMin / aiTimeMax)}
+    {@const donutR = 43}
+    {@const donutC = 2 * Math.PI * donutR}
+    {@const shippedSamples = bullets.filter(b => b.chip === 'SHIPPED' || b.chip === 'MERGED').slice(0, 3)}
+    {@const headlineTxt = headlineFromMarkdown(v.reflection_markdown ?? '', 160)}
+    {@const sortedSvcs = [...v.services].map(s => {
+      const m = (s.minutes_by_cli?.claude ?? 0) + (s.minutes_by_cli?.codex ?? 0);
+      const shippedN = s.branches.filter(b => b.ship === 'pushed-to-remote' || b.ship === 'merged-to-default').length;
+      const loops = s.branches.filter(b => b.ahead > 0 || b.behind > 0).length + s.risks.filter(r => r.kind === 'done-uncommitted').length;
+      return { svc: s, min: m, shipped: shippedN, loops };
+    }).sort((a, b) => b.min - a.min)}
+    {@const maxSvcMin = Math.max(1, ...sortedSvcs.map(s => s.min))}
 
-    <div class="body">
-      <!-- ── 2. Masthead ─────────────────────────────────────────── -->
-      <header class="mast">
-        <div class="mast-l">
-          <span class="kick">{dp.weekday} · Standup digest</span>
-          <h1 class="date">{dp.pretty}</h1>
-        </div>
-        <div class="mast-m">
-          <div class="mast-pills">
-            <span class="pill pill-{v.reflection_status === 'current' ? 'ok' : v.reflection_status === 'stale' ? 'warn' : 'alert'}">
-              <span class="dot dot-{v.reflection_status === 'current' ? 'ok' : v.reflection_status === 'stale' ? 'warn' : 'alert'}"></span>{reflectionLabel(v.reflection_status)}
-            </span>
-            <button
-              class="pill pill-action"
-              class:is-highlighted={needsSync}
-              onclick={runReflectForAllProjects}
-              disabled={reflectRunning}
-              title="Spawn /klyne:reflect for every project in this window">
-              {#if reflectRunning}
-                Running {reflectDone}/{reflectTotal}…
-              {:else}
-                ▶ Run /klyne:reflect now
-                {#if needsSync && pendingNew > 0}
-                  <span class="pill-action-badge mono">{pendingNew} new</span>
-                {/if}
-              {/if}
-            </button>
-            {#if pendingCompileCount > 0}
-              <button
-                class="pill pill-action is-highlighted"
-                onclick={runCompileForAllPendingServices}
-                disabled={compileRunning}
-                title="Spawn /klyne:productivity-sync to compile cohesive Tier 1 prose from this day's typed reflections">
-                {#if compileRunning}
-                  Compiling {compileDone}/{compileTotal}…
-                {:else}
-                  ✨ Generate productivity
-                  <span class="pill-action-badge mono">{pendingCompileCount} pending</span>
-                {/if}
-              </button>
-            {/if}
-            {#if alerts.length > 0}
-              <span class="pill pill-alert"><span class="dot dot-alert"></span>{plural(alerts.length, 'open alert')} · review before EOD</span>
-            {/if}
-          </div>
-          <span class="mast-sub">
-            {realSessions.length} worklog entries pending · next /klyne:reflect when window resets
-            {#if reflectError}
-              · <span class="refl-err">last run reported: {reflectError}</span>
-            {/if}
-          </span>
-        </div>
-        <div class="mast-r">
-          <button class="btn-primary" onclick={copyForStandup}>{copied ? '✓ Copied' : 'Copy for standup ⌘C'}</button>
-          <span class="mast-sub">{bullets.length} bullets · {bullets.reduce((n,b)=>n+b.title.length+b.body.length, 0)} chars</span>
-        </div>
-      </header>
-
-      <!-- ── 3. Triage ───────────────────────────────────────────── -->
-      <section class="triage">
-        {#each alerts as a (a.rank)}
-          <article class="tc" class:tc-alert={a.level==='alert'} class:tc-warn={a.level==='warn'}>
-            <span class="tc-bar"></span>
-            <div class="tc-head">
-              <div class="tc-head-l">
-                <span class="mono dim">{a.rank}</span>
-                <span class="kick" class:kick-alert={a.level==='alert'} class:kick-warn={a.level==='warn'}>{a.kicker}</span>
-              </div>
-              <span class="mono dim">{a.meta}</span>
+    <main class="cockpit">
+      <!--
+        ── top split: parallel sessions (left 50%) + unpushed commits (right 50%) ──
+        The 2026-05-28 redesign asks for the timeline and the
+        "uncommitted-but-not-yet-pushed" feed side-by-side so the
+        signal that's most actionable mid-day (push your work!) is
+        always one glance away.
+      -->
+      <div class="top-split">
+        <!-- LEFT 50%: parallel sessions timeline -->
+        <section class="card timeline-top">
+          <header class="timeline-top-h">
+            <div class="timeline-top-h-l">
+              <span class="kick">Parallel sessions</span>
+              <span class="mono muted timeline-top-sub">{realSessions.length} sessions · {sortedSvcs.length} services · {fmtMinutes(totalMin)} wall</span>
             </div>
-            <h3 class="tc-title">{a.title}</h3>
-            <p class="tc-body">{a.body}</p>
-          </article>
-        {/each}
-        {#if alerts.length === 0}
-          <article class="tc tc-empty">
-            <span class="tc-bar"></span>
-            <div class="tc-head"><span class="kick kick-ok">All clear</span></div>
-            <h3 class="tc-title">No open alerts for this window.</h3>
-            <p class="tc-body">No uncommitted edits, no unpushed signal, no migrations stalled.</p>
-          </article>
-        {/if}
-        <!-- Pad to 2 cards so the grid is stable -->
-        {#if alerts.length === 1}<div></div>{/if}
+            <div class="timeline-top-h-r">
+              <span class="mono"><span class="kick">peak</span> <span class="num-m">{peak.peak}×</span></span>
+              <span class="sep">·</span>
+              <span class="mono"><span class="kick">overlap</span> <span class="num-m">{fmtMinutes(peak.overlapMinutes)}</span></span>
+            </div>
+          </header>
+          <div class="timeline-top-body">
+            <ConcurrencyTimeline sessions={v.sessions} since={since} until={until} />
+          </div>
+        </section>
 
-        <aside class="risks">
-          <div class="risks-head">
-            <span class="kick">All risks</span>
-            <span class="mono dim">{hist.uncommitted + hist.unpushedSignal} actionable</span>
+        <!-- RIGHT 50%: unpushed commits feed (project-level, scrollable) -->
+        <section class="card unpushed-top">
+          <header class="rail-tile-h">
+            <span class="kick kick-warn">Unpushed commits</span>
+            <span class="mono dim">{unpushedList.length} branch{unpushedList.length === 1 ? '' : 'es'} ahead</span>
+          </header>
+          <div class="alert-feed">
+            {#each unpushedList as u, i (u.repo + '|' + u.branch + '|' + i)}
+              <article class="alert-card alert-card-warn">
+                <div class="alert-card-rank mono dim">{u.rank}</div>
+                <div class="alert-card-body">
+                  <header class="alert-card-h">
+                    <span class="kick kick-warn alert-card-kick">UNPUSHED COMMITS</span>
+                    <span class="grow"></span>
+                    <span class="mono dim alert-card-meta">{u.repo} · {u.branch}{u.ageMinutes > 0 ? ' · ' + fmtMinutes(u.ageMinutes) + ' old' : ''}</span>
+                  </header>
+                  <h4 class="alert-card-title">{u.title}</h4>
+                  {#if u.commits.length > 0}
+                    <ul class="alert-commits">
+                      {#each u.commits as c, ci (c.sha + ci)}
+                        <li class="alert-commit">
+                          <span class="mono dim alert-commit-sha">{c.sha.slice(0, 7)}</span>
+                          <span class="alert-commit-subj">{c.subject}</span>
+                        </li>
+                      {/each}
+                      {#if u.extraCommits > 0}
+                        <li class="alert-commit mono dim">… and {u.extraCommits} more</li>
+                      {/if}
+                    </ul>
+                  {/if}
+                </div>
+              </article>
+            {/each}
+            {#if unpushedList.length === 0}
+              <div class="alert-empty">
+                <span class="kick kick-ok">All pushed</span>
+                <p class="mono dim">No branches ahead of origin in this window.</p>
+              </div>
+            {/if}
           </div>
-          <div class="risks-num-row">
-            <span class="num-xl alert">{totalRisks || 0}</span>
-            <span class="mono dim">open · {hist.unpushedNoise} noise · {hist.drifted} drifted</span>
+        </section>
+      </div>
+
+      <!--
+        ── two-pane split: what was done (70%) | right rail (30%) ──
+        Per the 2026-05-28 redesign: the narrative belongs front-and-
+        centre and gets the canvas; AI time + services + (future home
+        of Needs Attention) stick to the right rail so scanning while
+        reading the day's narrative is one glance away.
+      -->
+      <div class="split">
+        <!-- LEFT (70%): What was done -->
+        <section class="col col-accent split-left">
+          <header class="col-h">
+            <span class="col-dot accent"></span>
+            <span class="col-title">What was done</span>
+            <span class="mono muted col-sub">{wwdServices.length} service{wwdServices.length === 1 ? '' : 's'} · {realSessions.length} session{realSessions.length === 1 ? '' : 's'}</span>
+            <span class="grow"></span>
+            <span class="mono dim col-meta">deterministic · git + jsonl</span>
+          </header>
+          <div class="col-body col-body-flush col-body-static">
+            {#if wwdServices.length === 0 && legacyBullets.length === 0}
+              <div class="col-empty">
+                <span class="kick">Nothing important yet</span>
+                <p class="mono dim">No important sessions in this window. Pick a wider range or check back after end of day.</p>
+              </div>
+            {/if}
+            {#if wwdServices.length > 0}
+              <div class="wwd-list">
+                {#each wwdServices as svc, si (svc.project_path || svc.repo || si)}
+                  {#if svc.what_was_done}
+                    <WhatWasDoneCard card={svc.what_was_done} onOpenEntry={openWorklogEntry} defaultOpen={si === 0} />
+                  {/if}
+                {/each}
+              </div>
+            {/if}
+            {#if legacyBullets.length > 0}
+              <ol class="bul-list">
+                {#each legacyBullets as b, i (b.title + i)}
+                  {@const tone = chipTone(b.chip)}
+                  <li class="bul">
+                    <span class="mono dim bul-num">0{i+1}</span>
+                    <span class="pill pill-{tone} bul-pill">{b.chip}</span>
+                    <div class="bul-body">
+                      <div class="bul-title">{b.title}</div>
+                      {#if b.body}<p class="bul-desc">{b.body}</p>{/if}
+                    </div>
+                    <div class="bul-ev">
+                      {#if b.repo}<span class="mono bul-repo">{b.repo}</span>{/if}
+                      {#each b.evidence as e}<span class="mono dim">{e}</span>{/each}
+                    </div>
+                  </li>
+                {/each}
+              </ol>
+            {/if}
           </div>
-          <hr class="hr" />
-          <ul class="risks-list">
-            {#each [
-              { level:'alert', count: alerts.filter(a=>a.level==='alert').length, label:'Credential exposure' as RiskLabel },
-              { level:'alert', count: alerts.filter(a=>a.level==='warn').length,  label:'Stalled migration' as RiskLabel },
-              { level:'warn',  count: hist.uncommitted,       label:'Uncommitted edits' as RiskLabel },
-              { level:'warn',  count: hist.unpushedSignal,    label:'Unpushed · signal' as RiskLabel },
-              { level:'info',  count: hist.drifted,           label:'Drifted from main' as RiskLabel },
-              { level:'muted', count: hist.unpushedNoise,     label:'Ephemeral worktrees' as RiskLabel },
-            ] as row (row.label)}
-              {@const isOpen = openRiskInfo === row.label}
-              {@const sources = isOpen ? risksFor(v.services, RISK_PREDICATES[row.label]) : []}
-              <li class="risks-li" class:risks-li-open={isOpen}>
-                <span class="num-sm" class:alert={row.level==='alert'} class:warn={row.level==='warn'} class:info={row.level==='info'} class:dim={row.level==='muted'}>{row.count}</span>
-                <span class="mono soft risks-label">{row.label}</span>
-                <button
-                  type="button"
-                  class="risks-info-btn"
-                  class:risks-info-btn-open={isOpen}
-                  onclick={() => toggleRiskInfo(row.label)}
-                  aria-label="Show source data for {row.label}"
-                  aria-expanded={isOpen}
-                  title="Where did this number come from?"
-                >i</button>
-                <span class="risks-dot" class:alert={row.level==='alert'} class:warn={row.level==='warn'} class:info={row.level==='info'}></span>
-                {#if isOpen}
-                  <div class="risks-info-pop" role="region" aria-label="Source data for {row.label}">
-                    <header class="risks-info-pop-head">
-                      <span class="kick">Source · {row.label}</span>
-                      <button type="button" class="risks-info-close mono" onclick={closeRiskInfo} aria-label="Close">×</button>
-                    </header>
-                    <p class="risks-info-pop-prov">{RISK_PROVENANCE[row.label]}</p>
-                    {#if sources.length === 0}
-                      <p class="risks-info-pop-empty mono">No active sources for this signal in this window.</p>
+          {#if headlineTxt}
+            <footer class="col-foot mono dim">{headlineTxt}</footer>
+          {/if}
+        </section>
+
+        <!-- RIGHT RAIL (30%, sticky) -->
+        <aside class="split-right">
+          <!-- AI Time tile -->
+          <section class="card rail-tile">
+            <span class="hero-bar hero-bar-info"></span>
+            <header class="rail-tile-h">
+              <span class="kick">AI time</span>
+              <span class="mono dim">peak {peak.peak}×</span>
+            </header>
+            <div class="ai-body">
+              <div class="ai-donut">
+                <svg width="106" height="106" viewBox="0 0 106 106" class="ai-donut-svg" aria-hidden="true">
+                  <circle cx="53" cy="53" r={donutR} stroke="var(--border-hair)" stroke-width="10" fill="none" />
+                  <circle cx="53" cy="53" r={donutR} stroke="var(--info)" stroke-width="10" fill="none"
+                          stroke-dasharray="{donutC * aiFill} {donutC}" stroke-linecap="round"
+                          transform="rotate(-90 53 53)" />
+                </svg>
+                <div class="ai-donut-label">
+                  <span class="num-l">{fmtMinutes(totalMin)}</span>
+                  <span class="mono dim">wall-clock</span>
+                </div>
+              </div>
+              <div class="ai-stats">
+                <div class="ai-stat">
+                  <span class="kick">Raw sum</span>
+                  <span class="num-m mono">{fmtMinutes(rawMin)}</span>
+                  <span class="mono dim">all sessions</span>
+                </div>
+                <div class="ai-stat">
+                  <span class="kick">Claude</span>
+                  <span class="num-m mono">{fmtMinutes(claudeM)}</span>
+                  <span class="mono dim">Codex {fmtMinutes(codexM)}</span>
+                </div>
+                <div class="ai-stat">
+                  <span class="kick">Sessions</span>
+                  <span class="num-m mono">{realSessions.length}</span>
+                  <span class="mono dim">{bullets.length} important</span>
+                </div>
+                <div class="ai-stat">
+                  <span class="kick">Shipped</span>
+                  <span class="num-m mono ok">{pushed}</span>
+                  <span class="mono dim">{merged} merged · {commits} commits</span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Services tile -->
+          <section class="card rail-tile">
+            <header class="rail-tile-h">
+              <span class="kick">Services</span>
+              <span class="mono dim">{sortedSvcs.length} active · by AI</span>
+              {#if hiddenIds.size > 0}
+                <span class="grow"></span>
+                <button class="rail-action btn-ghost-l" onclick={showAllHidden} title="Restore all hidden sessions">
+                  {hiddenIds.size} hidden · show
+                </button>
+              {/if}
+            </header>
+            <div class="rail-tile-body">
+              <div class="svc-bar-list">
+                {#each sortedSvcs as { svc: s, min, shipped: shippedN, loops }, si (s.repo + si)}
+                  {@const pct = (min / maxSvcMin) * 100}
+                  <div class="svc-bar-row">
+                    <span class="svc-bar-dot" class:ok={shippedN > 0}></span>
+                    <span class="mono svc-bar-name">{s.repo}</span>
+                    <div class="svc-bar-track">
+                      <div class="svc-bar-fill" class:ok={shippedN > 0} style="width: {pct}%"></div>
+                    </div>
+                    <span class="mono svc-bar-time">{fmtMinutes(min)}</span>
+                    {#if loops > 0}
+                      <span class="mono warn svc-bar-loops" title="{loops} open loop{loops === 1 ? '' : 's'}">·{loops}</span>
                     {:else}
-                      <ul class="risks-info-pop-list">
-                        {#each sources as src, i (src.repo + src.branch + src.worktree + i)}
-                          <li class="risks-info-pop-item">
-                            <div class="risks-info-pop-item-hd">
-                              <span class="mono risks-info-pop-repo">{src.repo}</span>
-                              {#if src.branch}<span class="mono dim">·</span><span class="mono risks-info-pop-branch">{src.branch}</span>{/if}
-                              <span class="risks-info-pop-kind mono">{src.kind}</span>
-                            </div>
-                            {#if src.detail}<p class="risks-info-pop-detail">{src.detail}</p>{/if}
-                            {#if src.files.length > 0}
-                              <div class="risks-info-pop-evlabel mono">files ({src.files.length})</div>
-                              <ul class="risks-info-pop-files">
-                                {#each src.files.slice(0, 8) as f}
-                                  <li class="mono dim">{f}</li>
-                                {/each}
-                                {#if src.files.length > 8}
-                                  <li class="mono dim">… and {src.files.length - 8} more</li>
-                                {/if}
-                              </ul>
-                            {/if}
-                            {#if src.commits.length > 0}
-                              <div class="risks-info-pop-evlabel mono">commits ahead ({src.commits.length})</div>
-                              <ul class="risks-info-pop-files">
-                                {#each src.commits.slice(0, 6) as c}
-                                  <li class="mono"><span class="dim">{c.sha.slice(0,7)}</span> {c.subject}</li>
-                                {/each}
-                                {#if src.commits.length > 6}
-                                  <li class="mono dim">… and {src.commits.length - 6} more</li>
-                                {/if}
-                              </ul>
-                            {/if}
-                            {#if src.worktree && src.worktree !== src.repo}
-                              <div class="risks-info-pop-meta mono dim">worktree: {src.worktree}</div>
-                            {/if}
-                            {#if src.ageMinutes > 0}
-                              <div class="risks-info-pop-meta mono dim">first observed {fmtMinutes(src.ageMinutes)} ago</div>
-                            {/if}
-                          </li>
+                      <span class="svc-bar-loops-spacer"></span>
+                    {/if}
+                    <button class="svc-bar-hide" onclick={() => hideService(s.repo)} title="Hide all sessions from {s.repo}" aria-label="Hide {s.repo}">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M3 3l18 18" />
+                        <path d="M10.585 10.585a2 2 0 0 0 2.83 2.83" />
+                        <path d="M16.681 16.673A8.717 8.717 0 0 1 12 18c-4 0-7.333-2-10-6 1.166-1.75 2.5-3.146 4-4.188" />
+                        <path d="M9.882 5.205A9.336 9.336 0 0 1 12 5c4 0 7.333 2 10 6-.706 1.06-1.49 1.99-2.349 2.79" />
+                      </svg>
+                    </button>
+                  </div>
+                {/each}
+                {#if sortedSvcs.length === 0}
+                  <div class="mono dim svc-bar-empty">No services in this window.</div>
+                {/if}
+              </div>
+            </div>
+          </section>
+
+          <!-- Uncommitted work tile (project-level cards) -->
+          <section class="card rail-tile">
+            <header class="rail-tile-h">
+              <span class="kick kick-alert">Uncommitted work</span>
+              <span class="mono dim">{uncommittedList.length} dirty</span>
+            </header>
+            <div class="rail-tile-body rail-tile-feed">
+              {#each uncommittedList as u, i (u.repo + '|' + u.branch + '|' + i)}
+                <article class="alert-card alert-card-alert">
+                  <div class="alert-card-rank mono dim">{u.rank}</div>
+                  <div class="alert-card-body">
+                    <header class="alert-card-h">
+                      <span class="kick kick-alert alert-card-kick">UNCOMMITTED</span>
+                      <span class="grow"></span>
+                      <span class="mono dim alert-card-meta">{u.repo} · {u.branch}{u.ageMinutes > 0 ? ' · ' + fmtMinutes(u.ageMinutes) + ' old' : ''}</span>
+                    </header>
+                    <h4 class="alert-card-title">{u.title}</h4>
+                    {#if u.files.length > 0}
+                      <ul class="alert-files">
+                        {#each u.files as f, fi (f + fi)}
+                          <li class="mono dim alert-file">{f}</li>
                         {/each}
+                        {#if u.extraFiles > 0}
+                          <li class="mono dim alert-file">… and {u.extraFiles} more</li>
+                        {/if}
                       </ul>
                     {/if}
                   </div>
-                {/if}
-              </li>
-            {/each}
-          </ul>
-        </aside>
-      </section>
-
-      <!-- ── 4. Hero — what was done ─────────────────────────────── -->
-      <!--
-        Iterative reflection (docs/features/iterative-reflection.md):
-        one card per /klyne:reflect run, oldest at top. Each card shows
-        the headline (first bullet) by default; the rest expand behind
-        a "view details" disclosure. Falls back to the flat bullet list
-        when there are no reflection groups at all.
-      -->
-      <section class="card hero">
-        <div class="hero-head">
-          <span class="kick kick-accent">What was done</span>
-          <span class="sep">·</span>
-          {#if wwdServices.length > 0}
-            <span class="mono muted">{wwdServices.length} service{wwdServices.length === 1 ? '' : 's'} · {realSessions.length} session{realSessions.length === 1 ? '' : 's'}</span>
-          {:else if legacyBullets.length > 0}
-            <span class="mono muted">{legacyBullets.length} important sessions · {realSessions.length} total · importance ≥ 7</span>
-          {/if}
-          <span class="grow"></span>
-          <span class="mono dim">deterministic · git + jsonl + sqlite</span>
-        </div>
-        {#if wwdServices.length === 0 && legacyBullets.length === 0}
-          <h2 class="hero-h hero-empty">No important sessions in this window. Pick a wider range or check back after end of day.</h2>
-        {/if}
-
-        {#if wwdServices.length > 0}
-          <!--
-            Typed "What was done" cards — one per service whose backend
-            wrote a body_json reflection. Spec:
-            docs/plan/2026-05-26-wwd-typed-cards.md §1.2 + §2 Agent U.
-          -->
-          <div class="wwd-list">
-            {#each wwdServices as svc, si (svc.project_path || svc.repo || si)}
-              {#if svc.what_was_done}
-                <WhatWasDoneCard card={svc.what_was_done} onOpenEntry={openWorklogEntry} />
+                </article>
+              {/each}
+              {#if uncommittedList.length === 0}
+                <div class="alert-empty">
+                  <span class="kick kick-ok">Clean</span>
+                  <p class="mono dim">No working trees with uncommitted edits.</p>
+                </div>
               {/if}
-            {/each}
-          </div>
-        {/if}
-        {#if legacyBullets.length > 0}
+            </div>
+          </section>
+
           <!--
-            Legacy prose-bullet fallback: rendered ALONGSIDE typed cards
-            for any service whose reflection is still pre-023 prose
-            (body_json IS NULL). Once that project's next /klyne:reflect
-            run lands a typed payload, those bullets get replaced by a
-            real WhatWasDoneCard. As all projects backfill, this branch
-            disappears naturally.
+            "All risks" tile removed 2026-05-28 per user request — the
+            Unpushed Commits feed (top-right) and Uncommitted Work tile
+            already surface the actionable signals, so the rollup was
+            redundant. Data wiring (`risksFor`, `RISK_PREDICATES`,
+            `RISK_PROVENANCE`, `openRiskInfo`/`toggleRiskInfo`) stays
+            in the script so we can re-introduce the tile later if the
+            rollup view becomes useful again.
           -->
-          <ol class="bul-list">
-            {#each legacyBullets as b, i (b.title + i)}
-              {@const tone = chipTone(b.chip)}
-              <li class="bul">
-                <span class="mono dim bul-num">0{i+1}</span>
-                <span class="pill pill-{tone} bul-pill">{b.chip}</span>
-                <div class="bul-body">
-                  <div class="bul-title">{b.title}</div>
-                  {#if b.body}<p class="bul-desc">{b.body}</p>{/if}
-                </div>
-                <div class="bul-ev">
-                  {#if b.repo}<span class="mono bul-repo">{b.repo}</span>{/if}
-                  {#each b.evidence as e}<span class="mono dim">{e}</span>{/each}
-                </div>
-              </li>
-            {/each}
-          </ol>
-        {/if}
-      </section>
+        </aside>
+      </div>
 
-      <!-- ── 5. Metric strip ─────────────────────────────────────── -->
-      <section class="card metrics">
-        {#each [
-          { k:'Total AI time',   v: fmtMinutes(v.total_active_minutes), sub:`wall · ${realSessions.length} sessions merged` },
-          { k:'Claude / Codex',  v: fmtMinutes(claudeM),               sub:`Codex ${fmtMinutes(codexM)}` },
-          { k:'Active services', v: String(v.services.length),         sub:`${v.services.filter(s=>!s.manual_only).length} with AI time` },
-          { k:'Branches',        v: String(branches),                  sub:`${commits} commits` },
-          { k:'Shipped',         v: String(pushed),                    sub:`${merged} merged · ${pushed} pushed` },
-          { k:'Peak parallel',   v: `${peak.peak}×`,                   sub:`${fmtMinutes(peak.overlapMinutes)} overlap` },
-        ] as m, i (m.k)}
-          <div class="metric" class:no-bar={i===5}>
-            <span class="kick metric-k">{m.k}</span>
-            <span class="num-l">{m.v}</span>
-            <span class="mono dim">{m.sub}</span>
+      <!--
+        ── hidden-for-now: Needs attention + Shipped hero ───────
+        Kept here as `{#if false}` so the JSX still type-checks and
+        the data wiring stays warm. To re-enable, flip the guard or
+        lift the contents back into the visible tree.
+      -->
+      {#if false}
+        <!-- Shipped hero — moved to a small Shipped stat inside AI Time tile -->
+        <div class="hero-strip">
+        <section class="hero-tile hero-shipped">
+          <span class="hero-bar hero-bar-ok"></span>
+          <div class="shipped-top">
+            <div class="shipped-num-wrap">
+              <span class="num-xxl mono ok">{pushed}</span>
+              <span class="mono muted">pushed</span>
+            </div>
+            <div class="shipped-meta">
+              <div class="kick">Shipped · {rangeLabel(rangeKey)}</div>
+              {#if headlineTxt}
+                <p class="shipped-headline">{headlineTxt}</p>
+              {:else}
+                <p class="shipped-headline dim">No narrative yet for this window.</p>
+              {/if}
+              <div class="mono dim shipped-counts">{commits} commits · {branches} branches · {merged} merged</div>
+            </div>
           </div>
-        {/each}
-      </section>
+          {#if shippedSamples.length > 0}
+            <hr class="hr" />
+            <div class="shipped-list">
+              {#each shippedSamples as b, i (i)}
+                <div class="shipped-row">
+                  <span class="mono dim shipped-row-t">{b.evidence[0] ?? ''}</span>
+                  <span class="mono ok shipped-row-p">{b.repo ?? ''}</span>
+                  <span class="shipped-row-title">{b.title}</span>
+                </div>
+              {/each}
+            </div>
+          {/if}
+        </section>
 
-      <!-- ── 5b. Klyne usage transparency tile ───────────────────── -->
+        <section class="hero-tile hero-ai">
+          <span class="hero-bar hero-bar-info"></span>
+          <header class="hero-tile-h">
+            <span class="kick">AI time</span>
+            <span class="mono dim">peak {peak.peak}× · {fmtMinutes(peak.overlapMinutes)} overlap</span>
+          </header>
+          <div class="ai-body">
+            <div class="ai-donut">
+              <svg width="106" height="106" viewBox="0 0 106 106" class="ai-donut-svg" aria-hidden="true">
+                <circle cx="53" cy="53" r={donutR} stroke="var(--border-hair)" stroke-width="10" fill="none" />
+                <circle cx="53" cy="53" r={donutR} stroke="var(--info)" stroke-width="10" fill="none"
+                        stroke-dasharray="{donutC * aiFill} {donutC}" stroke-linecap="round"
+                        transform="rotate(-90 53 53)" />
+              </svg>
+              <div class="ai-donut-label">
+                <span class="num-l">{fmtMinutes(totalMin)}</span>
+                <span class="mono dim">wall-clock</span>
+              </div>
+            </div>
+            <div class="ai-stats">
+              <div class="ai-stat">
+                <span class="kick">Raw sum</span>
+                <span class="num-m mono">{fmtMinutes(rawMin)}</span>
+                <span class="mono dim">all sessions</span>
+              </div>
+              <div class="ai-stat">
+                <span class="kick">Claude</span>
+                <span class="num-m mono">{fmtMinutes(claudeM)}</span>
+                <span class="mono dim">Codex {fmtMinutes(codexM)}</span>
+              </div>
+              <div class="ai-stat">
+                <span class="kick">Sessions</span>
+                <span class="num-m mono">{realSessions.length}</span>
+                <span class="mono dim">{bullets.length} important</span>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- ── 3-column body: needs attention | what was done | where time went ── -->
+      <div class="cols">
+        <!-- LEFT: Needs attention -->
+        <section class="col col-warn">
+          <header class="col-h">
+            <span class="col-dot warn"></span>
+            <span class="col-title">Needs attention</span>
+            <span class="mono muted col-sub">{actionable} actionable · {totalRisks} open</span>
+          </header>
+          <div class="col-body">
+            {#if alerts.length === 0}
+              <div class="col-empty">
+                <span class="kick kick-ok">All clear</span>
+                <p class="mono dim">No open alerts for this window.</p>
+              </div>
+            {:else}
+              <div class="triage-stack">
+                {#each alerts as a (a.rank)}
+                  <article class="tinline" class:tinline-alert={a.level === 'alert'} class:tinline-warn={a.level === 'warn'}>
+                    <div class="tinline-h">
+                      <span class="mono dim tinline-rank">{a.rank}</span>
+                      <div class="tinline-body">
+                        <div class="tinline-title">{a.title}</div>
+                        <div class="mono muted tinline-meta">{a.meta}</div>
+                      </div>
+                    </div>
+                    <p class="tinline-desc">{a.body}</p>
+                  </article>
+                {/each}
+              </div>
+            {/if}
+
+            <div class="risk-section">
+              <div class="kick-row">
+                <span class="kick small">Risk breakdown</span>
+                <span class="mono dim small">by category</span>
+              </div>
+              <ul class="risks-list">
+                {#each [
+                  { level:'alert', count: alerts.filter(a=>a.level==='alert').length, label:'Credential exposure' as RiskLabel },
+                  { level:'alert', count: alerts.filter(a=>a.level==='warn').length,  label:'Stalled migration' as RiskLabel },
+                  { level:'warn',  count: hist.uncommitted,       label:'Uncommitted edits' as RiskLabel },
+                  { level:'warn',  count: hist.unpushedSignal,    label:'Unpushed · signal' as RiskLabel },
+                  { level:'info',  count: hist.drifted,           label:'Drifted from main' as RiskLabel },
+                  { level:'muted', count: hist.unpushedNoise,     label:'Ephemeral worktrees' as RiskLabel },
+                ] as row (row.label)}
+                  {@const isOpen = openRiskInfo === row.label}
+                  {@const sources = isOpen ? risksFor(v.services, RISK_PREDICATES[row.label]) : []}
+                  <li class="risks-li" class:risks-li-open={isOpen} class:dim-row={row.count === 0}>
+                    <span class="num-sm" class:alert={row.level==='alert'} class:warn={row.level==='warn'} class:info={row.level==='info'} class:dim={row.level==='muted'}>{row.count}</span>
+                    <span class="mono soft risks-label">{row.label}</span>
+                    <button
+                      type="button"
+                      class="risks-info-btn"
+                      class:risks-info-btn-open={isOpen}
+                      onclick={() => toggleRiskInfo(row.label)}
+                      aria-label="Show source data for {row.label}"
+                      aria-expanded={isOpen}
+                      title="Where did this number come from?"
+                    >i</button>
+                    <span class="risks-dot" class:alert={row.level==='alert'} class:warn={row.level==='warn'} class:info={row.level==='info'}></span>
+                    {#if isOpen}
+                      <div class="risks-info-pop" role="region" aria-label="Source data for {row.label}">
+                        <header class="risks-info-pop-head">
+                          <span class="kick">Source · {row.label}</span>
+                          <button type="button" class="risks-info-close mono" onclick={closeRiskInfo} aria-label="Close">×</button>
+                        </header>
+                        <p class="risks-info-pop-prov">{RISK_PROVENANCE[row.label]}</p>
+                        {#if sources.length === 0}
+                          <p class="risks-info-pop-empty mono">No active sources for this signal in this window.</p>
+                        {:else}
+                          <ul class="risks-info-pop-list">
+                            {#each sources as src, i (src.repo + src.branch + src.worktree + i)}
+                              <li class="risks-info-pop-item">
+                                <div class="risks-info-pop-item-hd">
+                                  <span class="mono risks-info-pop-repo">{src.repo}</span>
+                                  {#if src.branch}<span class="mono dim">·</span><span class="mono risks-info-pop-branch">{src.branch}</span>{/if}
+                                  <span class="risks-info-pop-kind mono">{src.kind}</span>
+                                </div>
+                                {#if src.detail}<p class="risks-info-pop-detail">{src.detail}</p>{/if}
+                                {#if src.files.length > 0}
+                                  <div class="risks-info-pop-evlabel mono">files ({src.files.length})</div>
+                                  <ul class="risks-info-pop-files">
+                                    {#each src.files.slice(0, 6) as f}<li class="mono dim">{f}</li>{/each}
+                                    {#if src.files.length > 6}<li class="mono dim">… and {src.files.length - 6} more</li>{/if}
+                                  </ul>
+                                {/if}
+                                {#if src.commits.length > 0}
+                                  <div class="risks-info-pop-evlabel mono">commits ahead ({src.commits.length})</div>
+                                  <ul class="risks-info-pop-files">
+                                    {#each src.commits.slice(0, 5) as c}<li class="mono"><span class="dim">{c.sha.slice(0,7)}</span> {c.subject}</li>{/each}
+                                    {#if src.commits.length > 5}<li class="mono dim">… and {src.commits.length - 5} more</li>{/if}
+                                  </ul>
+                                {/if}
+                                {#if src.ageMinutes > 0}
+                                  <div class="risks-info-pop-meta mono dim">first observed {fmtMinutes(src.ageMinutes)} ago</div>
+                                {/if}
+                              </li>
+                            {/each}
+                          </ul>
+                        {/if}
+                      </div>
+                    {/if}
+                  </li>
+                {/each}
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <!-- MIDDLE: What was done -->
+        <section class="col col-accent">
+          <header class="col-h">
+            <span class="col-dot accent"></span>
+            <span class="col-title">What was done</span>
+            <span class="mono muted col-sub">{wwdServices.length} service{wwdServices.length === 1 ? '' : 's'} · {realSessions.length} session{realSessions.length === 1 ? '' : 's'}</span>
+            <span class="grow"></span>
+            <span class="mono dim col-meta">deterministic · git + jsonl</span>
+          </header>
+          <div class="col-body col-body-flush">
+            {#if wwdServices.length === 0 && legacyBullets.length === 0}
+              <div class="col-empty">
+                <span class="kick">Nothing important yet</span>
+                <p class="mono dim">No important sessions in this window. Pick a wider range or check back after end of day.</p>
+              </div>
+            {/if}
+            <!-- legacy What-was-done body intentionally removed; see
+                 the visible split-left section above for the canonical
+                 implementation. The hero-strip + cols blocks below stay
+                 as a reference for the un-hidden "Needs attention"
+                 column data wiring. -->
+          </div>
+        </section>
+
+        <!-- RIGHT: Where time went -->
+        <section class="col col-info">
+          <header class="col-h">
+            <span class="col-dot info"></span>
+            <span class="col-title">Where time went</span>
+            <span class="mono muted col-sub">{v.services.length} services · {realSessions.length} sessions</span>
+            {#if hiddenIds.size > 0}
+              <span class="grow"></span>
+              <button class="btn-ghost-l col-action" onclick={showAllHidden} title="Restore all hidden sessions">
+                {hiddenIds.size} hidden · show all
+              </button>
+            {/if}
+          </header>
+          <div class="col-body">
+            <div class="svc-bars">
+              <div class="kick-row">
+                <span class="kick small">Services</span>
+                <span class="mono dim small">{sortedSvcs.length} active · by AI</span>
+              </div>
+              <div class="svc-bar-list">
+                {#each sortedSvcs as { svc: s, min, shipped: shippedN, loops }, si (s.repo + si)}
+                  {@const pct = (min / maxSvcMin) * 100}
+                  <div class="svc-bar-row">
+                    <span class="svc-bar-dot" class:ok={shippedN > 0}></span>
+                    <span class="mono svc-bar-name">{s.repo}</span>
+                    <div class="svc-bar-track">
+                      <div class="svc-bar-fill" class:ok={shippedN > 0} style="width: {pct}%"></div>
+                    </div>
+                    <span class="mono svc-bar-time">{fmtMinutes(min)}</span>
+                    {#if loops > 0}
+                      <span class="mono warn svc-bar-loops" title="{loops} open loop{loops === 1 ? '' : 's'}">·{loops}</span>
+                    {:else}
+                      <span class="svc-bar-loops-spacer"></span>
+                    {/if}
+                    <button class="svc-bar-hide" onclick={() => hideService(s.repo)} title="Hide all sessions from {s.repo}" aria-label="Hide {s.repo}">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M3 3l18 18" />
+                        <path d="M10.585 10.585a2 2 0 0 0 2.83 2.83" />
+                        <path d="M16.681 16.673A8.717 8.717 0 0 1 12 18c-4 0-7.333-2-10-6 1.166-1.75 2.5-3.146 4-4.188" />
+                        <path d="M9.882 5.205A9.336 9.336 0 0 1 12 5c4 0 7.333 2 10 6-.706 1.06-1.49 1.99-2.349 2.79" />
+                      </svg>
+                    </button>
+                  </div>
+                {/each}
+                {#if sortedSvcs.length === 0}
+                  <div class="mono dim svc-bar-empty">No services in this window.</div>
+                {/if}
+              </div>
+            </div>
+
+            <div class="mini-tl">
+              <div class="kick-row">
+                <span class="kick small">Parallel sessions</span>
+                <span class="mono dim small">peak {peak.peak}× · {fmtMinutes(peak.overlapMinutes)}</span>
+              </div>
+              <ConcurrencyTimeline sessions={v.sessions} since={since} until={until} />
+            </div>
+          </div>
+        </section>
+      </div>
+      {/if}
+
+      <!-- ── klyne overhead footer (preserved transparency tile) ─── -->
       {#if klyneUsage && klyneUsage.klyne.runs > 0}
         <section class="card klyne-usage">
           <button
@@ -1335,22 +1737,10 @@
           {#if klyneUsageExpanded}
             <div class="ku-detail">
               <div class="ku-tot">
-                <div class="ku-tot-cell">
-                  <span class="kick">Input</span>
-                  <span class="num-m mono">{fmtTokens(klyneUsage.klyne.input_tokens)}</span>
-                </div>
-                <div class="ku-tot-cell">
-                  <span class="kick">Output</span>
-                  <span class="num-m mono">{fmtTokens(klyneUsage.klyne.output_tokens)}</span>
-                </div>
-                <div class="ku-tot-cell">
-                  <span class="kick">Cache read</span>
-                  <span class="num-m mono">{fmtTokens(klyneUsage.klyne.cache_read_tokens)}</span>
-                </div>
-                <div class="ku-tot-cell">
-                  <span class="kick">Cache write</span>
-                  <span class="num-m mono">{fmtTokens(klyneUsage.klyne.cache_write_tokens)}</span>
-                </div>
+                <div class="ku-tot-cell"><span class="kick">Input</span><span class="num-m mono">{fmtTokens(klyneUsage.klyne.input_tokens)}</span></div>
+                <div class="ku-tot-cell"><span class="kick">Output</span><span class="num-m mono">{fmtTokens(klyneUsage.klyne.output_tokens)}</span></div>
+                <div class="ku-tot-cell"><span class="kick">Cache read</span><span class="num-m mono">{fmtTokens(klyneUsage.klyne.cache_read_tokens)}</span></div>
+                <div class="ku-tot-cell"><span class="kick">Cache write</span><span class="num-m mono">{fmtTokens(klyneUsage.klyne.cache_write_tokens)}</span></div>
               </div>
               {#if klyneUsage.klyne.by_operation.length > 0}
                 <div class="ku-ops">
@@ -1373,101 +1763,10 @@
         </section>
       {/if}
 
-      <!-- ── 6. Services table ───────────────────────────────────── -->
-      <section class="card services">
-        <header class="svc-head">
-          <div>
-            <span class="kick">Services</span>
-            <span class="mono muted svc-head-sub">· {v.services.length} active</span>
-          </div>
-          {#if hiddenIds.size > 0}
-            <button class="btn-ghost-l" onclick={showAllHidden} title="Restore all hidden sessions">
-              {hiddenIds.size} hidden · show all
-            </button>
-          {/if}
-        </header>
-        <div class="svc-row svc-row-th">
-          <span class="kick">Service</span>
-          <span class="kick num">AI time</span>
-          <span class="kick num">Commits</span>
-          <span class="kick num">Shipped</span>
-          <span class="kick">Open loops</span>
-          <span class="kick num"></span>
-        </div>
-        {#each v.services as svc, si (svc.repo + si)}
-          {@const svcMin = (svc.minutes_by_cli?.claude ?? 0) + (svc.minutes_by_cli?.codex ?? 0)}
-          {@const svcCommits = svc.branches.reduce((a,b)=>a+b.commits.length, 0)}
-          {@const svcShipped = svc.branches.filter(b=>b.ship==='pushed-to-remote'||b.ship==='merged-to-default').length}
-          {@const tickets = svc.branches.map(b => b.ticket_id).filter(Boolean).slice(0, 3)}
-          {@const loops = [
-            ...svc.branches.filter(b => b.ahead > 0 || b.behind > 0).map(b => ({ kind:'unpushed', label: b.name, note: `${b.ahead} ahead${b.behind>0?`, ${b.behind} behind`:''}` })),
-            ...svc.risks.filter(r => r.kind === 'done-uncommitted').map(r => ({ kind:'uncommitted', label: r.branch || 'main', note: r.detail || `${r.files?.length ?? 0} files` })),
-          ]}
-          <div class="svc-row">
-            <div class="svc-name">
-              <span class="mono">{svc.repo}</span>
-              {#each tickets as t}<span class="pill pill-mini">{t}</span>{/each}
-            </div>
-            <span class="num-m num">{fmtMinutes(svcMin)}</span>
-            <span class="num-m num" class:dim={!svcCommits}>{svcCommits || '—'}</span>
-            <div class="num">
-              {#if svcShipped > 0}<span class="pill pill-ok"><span class="dot dot-ok"></span>{svcShipped} pushed</span>{:else}<span class="mono dim">—</span>{/if}
-            </div>
-            <div class="svc-loops">
-              {#if loops.length === 0}
-                <span class="mono dim">clean · exploration only</span>
-              {/if}
-              {#each loops.slice(0,3) as l, li (l.kind + '|' + l.label + '|' + li)}
-                <div class="loop">
-                  <span class="mono loop-prefix" class:warn={l.kind==='uncommitted'} class:info={l.kind==='unpushed'}>{l.kind==='uncommitted'?'M':'↑'}</span>
-                  <span class="mono loop-label">{l.label}</span>
-                  <span class="mono dim loop-note">{l.note}</span>
-                </div>
-              {/each}
-              {#if loops.length > 3}<span class="mono muted">+{loops.length-3} more</span>{/if}
-            </div>
-            <button class="svc-hide" onclick={() => hideService(svc.repo)} title="Hide all sessions from {svc.repo}" aria-label="Hide {svc.repo}">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M3 3l18 18" />
-                <path d="M10.585 10.585a2 2 0 0 0 2.83 2.83" />
-                <path d="M16.681 16.673A8.717 8.717 0 0 1 12 18c-4 0-7.333-2-10-6 1.166-1.75 2.5-3.146 4-4.188" />
-                <path d="M9.882 5.205A9.336 9.336 0 0 1 12 5c4 0 7.333 2 10 6-.706 1.06-1.49 1.99-2.349 2.79" />
-              </svg>
-            </button>
-          </div>
-        {/each}
-        {#if v.services.length === 0}
-          <div class="svc-empty">No services in this window.</div>
-        {/if}
-      </section>
-
-      <!-- ── 7. Concurrency / timeline ───────────────────────────── -->
-      <section class="card timeline">
-        <div class="tl-side">
-          <span class="kick">Concurrency</span>
-          {#each [
-            { k:'Wall-clock', v: fmtMinutes(v.total_active_minutes), sub: 'elapsed' },
-            { k:'Raw sum',    v: fmtMinutes(rawSumMinutes(v.sessions)), sub: 'all sessions' },
-            { k:'Sessions',   v: String(realSessions.length), sub: `${bullets.length} important` },
-            { k:'Peak',       v: `${peak.peak}×`, sub: fmtMinutes(peak.overlapMinutes) + ' overlap' },
-          ] as s (s.k)}
-            <div class="tl-stat">
-              <span class="mono muted">{s.k}</span>
-              <span>
-                <span class="num-m">{s.v}</span>
-                <span class="mono dim tl-stat-sub">{s.sub}</span>
-              </span>
-            </div>
-          {/each}
-        </div>
-        <div class="tl-main">
-          <header class="tl-h">
-            <span class="mono soft">parallel session timeline · {realSessions.length} sessions</span>
-          </header>
-          <ConcurrencyTimeline sessions={v.sessions} since={since} until={until} />
-        </div>
-      </section>
-    </div>
+      {#if reflectError}
+        <div class="mono refl-err">last reflect run reported: {reflectError}</div>
+      {/if}
+    </main>
   {/if}
 </div>
 
@@ -1479,13 +1778,12 @@
 />
 
 <style>
-  /* ─── design tokens (V4 Synthesis) — scoped to this page so the
-     rest of the app keeps its existing palette ───────────────── */
-  .page {
+  /* ── design tokens (V4 Synthesis · D-hybrid) ─────────────── */
+  .page-cockpit {
     --bg:           oklch(0.155 0.005 80);
     --bg-card:      oklch(0.195 0.005 80);
     --bg-card-2:    oklch(0.225 0.005 80);
-    --bg-inset:    oklch(0.13  0.005 80);
+    --bg-inset:     oklch(0.13  0.005 80);
     --fg:           oklch(0.975 0.005 80);
     --fg-soft:      oklch(0.82  0.005 80);
     --fg-muted:     oklch(0.62  0.005 80);
@@ -1504,80 +1802,34 @@
     background: var(--bg); color: var(--fg);
     font-family: var(--font-sans); font-size: 13px; line-height: 1.45;
     min-height: 100vh; min-width: 0;
+    display: flex; flex-direction: column;
   }
   :global(body) { background: oklch(0.155 0.005 80); }
-  .page :global(*) { box-sizing: border-box; }
-
-  .state { color: var(--fg-muted); padding: 24px; font-family: var(--font-mono); font-size: 12px; }
-  .state-err { color: var(--alert); }
-  .state-loading { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; padding: 48px 28px; }
-  .state-loading .mono { font-size: 12px; }
-  .state-err { display: flex; flex-direction: column; gap: 8px; padding: 48px 28px; color: var(--alert); }
-  /* Soft variant: render in a slim banner inline above the still-visible
-     body so an error during a range refetch doesn't blank the page. */
-  .state-err.state-soft {
-    flex-direction: row;
-    align-items: center;
-    padding: 10px 16px;
-    margin: 8px 20px 0;
-    background: color-mix(in oklch, var(--alert) 8%, var(--bg-card));
-    border: 1px solid color-mix(in oklch, var(--alert) 30%, transparent);
-    border-radius: 8px;
-    gap: 12px;
-  }
-  /* Slim "Fetching <range>…" banner shown while a range-switch fetch is
-     in flight and we still have last range's data on screen. */
-  .range-loading {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 8px 14px;
-    margin: 8px 20px 0;
-    background: color-mix(in oklch, var(--accent) 10%, var(--bg-card));
-    border: 1px solid color-mix(in oklch, var(--accent) 30%, transparent);
-    border-radius: 8px;
-    font-size: 12px;
-    color: var(--fg-soft);
-  }
-  .range-spinner {
-    width: 12px; height: 12px;
-    border-radius: 50%;
-    border: 2px solid color-mix(in oklch, var(--accent) 40%, transparent);
-    border-top-color: var(--accent);
-    animation: range-spin 0.7s linear infinite;
-  }
-  @keyframes range-spin {
-    to { transform: rotate(360deg); }
-  }
-  .state-actions { display: flex; gap: 8px; padding-top: 8px; }
-  .btn-ghost-l { background: transparent; color: var(--fg); border: 1px solid var(--border); padding: 6px 14px; border-radius: 6px; cursor: pointer; font-family: var(--font-mono); font-size: 11px; }
-  .btn-ghost-l:hover { background: var(--bg-card); }
+  .page-cockpit :global(*) { box-sizing: border-box; }
 
   .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
-  .soft { color: var(--fg-soft); }
+  .soft  { color: var(--fg-soft); }
   .muted { color: var(--fg-muted); }
   .dim   { color: var(--fg-dim); }
   .alert { color: var(--alert); }
   .warn  { color: var(--warn); }
   .info  { color: var(--info); }
+  .ok    { color: var(--ok); }
   .grow  { flex: 1; }
   .num   { text-align: right; }
   .sep   { color: var(--border); }
+  .small { font-size: 10px; }
+  .hr    { border: 0; border-top: 1px solid var(--border-hair); margin: 0; }
 
   .kick { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--fg-muted); }
   .kick-accent { color: var(--accent); }
-  .kick-alert  { color: var(--alert); }
-  .kick-warn   { color: var(--warn); }
   .kick-ok     { color: var(--ok); }
 
-  .card  { background: var(--bg-card); border: 1px solid var(--border-soft); border-radius: 10px; }
-  .hr    { border: 0; border-top: 1px solid var(--border-hair); margin: 0; }
-
   /* number readouts */
-  .num-l  { font-family: var(--font-mono); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; line-height: 1; font-size: 24px; color: var(--fg); }
-  .num-m  { font-family: var(--font-mono); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; font-size: 15px; color: var(--fg); }
-  .num-xl { font-family: var(--font-mono); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; line-height: 1; font-size: 36px; }
-  .num-sm { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 13px; text-align: right; color: var(--fg); }
+  .num-l   { font-family: var(--font-mono); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; line-height: 1; font-size: 22px; color: var(--fg); }
+  .num-m   { font-family: var(--font-mono); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; font-size: 14px; color: var(--fg); }
+  .num-sm  { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 13px; text-align: right; color: var(--fg); }
+  .num-xxl { font-family: var(--font-mono); font-variant-numeric: tabular-nums; letter-spacing: -0.03em; line-height: 0.9; font-size: 56px; }
   .num-sm.alert { color: var(--alert); }
   .num-sm.warn  { color: var(--warn); }
   .num-sm.info  { color: var(--info); }
@@ -1585,33 +1837,17 @@
 
   /* pills */
   .pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border-radius: 999px; font-family: var(--font-mono); font-size: 11px; line-height: 1.4; border: 1px solid var(--border); color: var(--fg-soft); background: var(--bg-card-2); white-space: nowrap; }
-  .pill-mini { padding: 2px 6px; font-size: 10px; color: var(--fg-soft); }
+  .pill-sm { font-size: 10.5px; padding: 2px 7px; }
   .pill-ok    { color: var(--ok);    border-color: color-mix(in oklch, var(--ok)    35%, transparent); background: color-mix(in oklch, var(--ok)    10%, var(--bg-card-2)); }
   .pill-warn  { color: var(--warn);  border-color: color-mix(in oklch, var(--warn)  35%, transparent); background: color-mix(in oklch, var(--warn)  10%, var(--bg-card-2)); }
   .pill-alert { color: var(--alert); border-color: color-mix(in oklch, var(--alert) 35%, transparent); background: color-mix(in oklch, var(--alert) 10%, var(--bg-card-2)); }
   .pill-info  { color: var(--info);  border-color: color-mix(in oklch, var(--info)  35%, transparent); background: color-mix(in oklch, var(--info)  10%, var(--bg-card-2)); }
-  /* The reflect-now trigger looks like a pill but is interactive. Borrow
-     the accent palette so it reads as the primary call-to-action when
-     reflection_status is missing/stale. Disabled state dims and removes
-     the hover lift while a /klyne:reflect batch is in flight. */
   .pill-action {
-    /* Default (snapshot is `current`): muted/normal styling — the
-       reflect-now button stays present but recedes when nothing is
-       pending. */
-    color: var(--fg-soft);
-    border-color: var(--border-hair);
-    background: var(--bg-inset);
-    cursor: pointer;
+    color: var(--fg-soft); border-color: var(--border-hair);
+    background: var(--bg-inset); cursor: pointer;
     font-family: var(--font-mono);
-    font-size: 11px;
   }
-  .pill-action:hover:not(:disabled) {
-    color: var(--fg);
-    background: var(--bg-card);
-  }
-  /* Highlighted variant: reflection_status != "current" OR
-     pending_entries > 0. Amber accent palette + an inline badge
-     showing the pending count drives attention back to the sync. */
+  .pill-action:hover:not(:disabled) { color: var(--fg); background: var(--bg-card); }
   .pill-action.is-highlighted {
     color: var(--warn);
     border-color: color-mix(in oklch, var(--warn) 45%, transparent);
@@ -1622,513 +1858,521 @@
   }
   .pill-action:disabled { cursor: progress; opacity: 0.7; }
   .pill-action-badge {
-    margin-left: 6px;
-    padding: 0 6px;
-    border-radius: 999px;
-    font-size: 10px;
-    line-height: 1.4;
-    color: var(--bg);
-    background: var(--warn);
+    margin-left: 4px; padding: 0 5px; border-radius: 999px;
+    font-size: 9.5px; line-height: 1.4;
+    color: var(--bg); background: var(--warn);
     border: 1px solid color-mix(in oklch, var(--warn) 55%, transparent);
   }
-  .refl-err { color: var(--alert); }
+  .refl-err { color: var(--alert); padding: 8px 18px; font-size: 11px; }
 
   .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--fg-muted); flex-shrink: 0; }
   .dot-ok    { background: var(--ok); }
   .dot-warn  { background: var(--warn); }
   .dot-alert { background: var(--alert); }
 
-  .btn       { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-card-2); color: var(--fg-soft); font-family: var(--font-mono); font-size: 11px; cursor: pointer; }
-  .btn:hover { background: var(--bg-card); color: var(--fg); }
-  .btn-fill  { background: var(--bg-card-2); color: var(--fg); }
-  .btn-ghost { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--fg-soft); font-family: var(--font-mono); font-size: 14px; cursor: pointer; }
+  /* buttons */
+  .btn-ghost { display: inline-flex; align-items: center; justify-content: center; height: 28px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--fg-soft); font-family: var(--font-mono); font-size: 11px; cursor: pointer; gap: 4px; }
   .btn-ghost:hover { background: var(--bg-card); color: var(--fg); }
-  /* Ask Klyne pill — overrides the square btn-ghost sizing so the
-     text label fits. Kept as a btn-ghost variant so colour/border
-     stay aligned with the existing rail buttons. */
-  .ask-btn { width: auto; padding: 0 12px; font-size: 11px; gap: 4px; }
-  .btn-primary { background: var(--fg); color: var(--bg); border: 1px solid var(--fg); padding: 8px 14px; border-radius: 8px; font-family: var(--font-mono); font-size: 11px; cursor: pointer; }
+  .btn-ghost.btn-square { width: 28px; padding: 0; font-size: 13px; }
+  .btn-ghost-l { background: transparent; color: var(--fg); border: 1px solid var(--border); padding: 6px 12px; border-radius: 6px; cursor: pointer; font-family: var(--font-mono); font-size: 11px; }
+  .btn-ghost-l:hover { background: var(--bg-card); }
+  .btn-primary { background: var(--fg); color: var(--bg); border: 1px solid var(--fg); padding: 7px 13px; border-radius: 6px; font-family: var(--font-mono); font-size: 11px; cursor: pointer; }
   .btn-primary:hover { opacity: 0.92; }
 
-  /* ── 1. Top rail ─────────────────────────────────────────── */
-  .rail {
-    position: relative; z-index: 5; overflow: visible;
-    display: grid; grid-template-columns: 1fr auto 1fr;
-    align-items: center; padding: 10px 28px;
+  /* states */
+  .state { color: var(--fg-muted); padding: 24px; font-family: var(--font-mono); font-size: 12px; }
+  .state-err { color: var(--alert); }
+  .state-loading { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; padding: 48px 28px; }
+  .state-err { display: flex; flex-direction: column; gap: 8px; padding: 48px 28px; color: var(--alert); }
+  .state-err.state-soft {
+    flex-direction: row; align-items: center;
+    padding: 10px 16px; margin: 8px 20px 0;
+    background: color-mix(in oklch, var(--alert) 8%, var(--bg-card));
+    border: 1px solid color-mix(in oklch, var(--alert) 30%, transparent);
+    border-radius: 8px; gap: 12px;
+  }
+  .range-loading {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 14px; margin: 8px 20px 0;
+    background: color-mix(in oklch, var(--accent) 10%, var(--bg-card));
+    border: 1px solid color-mix(in oklch, var(--accent) 30%, transparent);
+    border-radius: 8px; font-size: 12px; color: var(--fg-soft);
+  }
+  .range-spinner {
+    width: 12px; height: 12px; border-radius: 50%;
+    border: 2px solid color-mix(in oklch, var(--accent) 40%, transparent);
+    border-top-color: var(--accent); animation: range-spin 0.7s linear infinite;
+  }
+  @keyframes range-spin { to { transform: rotate(360deg); } }
+  .state-actions { display: flex; gap: 8px; padding-top: 8px; }
+
+  /* ── compact header ─────────────────────────────────────── */
+  .hdr {
+    display: grid;
+    grid-template-columns: minmax(0, auto) 1fr auto;
+    align-items: center; gap: 24px;
+    padding: 12px 22px;
     border-bottom: 1px solid var(--border-hair);
     background: var(--bg-inset);
+    position: relative; z-index: 5;
   }
-  .rail-brand { display: inline-flex; align-items: baseline; gap: 10px; }
-  .rail-logo { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.18em; color: var(--accent); }
-  .rail-app  { font-family: var(--font-mono); font-size: 11.5px; color: var(--fg-soft); }
-  .seg {
-    display: inline-flex; gap: 1px; padding: 2px;
-    background: var(--bg-card); border: 1px solid var(--border-hair); border-radius: 6px;
-    justify-self: center;
-  }
-  .seg-btn {
-    padding: 4px 10px; border-radius: 4px;
-    background: transparent; border: none; color: var(--fg-muted);
-    font-family: var(--font-mono); font-size: 11px; cursor: pointer;
-  }
+  .hdr-l { display: inline-flex; align-items: baseline; gap: 10px; min-width: 0; flex-wrap: nowrap; }
+  .hdr-l .kick { letter-spacing: 0.18em; }
+  .hdr-date { margin: 0; font-size: 20px; font-weight: 500; letter-spacing: -0.02em; color: var(--fg); white-space: nowrap; }
+  .hdr-m { display: flex; align-items: center; gap: 10px; justify-self: center; flex-wrap: wrap; }
+  .hdr-r { display: inline-flex; align-items: center; gap: 8px; justify-self: end; }
+  .hdr-ago { font-size: 10.5px; }
+
+  .seg { display: inline-flex; gap: 1px; padding: 2px; background: var(--bg-card); border: 1px solid var(--border-hair); border-radius: 6px; }
+  .seg-btn { padding: 4px 9px; border-radius: 4px; background: transparent; border: none; color: var(--fg-muted); font-family: var(--font-mono); font-size: 11px; cursor: pointer; }
   .seg-btn.on { background: var(--fg); color: var(--bg); }
   .cal-wrap { position: relative; display: inline-flex; }
-  .cal-trigger { min-width: 74px; }
+  .cal-trigger { min-width: 70px; }
   .cal-pop {
-    position: absolute;
-    top: calc(100% + 8px);
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 20;
-    width: 252px;
-    padding: 10px;
-    background: var(--bg-card);
-    border: 1px solid var(--border-soft);
-    border-radius: 8px;
+    position: absolute; top: calc(100% + 8px); left: 50%; transform: translateX(-50%);
+    z-index: 20; width: 252px; padding: 10px;
+    background: var(--bg-card); border: 1px solid var(--border-soft); border-radius: 8px;
     box-shadow: 0 18px 50px color-mix(in oklch, black 42%, transparent);
   }
-  .cal-head {
-    display: grid;
-    grid-template-columns: 28px 1fr 28px;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 8px;
-    font-family: var(--font-mono);
-    font-size: 11px;
-    color: var(--fg-soft);
-    text-align: center;
-  }
-  .cal-nav {
-    width: 28px; height: 26px;
-    border-radius: 6px;
-    border: 1px solid var(--border-hair);
-    background: var(--bg-inset);
-    color: var(--fg-soft);
-    cursor: pointer;
-    font-size: 16px;
-    line-height: 1;
-  }
+  .cal-head { display: grid; grid-template-columns: 28px 1fr 28px; align-items: center; gap: 8px; margin-bottom: 8px; font-family: var(--font-mono); font-size: 11px; color: var(--fg-soft); text-align: center; }
+  .cal-nav { width: 28px; height: 26px; border-radius: 6px; border: 1px solid var(--border-hair); background: var(--bg-inset); color: var(--fg-soft); cursor: pointer; font-size: 16px; line-height: 1; }
   .cal-nav:disabled { opacity: 0.35; cursor: default; }
   .cal-week, .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
   .cal-week { margin-bottom: 4px; color: var(--fg-dim); font-family: var(--font-mono); font-size: 10px; text-align: center; }
-  .cal-day {
-    height: 28px;
-    border-radius: 6px;
-    border: 1px solid transparent;
-    background: transparent;
-    color: var(--fg-dim);
-    font-family: var(--font-mono);
-    font-size: 11px;
-    cursor: default;
-  }
-  .cal-day.calDayData {
-    cursor: pointer;
-    color: var(--fg-soft);
-    background: var(--bg-inset);
-    border-color: var(--border-hair);
-  }
+  .cal-day { height: 28px; border-radius: 6px; border: 1px solid transparent; background: transparent; color: var(--fg-dim); font-family: var(--font-mono); font-size: 11px; cursor: default; }
+  .cal-day.calDayData { cursor: pointer; color: var(--fg-soft); background: var(--bg-inset); border-color: var(--border-hair); }
   .cal-day.calDayData:hover { color: var(--fg); border-color: var(--border); }
-  .cal-day.selected {
-    color: var(--bg);
-    background: var(--fg);
-    border-color: var(--fg);
-  }
+  .cal-day.selected { color: var(--bg); background: var(--fg); border-color: var(--fg); }
   .cal-day.calDayMuted { opacity: 0.38; }
   .cal-day:disabled { opacity: 0.22; }
-  .cal-foot {
-    margin-top: 9px;
-    padding-top: 8px;
-    border-top: 1px solid var(--border-hair);
-    color: var(--fg-dim);
-    font-family: var(--font-mono);
-    font-size: 10px;
-    text-align: center;
+  .cal-foot { margin-top: 9px; padding-top: 8px; border-top: 1px solid var(--border-hair); color: var(--fg-dim); font-family: var(--font-mono); font-size: 10px; text-align: center; }
+
+  /* ── cockpit body shell ──────────────────────────────────── */
+  /* Natural page flow (not flex:1 + min-height:0) so the outer
+     scroll container (Shell.svelte's .page) drives scrolling and
+     the right rail's `position: sticky` works against the page
+     viewport. */
+  .cockpit {
+    display: flex; flex-direction: column; gap: 14px;
+    padding: 14px 22px 24px;
+    max-width: 1640px; width: 100%; margin: 0 auto;
   }
-  .rail-right { display: inline-flex; align-items: center; gap: 10px; justify-self: end; }
-  .rail-ago { font-family: var(--font-mono); font-size: 10.5px; color: var(--fg-dim); }
 
-  /* ── body wrapper ────────────────────────────────────────── */
-  .body { display: flex; flex-direction: column; gap: 16px; padding: 20px 28px 28px; max-width: 1280px; margin: 0 auto; }
+  /* ── top split: timeline (left) + unpushed feed (right) ───── */
+  .top-split {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 14px;
+    align-items: stretch;
+  }
+  .top-split > .card {
+    display: flex; flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+  }
 
-  /* ── 2. Masthead ─────────────────────────────────────────── */
-  .mast {
-    display: grid; grid-template-columns: auto 1fr auto;
-    gap: 24px; align-items: end;
-    padding-bottom: 10px;
+  /* The unpushed feed lives next to the timeline; cap its visible
+     height to the timeline's natural height so the row stays tidy.
+     The list inside scrolls. */
+  .unpushed-top { padding: 0; }
+  .unpushed-top .alert-feed {
+    flex: 1; min-height: 0;
+    max-height: 240px;
+    overflow-y: auto;
+    padding: 10px 12px;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+
+  /* ── alert cards (unpushed + uncommitted feed rows) ───────── */
+  .alert-card {
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr);
+    gap: 8px;
+    padding: 10px 12px;
+    border: 1px solid var(--border-soft);
+    border-left-width: 2px;
+    border-radius: 8px;
+    background: var(--bg-inset);
+  }
+  .alert-card-warn  { border-left-color: var(--warn); }
+  .alert-card-alert { border-left-color: var(--alert); }
+  .alert-card-rank { font-size: 10.5px; padding-top: 2px; letter-spacing: 0.04em; }
+  .alert-card-body { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+  .alert-card-h { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .alert-card-kick { font-size: 9.5px; letter-spacing: 0.1em; }
+  .alert-card-meta { font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+  .alert-card-title { margin: 0; font-size: 13px; color: var(--fg); line-height: 1.4; font-weight: 500; }
+
+  .alert-commits, .alert-files {
+    list-style: none; padding: 0; margin: 0;
+    display: flex; flex-direction: column; gap: 3px;
+  }
+  .alert-commit { display: flex; align-items: baseline; gap: 8px; font-size: 11px; line-height: 1.45; min-width: 0; }
+  .alert-commit-sha { font-size: 10.5px; flex-shrink: 0; }
+  .alert-commit-subj { color: var(--fg-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .alert-file { font-size: 11px; line-height: 1.45; color: var(--fg-soft); word-break: break-all; }
+
+  .alert-empty {
+    display: flex; flex-direction: column; gap: 6px;
+    padding: 14px 6px;
+  }
+  .alert-empty p { margin: 0; font-size: 11.5px; line-height: 1.5; max-width: 38ch; }
+  .kick-warn { color: var(--warn); }
+  .kick-alert { color: var(--alert); }
+
+  /* ── rail-tile-feed: scrollable list area inside a rail tile ── */
+  .rail-tile-feed {
+    max-height: 360px;
+    overflow-y: auto;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+
+  /* ── all-risks tile (re-using the existing risks-list styles) ── */
+  .risks-num-row { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
+  .num-xl { font-family: var(--font-mono); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; line-height: 1; font-size: 32px; }
+  .num-xl.alert { color: var(--alert); }
+  .risks-num-sub { font-size: 11px; }
+
+  /* ── top: full-width parallel-sessions timeline ──────────── */
+  .timeline-top { padding: 0; overflow: hidden; }
+  .timeline-top-h {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 16px; padding: 12px 16px;
     border-bottom: 1px solid var(--border-hair);
+    background: var(--bg-card-2);
+    flex-wrap: wrap;
   }
-  .mast-l { display: flex; flex-direction: column; gap: 6px; }
-  .date {
-    margin: 0; font-family: var(--font-mono);
-    font-size: 44px; font-weight: 500; line-height: 0.95; letter-spacing: -0.03em;
-    color: var(--fg);
+  .timeline-top-h-l { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .timeline-top-sub { font-size: 11px; }
+  .timeline-top-h-r {
+    display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+    font-size: 11px; color: var(--fg-soft);
   }
-  .mast-m { display: flex; flex-direction: column; gap: 6px; padding-bottom: 6px; }
-  .mast-pills { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-  .mast-sub { font-family: var(--font-mono); font-size: 11px; color: var(--fg-dim); }
-  .mast-r { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; padding-bottom: 6px; }
+  .timeline-top-h-r .kick { font-size: 9.5px; margin-right: 4px; }
+  .timeline-top-h-r .num-m { font-size: 12.5px; }
+  .timeline-top-body { padding: 14px 18px 12px; }
 
-  /* ── 3. Triage ───────────────────────────────────────────── */
-  .triage { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr) 320px; gap: 12px; }
-  .tc {
+  /* ── two-pane split: 70% narrative / 30% sticky rail ─────── */
+  .split {
+    display: grid;
+    grid-template-columns: minmax(0, 7fr) minmax(0, 3fr);
+    gap: 14px;
+    align-items: start;
+  }
+  .split-left { min-width: 0; }
+  .split-right {
+    display: flex; flex-direction: column; gap: 12px;
+    position: sticky;
+    /* 14px ≈ .cockpit's padding-top so the rail isn't flush against
+       the route header when scrolling. */
+    top: 14px;
+    align-self: start;
+    /* Keep the rail from exceeding viewport so its own content can
+       scroll independently if it grows past the visible area. */
+    max-height: calc(100vh - 28px);
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+
+  /* ── right-rail tiles ────────────────────────────────────── */
+  .rail-tile {
+    position: relative; overflow: hidden;
+    background: var(--bg-card); border: 1px solid var(--border-soft);
+    border-radius: 10px;
+    display: flex; flex-direction: column;
+  }
+  .rail-tile-h {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border-hair);
+    background: var(--bg-card-2);
+  }
+  .rail-tile-h .kick { font-size: 10px; }
+  .rail-tile-body { padding: 12px 14px; }
+  .rail-action { padding: 2px 8px; font-size: 10px; }
+  .ai-stat .num-m.ok { color: var(--ok); }
+
+  /* In the rail the AI tile shifts to a tighter layout — the donut
+     sits inline with the stats stack (same as the old hero) but
+     the stats column wraps to the rail's narrower width. */
+  .rail-tile .ai-body { padding: 12px 14px; }
+  /* In the rail the donut is the dominant visual; size it big enough
+     that "9h 34m" reads cleanly without touching the stroke. */
+  .rail-tile .ai-donut { width: 132px; height: 132px; }
+
+  /* ── ABANDONED-FOR-NOW: tile constraints that used to bound the
+     left "Needs attention" col + center "What was done" col. The
+     split-left section inherits .col styling but should grow with
+     its content; clear the overflow:hidden + min-height:0 so the
+     page-level scroll works. */
+  .split-left.col { overflow: visible; min-height: 0; }
+  .col-body-static { overflow: visible; max-height: none; }
+
+  /* hero strip: shipped + AI time */
+  .hero-strip {
+    display: grid;
+    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+    gap: 12px;
+  }
+  .hero-tile {
     position: relative; overflow: hidden;
     background: var(--bg-card); border: 1px solid var(--border-soft); border-radius: 10px;
-    padding: 16px 18px; display: flex; flex-direction: column; gap: 10px;
+    padding: 14px 18px;
+    display: flex; flex-direction: column; gap: 10px;
   }
-  .tc-bar { position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--border); }
-  .tc-alert .tc-bar { background: var(--alert); }
-  .tc-warn  .tc-bar { background: var(--warn); }
-  .tc-empty .tc-bar { background: var(--ok); }
-  .tc-head { display: flex; align-items: center; justify-content: space-between; padding-left: 6px; }
-  .tc-head-l { display: flex; align-items: center; gap: 10px; }
-  .tc-title { margin: 0; padding-left: 6px; font-size: 15px; color: var(--fg); font-weight: 500; line-height: 1.3; letter-spacing: -0.01em; }
-  .tc-body  { margin: 0; padding-left: 6px; font-size: 12.5px; color: var(--fg-soft); line-height: 1.5; }
-  .tc-actions { display: flex; gap: 6px; padding-left: 6px; margin-top: auto; }
+  .hero-bar { position: absolute; top: 0; left: 0; right: 0; height: 2px; background: var(--border); }
+  .hero-bar-ok   { background: var(--ok); }
+  .hero-bar-info { background: var(--info); }
 
-  .risks { background: var(--bg-card-2); border: 1px solid var(--border-soft); border-radius: 10px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
-  .risks-head { display: flex; align-items: baseline; justify-content: space-between; }
-  .risks-num-row { display: flex; align-items: baseline; gap: 8px; }
-  .risks-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 5px; }
-  .risks-li {
+  .shipped-top { display: grid; grid-template-columns: auto 1fr; gap: 20px; align-items: center; }
+  .shipped-num-wrap { display: inline-flex; align-items: baseline; gap: 6px; white-space: nowrap; }
+  .shipped-num-wrap .num-xxl { line-height: 0.9; }
+  .shipped-meta { min-width: 0; }
+  .shipped-meta .kick { font-size: 9.5px; margin-bottom: 4px; display: block; }
+  .shipped-headline { margin: 0; font-size: 12.5px; color: var(--fg); line-height: 1.45; }
+  .shipped-headline.dim { color: var(--fg-muted); }
+  .shipped-counts { font-size: 10.5px; margin-top: 4px; }
+
+  .shipped-list { display: flex; flex-direction: column; gap: 4px; }
+  .shipped-row {
     display: grid;
-    grid-template-columns: 24px 1fr auto auto;
-    align-items: center;
-    gap: 8px;
-    position: relative;
+    grid-template-columns: 70px 96px 1fr;
+    gap: 10px; align-items: baseline;
   }
-  .risks-li-open {
+  .shipped-row-t { font-size: 10px; color: var(--fg-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .shipped-row-p { font-size: 10.5px; color: var(--ok); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .shipped-row-title { font-size: 12px; color: var(--fg-soft); line-height: 1.4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .hero-tile-h { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+  .hero-tile-h .kick { font-size: 9.5px; }
+  .ai-body { display: flex; align-items: center; gap: 16px; min-width: 0; }
+  .ai-donut { position: relative; width: 132px; height: 132px; flex-shrink: 0; }
+  /* SVG sizes from its container, not from the width="106" attribute.
+     This lets `.rail-tile .ai-donut` override the donut size from CSS
+     without leaving the SVG drawn at the original 106px (which used to
+     overflow the container + crowd the inner label). */
+  .ai-donut-svg { display: block; width: 100%; height: 100%; }
+  .ai-donut-label { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; padding: 12px; }
+  /* Inner label sizes: bumped down so "9h 34m"-style readouts stop
+     bleeding into the ring on either side. The wall-clock subtext
+     stays tiny and dim. */
+  .ai-donut-label .num-l { font-size: 18px; letter-spacing: -0.02em; }
+  .ai-donut-label .mono { font-size: 9.5px; }
+  .ai-stats { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; }
+  .ai-stat { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: baseline; padding: 4px 0; border-bottom: 1px dashed var(--border-hair); }
+  .ai-stat .kick { font-size: 9.5px; grid-column: 1; }
+  .ai-stat .num-m { grid-column: 2; text-align: right; }
+  .ai-stat .mono.dim { grid-column: 2; font-size: 10px; text-align: right; }
+  .ai-stat:last-child { border-bottom: none; }
+
+  /* ── 3-column body ───────────────────────────────────────── */
+  .cols {
+    display: grid;
+    grid-template-columns: minmax(0, 320px) minmax(0, 1fr) minmax(0, 380px);
+    gap: 12px;
+    min-height: 0;
+  }
+  .col {
+    display: flex; flex-direction: column;
+    background: var(--bg-card); border: 1px solid var(--border-soft); border-radius: 10px;
+    min-height: 0; overflow: hidden;
+  }
+  .col-h {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border-hair);
+    background: var(--bg-card-2);
+    min-width: 0;
+  }
+  .col-dot { width: 6px; height: 6px; border-radius: 2px; background: var(--fg); flex-shrink: 0; }
+  .col-warn   .col-dot { background: var(--warn); }
+  .col-accent .col-dot { background: var(--accent); }
+  .col-info   .col-dot { background: var(--info); }
+  .col-title { font-size: 12.5px; font-weight: 500; color: var(--fg); white-space: nowrap; }
+  .col-sub { font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .col-meta { font-size: 10px; }
+  .col-action { padding: 3px 8px; font-size: 10px; }
+  .col-body {
+    padding: 14px;
+    display: flex; flex-direction: column; gap: 12px;
+    overflow-y: auto; overflow-x: hidden;
+    flex: 1; min-height: 0;
+  }
+  .col-body-flush { padding: 12px; gap: 12px; }
+  .col-foot {
+    padding: 8px 14px;
+    border-top: 1px solid var(--border-hair);
     background: var(--bg-inset);
-    border-radius: 6px;
-    padding: 4px 6px;
-    margin: -4px -6px;
+    font-size: 10.5px; line-height: 1.5;
+    color: var(--fg-muted);
   }
-  .risks-list .mono { font-size: 11px; }
+  .col-empty {
+    display: flex; flex-direction: column; gap: 6px;
+    padding: 16px 4px;
+  }
+  .col-empty p { margin: 0; font-size: 11.5px; line-height: 1.5; max-width: 38ch; }
+
+  /* triage inline cards */
+  .triage-stack { display: flex; flex-direction: column; gap: 8px; }
+  .tinline {
+    background: var(--bg-inset);
+    border: 1px solid var(--border-hair);
+    border-left-width: 2px;
+    border-radius: 6px;
+    padding: 8px 10px 8px 12px;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .tinline-alert { border-left-color: var(--alert); }
+  .tinline-warn  { border-left-color: var(--warn); }
+  .tinline-h { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: baseline; }
+  .tinline-rank { font-size: 10px; letter-spacing: 0.05em; }
+  .tinline-body { min-width: 0; }
+  .tinline-title { font-size: 12.5px; font-weight: 500; color: var(--fg); line-height: 1.3; }
+  .tinline-meta { font-size: 10.5px; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tinline-desc { margin: 0; font-size: 11.5px; color: var(--fg-soft); line-height: 1.5; }
+
+  /* risk breakdown inside left column */
+  .risk-section { padding-top: 8px; border-top: 1px solid var(--border-hair); display: flex; flex-direction: column; gap: 8px; }
+  .kick-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  .risks-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
+  .risks-li {
+    display: grid; grid-template-columns: 26px 1fr auto auto;
+    align-items: center; gap: 8px; position: relative;
+  }
+  .risks-li.dim-row { opacity: 0.45; }
+  .risks-li-open { background: var(--bg-inset); border-radius: 6px; padding: 4px 6px; margin: -4px -6px; }
+  .risks-li .mono { font-size: 11px; }
   .risks-label { min-width: 0; }
   .risks-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--fg-muted); opacity: 0.7; }
   .risks-dot.alert { background: var(--alert); }
   .risks-dot.warn  { background: var(--warn); }
   .risks-dot.info  { background: var(--info); }
 
-  /* "i" info button + provenance popover (2026-05-27) — exposes the
-     concrete source data behind each rolled-up risk count so the user
-     can verify the signal instead of having to trust the label. */
   .risks-info-btn {
-    width: 16px;
-    height: 16px;
-    border-radius: 50%;
-    border: 1px solid var(--border-soft);
-    background: transparent;
+    width: 16px; height: 16px; border-radius: 50%;
+    border: 1px solid var(--border-soft); background: transparent;
     color: var(--fg-muted);
-    font-family: var(--font-mono);
-    font-size: 10px;
-    font-style: italic;
-    line-height: 1;
-    padding: 0;
-    cursor: pointer;
+    font-family: var(--font-mono); font-size: 10px; font-style: italic; line-height: 1;
+    padding: 0; cursor: pointer;
     transition: color var(--t-fast), border-color var(--t-fast), background var(--t-fast);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
+    display: inline-flex; align-items: center; justify-content: center;
   }
-  .risks-info-btn:hover {
-    color: var(--fg);
-    border-color: var(--fg-muted);
-    background: var(--bg-card);
-  }
-  .risks-info-btn-open {
-    color: var(--accent);
-    border-color: var(--accent);
-    background: color-mix(in oklch, var(--accent) 10%, var(--bg-card-2));
-  }
+  .risks-info-btn:hover { color: var(--fg); border-color: var(--fg-muted); background: var(--bg-card); }
+  .risks-info-btn-open { color: var(--accent); border-color: var(--accent); background: color-mix(in oklch, var(--accent) 10%, var(--bg-card-2)); }
   .risks-info-pop {
-    grid-column: 1 / -1;
-    margin-top: 8px;
-    background: var(--bg-card);
-    border: 1px solid var(--border-soft);
-    border-radius: 8px;
-    padding: 10px 12px 12px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
+    grid-column: 1 / -1; margin-top: 8px;
+    background: var(--bg-card); border: 1px solid var(--border-soft); border-radius: 8px;
+    padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 8px;
   }
-  .risks-info-pop-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-  }
-  .risks-info-close {
-    background: transparent;
-    border: none;
-    color: var(--fg-muted);
-    font-size: 14px;
-    line-height: 1;
-    cursor: pointer;
-    padding: 2px 6px;
-    border-radius: 4px;
-  }
+  .risks-info-pop-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .risks-info-close { background: transparent; border: none; color: var(--fg-muted); font-size: 14px; line-height: 1; cursor: pointer; padding: 2px 6px; border-radius: 4px; }
   .risks-info-close:hover { color: var(--fg); background: var(--bg-inset); }
-  .risks-info-pop-prov {
-    margin: 0;
-    font-size: 11px;
-    line-height: 1.45;
-    color: var(--fg-soft);
-  }
-  .risks-info-pop-empty {
-    margin: 4px 0 0;
-    font-size: 11px;
-    color: var(--fg-muted);
-    font-style: italic;
-  }
-  .risks-info-pop-list {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-  .risks-info-pop-item {
-    border-left: 2px solid var(--border-soft);
-    padding: 4px 0 4px 10px;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-  .risks-info-pop-item-hd {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex-wrap: wrap;
-    font-size: 11.5px;
-  }
+  .risks-info-pop-prov { margin: 0; font-size: 11px; line-height: 1.45; color: var(--fg-soft); }
+  .risks-info-pop-empty { margin: 4px 0 0; font-size: 11px; color: var(--fg-muted); font-style: italic; }
+  .risks-info-pop-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+  .risks-info-pop-item { border-left: 2px solid var(--border-soft); padding: 4px 0 4px 10px; display: flex; flex-direction: column; gap: 4px; }
+  .risks-info-pop-item-hd { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 11.5px; }
   .risks-info-pop-repo { color: var(--fg); font-weight: 600; }
   .risks-info-pop-branch { color: var(--info); }
   .risks-info-pop-kind {
-    margin-left: auto;
-    padding: 1px 6px;
-    border-radius: 3px;
-    background: var(--bg-inset);
-    border: 1px solid var(--border-hair);
-    color: var(--fg-muted);
-    font-size: 9.5px;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
+    margin-left: auto; padding: 1px 6px; border-radius: 3px;
+    background: var(--bg-inset); border: 1px solid var(--border-hair);
+    color: var(--fg-muted); font-size: 9.5px; letter-spacing: 0.05em; text-transform: uppercase;
   }
-  .risks-info-pop-detail {
-    margin: 0;
-    font-size: 11px;
-    color: var(--fg-soft);
-    line-height: 1.45;
-  }
-  .risks-info-pop-evlabel {
-    font-size: 9.5px;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--fg-muted);
-    margin-top: 2px;
-  }
-  .risks-info-pop-files {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-  .risks-info-pop-files li {
-    font-size: 11px;
-    line-height: 1.4;
-    word-break: break-all;
-  }
-  .risks-info-pop-meta {
-    font-size: 10px;
-    color: var(--fg-dim);
-  }
+  .risks-info-pop-detail { margin: 0; font-size: 11px; color: var(--fg-soft); line-height: 1.45; }
+  .risks-info-pop-evlabel { font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--fg-muted); margin-top: 2px; }
+  .risks-info-pop-files { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 2px; }
+  .risks-info-pop-files li { font-size: 11px; line-height: 1.4; word-break: break-all; }
+  .risks-info-pop-meta { font-size: 10px; color: var(--fg-dim); }
 
-  /* ── 4. Hero ─────────────────────────────────────────────── */
-  .hero { padding: 24px 26px; display: flex; flex-direction: column; gap: 18px; }
-  .hero-head { display: flex; align-items: center; gap: 10px; }
-  .hero-h {
-    margin: 0; font-size: 26px; line-height: 1.3; font-weight: 500;
-    letter-spacing: -0.015em; color: var(--fg);
-    max-width: 38ch; text-wrap: balance;
-  }
-  .hero-empty { font-size: 18px; color: var(--fg-muted); max-width: 60ch; }
-  .mk-accent { color: var(--fg); padding: 0 1px; background-image: linear-gradient(transparent 62%, color-mix(in oklch, var(--accent) 28%, transparent) 62%); }
-  .mk-warn   { color: var(--fg); padding: 0 1px; background-image: linear-gradient(transparent 62%, color-mix(in oklch, var(--warn) 28%, transparent) 62%); }
-  .mk-alert  { color: var(--fg); padding: 0 1px; background-image: linear-gradient(transparent 62%, color-mix(in oklch, var(--alert) 28%, transparent) 62%); }
-
-  .bul-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 14px; }
-  .bul { display: grid; grid-template-columns: 28px 84px 1fr auto; gap: 14px; align-items: start; }
-  .bul-num  { font-size: 11px; padding-top: 4px; }
-  .bul-pill { align-self: start; margin-top: 2px; justify-content: center; min-width: 70px; text-align: center; }
+  /* MIDDLE: what was done */
+  .wwd-list { display: flex; flex-direction: column; gap: 12px; }
+  .bul-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }
+  .bul { display: grid; grid-template-columns: 26px 78px 1fr auto; gap: 10px; align-items: start; padding: 8px 10px; background: var(--bg-inset); border: 1px solid var(--border-hair); border-radius: 6px; }
+  .bul-num  { font-size: 10.5px; padding-top: 4px; }
+  .bul-pill { align-self: start; margin-top: 2px; justify-content: center; min-width: 68px; text-align: center; font-size: 10px; }
   .bul-body { min-width: 0; }
-  .bul-title { font-size: 14px; color: var(--fg); line-height: 1.4; font-weight: 500; margin-bottom: 2px; }
-  .bul-desc  { margin: 0; color: var(--fg-soft); font-size: 12.75px; line-height: 1.5; max-width: 78ch; }
+  .bul-title { font-size: 12.5px; color: var(--fg); line-height: 1.4; font-weight: 500; margin-bottom: 2px; }
+  .bul-desc  { margin: 0; color: var(--fg-soft); font-size: 11.5px; line-height: 1.5; }
   .bul-ev    { display: flex; flex-direction: column; gap: 4px; align-items: flex-end; }
-  .bul-ev .mono { font-size: 10.5px; color: var(--fg-dim); }
+  .bul-ev .mono { font-size: 10px; color: var(--fg-dim); }
   .bul-repo {
     color: var(--fg-soft) !important;
-    background: var(--bg-inset);
-    border: 1px solid var(--border-hair);
-    padding: 1px 7px;
-    border-radius: 4px;
-    font-size: 10.5px;
-    letter-spacing: 0.01em;
-  }
-
-  /* ── 4b. Typed What-was-done cards (one per service) ─────── */
-  /* The new WhatWasDoneCard component is fully self-styled; we
-     only need a thin layout wrapper here so multiple cards stack
-     with the same spacing rhythm as the legacy refl-cards list. */
-  .wwd-list { display: flex; flex-direction: column; gap: 14px; }
-
-  /* ── 4c. Reflection cards (legacy, iterative-reflection phase 3) ─── */
-  .refl-cards { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 14px; }
-  .refl-card  {
-    border: 1px solid var(--border-soft);
-    border-radius: 8px;
     background: var(--bg-card-2);
-    padding: 12px 16px 14px;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-  }
-  .refl-head { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--fg-muted); }
-  .refl-num  { font-size: 11px; color: var(--fg-dim); letter-spacing: 0.04em; }
-  .refl-ts   { color: var(--fg-soft); font-variant-numeric: tabular-nums; }
-  .refl-sep  { color: var(--fg-dim); }
-  .refl-repo {
-    color: var(--fg-soft);
-    background: var(--bg-inset);
     border: 1px solid var(--border-hair);
-    padding: 1px 7px;
-    border-radius: 4px;
-    font-size: 10.5px;
+    padding: 1px 6px; border-radius: 4px;
+    font-size: 10px; letter-spacing: 0.01em;
   }
-  .refl-chip { font-size: 10.5px; letter-spacing: 0.02em; }
-  .refl-body { display: flex; flex-direction: column; gap: 4px; }
-  .refl-title { font-size: 14.5px; color: var(--fg); font-weight: 500; line-height: 1.4; }
-  .refl-desc  { margin: 0; color: var(--fg-soft); font-size: 13px; line-height: 1.5; max-width: 78ch; }
-  .refl-disclose {
-    align-self: flex-start;
-    background: transparent;
-    border: 1px solid var(--border-hair);
-    border-radius: 6px;
-    padding: 3px 8px;
-    color: var(--fg-muted);
-    font-family: var(--font-mono);
-    font-size: 10.5px;
-    cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
+
+  /* RIGHT: where time went */
+  .svc-bars { display: flex; flex-direction: column; gap: 8px; }
+  .svc-bar-list { display: flex; flex-direction: column; gap: 7px; }
+  .svc-bar-row {
+    display: grid;
+    grid-template-columns: 8px minmax(0, 1fr) 78px 56px 22px 22px;
+    gap: 8px; align-items: center;
+    white-space: nowrap;
+  }
+  .svc-bar-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--fg-dim); flex-shrink: 0; }
+  .svc-bar-dot.ok { background: var(--ok); }
+  .svc-bar-name { font-size: 11.5px; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .svc-bar-track { position: relative; height: 6px; background: var(--bg-inset); border-radius: 2px; overflow: hidden; }
+  .svc-bar-fill { position: absolute; inset: 0; right: auto; background: var(--info); border-radius: 2px; }
+  .svc-bar-fill.ok { background: var(--ok); }
+  .svc-bar-time { font-size: 11px; color: var(--fg); text-align: right; }
+  .svc-bar-loops { font-size: 10px; text-align: center; }
+  .svc-bar-loops-spacer { display: inline-block; width: 22px; }
+  .svc-bar-hide {
+    width: 22px; height: 22px; border-radius: 4px;
+    background: transparent; border: 1px solid transparent;
+    color: var(--fg-dim); cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center;
     transition: color var(--t-fast), border-color var(--t-fast), background var(--t-fast);
   }
-  .refl-disclose:hover { color: var(--fg); border-color: var(--border-soft); background: var(--bg-inset); }
-  .refl-caret { display: inline-block; transition: transform 120ms ease-out; }
-  .refl-caret.open { transform: rotate(90deg); }
-  .refl-details {
-    margin: 4px 0 0;
-    padding: 0;
-    list-style: none;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    border-top: 1px dashed var(--border-hair);
-    padding-top: 10px;
-  }
-  .refl-detail { display: grid; grid-template-columns: 78px 1fr auto; gap: 12px; align-items: start; }
-  .refl-detail-chip { align-self: start; margin-top: 2px; justify-content: center; min-width: 64px; text-align: center; font-size: 10px; }
-  .refl-detail-body { min-width: 0; }
-  .refl-detail-title { font-size: 13px; color: var(--fg); font-weight: 500; line-height: 1.4; }
-  .refl-detail-desc  { margin: 2px 0 0; color: var(--fg-soft); font-size: 12px; line-height: 1.5; max-width: 78ch; }
-  .refl-detail-ev    { display: flex; flex-direction: column; gap: 3px; align-items: flex-end; font-size: 10.5px; color: var(--fg-dim); }
+  .svc-bar-hide svg { width: 12px; height: 12px; display: block; }
+  .svc-bar-hide:hover { color: var(--fg); border-color: var(--border-hair); background: var(--bg-inset); }
+  .svc-bar-empty { padding: 12px; text-align: center; font-size: 11px; }
 
-  /* ── 5. Metrics ──────────────────────────────────────────── */
-  .metrics { padding: 14px 4px; display: grid; grid-template-columns: repeat(6, 1fr); }
-  .metric  { padding: 2px 18px; border-right: 1px solid var(--border-hair); display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-  .metric.no-bar { border-right: none; }
-  .metric-k { font-size: 10px; }
+  .mini-tl { display: flex; flex-direction: column; gap: 6px; padding-top: 8px; border-top: 1px solid var(--border-hair); }
 
-  /* ── 5b. Klyne usage transparency tile ───────────────────── */
+  /* klyne overhead footer (preserved tile, less prominent) */
+  .card { background: var(--bg-card); border: 1px solid var(--border-soft); border-radius: 10px; }
   .klyne-usage { padding: 0; overflow: hidden; }
   .ku-row {
     display: flex; align-items: center; gap: 10px;
-    width: 100%; padding: 12px 18px;
+    width: 100%; padding: 10px 16px;
     background: transparent; border: 0; cursor: pointer;
     color: var(--fg); font: inherit; text-align: left;
   }
-  .ku-row:hover { background: var(--bg-card-hover, rgba(255,255,255,0.02)); }
+  .ku-row:hover { background: color-mix(in oklch, var(--bg-card-2) 65%, transparent); }
   .ku-icon { color: var(--accent); font-size: 11px; flex-shrink: 0; }
-  .ku-text { flex: 1; display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; font-size: 13px; }
+  .ku-text { flex: 1; display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; font-size: 12.5px; }
   .ku-text strong { font-weight: 600; }
   .ku-sep { color: var(--fg-dim); }
   .ku-caret { color: var(--fg-dim); font-size: 11px; flex-shrink: 0; }
-  .ku-detail { padding: 4px 18px 16px; border-top: 1px solid var(--border-hair); display: flex; flex-direction: column; gap: 14px; }
-  .ku-tot { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; padding-top: 12px; }
+  .ku-detail { padding: 4px 16px 14px; border-top: 1px solid var(--border-hair); display: flex; flex-direction: column; gap: 12px; }
+  .ku-tot { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; padding-top: 10px; }
   .ku-tot-cell { display: flex; flex-direction: column; gap: 4px; }
   .ku-ops { display: flex; flex-direction: column; gap: 6px; }
   .ku-op { display: flex; align-items: baseline; gap: 12px; font-size: 12px; }
   .ku-op-name { flex: 1; color: var(--fg); }
   .ku-note { font-size: 10.5px; line-height: 1.5; margin: 0; }
 
-  /* ── 6. Services ─────────────────────────────────────────── */
-  .services { padding: 0; overflow: hidden; }
-  .svc-head { padding: 14px 18px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border-hair); }
-  .svc-head-sub { font-size: 12px; margin-left: 10px; }
-  .svc-row {
-    display: grid; grid-template-columns: minmax(0,1.4fr) 88px 88px 100px minmax(0,1.4fr) 28px;
-    gap: 16px; padding: 14px 18px; border-bottom: 1px solid var(--border-hair); align-items: center;
-  }
-  .svc-row-th { padding: 10px 18px; align-items: baseline; }
-  .svc-row-th .kick { font-size: 10px; }
-  .svc-row:last-child { border-bottom: none; }
-  .svc-name { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-  .svc-name .mono { font-size: 14px; color: var(--fg); }
-  .svc-loops { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-  .loop { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
-  .loop-prefix { width: 12px; text-align: center; flex-shrink: 0; font-size: 11px; color: var(--fg-dim); }
-  .loop-label  { font-size: 11.5px; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 55%; }
-  .loop-note   { font-size: 10.5px; color: var(--fg-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
-  .svc-empty   { padding: 24px; color: var(--fg-muted); font-family: var(--font-mono); font-size: 12px; text-align: center; }
-  .svc-hide {
-    background: transparent; border: 1px solid var(--border-hair);
-    color: var(--fg-dim); width: 26px; height: 26px;
-    border-radius: 6px; cursor: pointer;
-    display: inline-flex; align-items: center; justify-content: center;
-    transition: color var(--t-fast), border-color var(--t-fast), background var(--t-fast);
-  }
-  .svc-hide svg { width: 14px; height: 14px; display: block; }
-  .svc-hide:hover { background: var(--bg-card-2); border-color: var(--border); color: var(--fg); }
-
-  /* ── 7. Timeline ─────────────────────────────────────────── */
-  .timeline { padding: 0; display: grid; grid-template-columns: 240px 1fr; }
-  .tl-side { padding: 16px 18px; border-right: 1px solid var(--border-hair); display: flex; flex-direction: column; gap: 12px; }
-  .tl-stat { display: flex; align-items: baseline; justify-content: space-between; }
-  .tl-stat .mono { font-size: 11px; }
-  .tl-stat-sub { font-size: 10px; margin-left: 6px; }
-  .tl-main { padding: 16px 20px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
-  .tl-h { display: flex; align-items: baseline; justify-content: space-between; }
-  .tl-h .mono { font-size: 11.5px; }
-
   /* ── responsive ──────────────────────────────────────────── */
-  @media (max-width: 1180px) {
-    .rail { grid-template-columns: 1fr auto auto; padding: 10px 16px; }
-    .body { padding: 16px; }
-    .triage { grid-template-columns: 1fr 1fr; }
-    .triage .risks { grid-column: 1 / -1; }
-    .metrics { grid-template-columns: repeat(3, 1fr); }
-    .metric:nth-child(3n) { border-right: none; }
-    .timeline { grid-template-columns: 1fr; }
-    .tl-side { border-right: none; border-bottom: 1px solid var(--border-hair); }
+  @media (max-width: 1380px) {
+    .cols { grid-template-columns: minmax(0, 280px) minmax(0, 1fr) minmax(0, 340px); }
   }
-  @media (max-width: 720px) {
-    .mast { grid-template-columns: 1fr; gap: 14px; }
-    .triage { grid-template-columns: 1fr; }
-    .metrics { grid-template-columns: repeat(2, 1fr); }
-    .metric:nth-child(2n) { border-right: none; }
-    .svc-row, .svc-row-th { grid-template-columns: 1fr; gap: 4px; }
+  @media (max-width: 1180px) {
+    .hdr { grid-template-columns: 1fr; gap: 10px; padding: 10px 16px; }
+    .hdr-l, .hdr-m, .hdr-r { justify-self: start; }
+    .hdr-r { width: 100%; justify-content: flex-end; }
+    .cockpit { padding: 12px 16px 16px; }
+    .hero-strip { grid-template-columns: 1fr; }
+    .cols { grid-template-columns: 1fr 1fr; }
+    .col-info { grid-column: 1 / -1; }
+  }
+  @media (max-width: 820px) {
+    .cols { grid-template-columns: 1fr; }
+    .ku-tot { grid-template-columns: repeat(2, 1fr); }
   }
 </style>

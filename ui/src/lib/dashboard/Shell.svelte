@@ -83,5 +83,12 @@
     /* 60px bottom padding keeps content above the topbar shadow on long pages */
     padding: 22px 26px 60px;
     min-width: 0;
+    /* Override the global .page { max-width: 1320px; margin: 0 auto } rule
+       in app.css — that rule was written for the older route shells; the
+       new productivity cockpit (and future full-bleed routes) need the full
+       width inside the sidebar grid. Individual routes can re-cage themselves
+       with their own max-width if they want a narrower reading column. */
+    max-width: none;
+    margin: 0;
   }
 </style>
