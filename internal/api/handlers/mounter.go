@@ -143,15 +143,16 @@ func (m *Mounter) Mount(r chi.Router) {
 	hProductivityRecompose := NewProductivityRecomposeHandler(m.deps.DB)
 	r.Post(api.RouteProductivityRecompose, hProductivityRecompose.Run)
 
-	// POST /api/productivity/compile — second LLM pass. Spawns
-	// `claude -p /klyne:productivity-sync` for (project_path, day) so
-	// Sonnet can compile cohesive WhatWasDoneCards from the typed
-	// reflection rows the first pass wrote. Same allowlist + same-
-	// origin + 5-min timeout guards as /worklog/reflect/run; only
-	// emitted when the user explicitly wants to re-sync a day (or
-	// chained internally after a successful reflect).
+	// POST /api/productivity/compile/start + GET …/compile/status — the
+	// detached background second LLM pass. start computes the day's
+	// floor-based pending services and launches one goroutine running
+	// /klyne:productivity-sync per service sequentially on context.Background()
+	// (survives client reload); status reports live per-service progress.
+	// One job per day; double-start is idempotent. Replaces the old
+	// blocking POST /api/productivity/compile.
 	hProductivityCompile := NewProductivityCompileHandler(m.deps.DB)
-	r.Post(api.RouteProductivityCompile, hProductivityCompile.Run)
+	r.Post(api.RouteProductivityCompileStart, hProductivityCompile.Start)
+	r.Get(api.RouteProductivityCompileStatus, hProductivityCompile.Status)
 
 	// DELETE /api/projects — project-wide wipe of the worklog/decision/
 	// runbook/work-span/git-snapshot tables for a given project_path.

@@ -93,18 +93,19 @@ const (
 	// /worklog/reflect/run after a successful reflect so the dashboard
 	// shows the new cards on the same UI round-trip.
 	RouteProductivityRecompose = "/api/productivity/recompose"
-	// RouteProductivityCompile: POST /api/productivity/compile.
-	// Spawns `claude -p /klyne:productivity-sync` for (project_path,
-	// day) — the SECOND LLM pass that reads the typed reflection rows
-	// the first pass wrote and persists a Sonnet-compiled
-	// WhatWasDoneCard with llm_compiled=true. Same security gating as
-	// /worklog/reflect/run (same-origin, project_path allowlist, 5-min
-	// timeout). Useful when reflection rows exist but no compiled card
-	// does (legacy day, user wants to re-sync without re-running
-	// reflection). The compile is also chained automatically from
-	// /worklog/reflect/run so the UI's existing "Run /klyne:reflect now"
-	// button does reflect → sync in one round-trip.
-	RouteProductivityCompile = "/api/productivity/compile"
+	// RouteProductivityCompileStart: POST /api/productivity/compile/start.
+	// Body {day, model}. Computes the day's floor-based pending services,
+	// builds a CompileJob, launches ONE detached background goroutine that
+	// runs /klyne:productivity-sync per service sequentially, and returns
+	// the initial job immediately. Idempotent per day: a running job is
+	// returned unchanged (no second spawn). Same allowlist + model
+	// validation as the legacy blocking route it replaces.
+	RouteProductivityCompileStart = "/api/productivity/compile/start"
+	// RouteProductivityCompileStatus: GET /api/productivity/compile/status?day=YYYY-MM-DD.
+	// Returns the current CompileJob for that day (live per-service state),
+	// or {"status":"none"} when no job has run. Polled by the dashboard
+	// every 2s while a compile is in flight; survives page reload.
+	RouteProductivityCompileStatus = "/api/productivity/compile/status"
 	// RouteKlyneUsage: GET /api/klyne-usage?day=YYYY-MM-DD.
 	// Returns the day's klyne LLM-subprocess token totals (productivity-
 	// sync + reflect runs) alongside the user's full-day Claude usage
@@ -154,7 +155,8 @@ func AllRoutes() []string {
 		RouteProductivity,
 		RouteProductivityDates,
 		RouteProductivityRecompose,
-		RouteProductivityCompile,
+		RouteProductivityCompileStart,
+		RouteProductivityCompileStatus,
 		RouteKlyneUsage,
 		RouteProjectDelete,
 		RouteAsk,

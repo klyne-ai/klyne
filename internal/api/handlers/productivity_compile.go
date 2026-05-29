@@ -15,42 +15,29 @@ import (
 	"github.com/klyne-ai/klyne/internal/store"
 )
 
-// ProductivityCompileHandler serves POST /api/productivity/compile —
-// the second LLM pass invocation. Spawns `claude -p
-// /klyne:productivity-sync project_path=<...> day=<...>` for a project
-// already in the worklog rollup.
+// ProductivityCompileHandler serves the detached background second LLM
+// pass over two routes:
 //
-// This is the second of the two places in the daemon that intentionally
-// invokes the `claude` CLI (the other is /worklog/reflect/run for the
-// first pass). It is gated on the same three checks:
+//   - POST /api/productivity/compile/start — compute the day's
+//     floor-based pending services and launch one background job
+//     (idempotent per day; survives client reload). See Start.
+//   - GET  /api/productivity/compile/status — report the day's live
+//     per-service progress. See Status.
 //
-//  1. Same-origin: enforced globally by the sameOriginOnly middleware.
-//  2. Project-path allowlist: requested path MUST already appear in the
-//     worklog rollup.
-//  3. Bounded execution: hard 5-minute context timeout.
+// The job runs `claude -p /klyne:productivity-sync project_path=<...>
+// day=<...>` per service sequentially on context.Background() with a
+// 10-minute per-service timeout (see CompileJobRegistry.execute). Each
+// subprocess persists one card per service with llm_compiled=true via
+// the record_productivity_card MCP tool.
 //
-// The spawn invokes the second-pass slash command directly with the
-// resolved (project_path, day) so the model never has to guess. The
-// command itself calls list_typed_reflections + record_productivity_card
-// MCP tools to read the day's typed reflections and persist one card
-// per service with llm_compiled=true.
-//
-// Distinct from /worklog/reflect/run because callers want to RE-SYNC
-// without re-running reflection (legacy days, manual UI button, etc.).
-// /worklog/reflect/run chains this same spawn after a successful
-// reflect so the dashboard's "Run /klyne:reflect now" button does
-// reflect → sync invisibly.
+// This is one of the two places in the daemon that intentionally invokes
+// the `claude` CLI (the other is /worklog/reflect/run for the first
+// pass). Security gating: same-origin (global sameOriginOnly middleware)
+// and a project-path allowlist preserved structurally — discovery only
+// ever targets paths drawn from the worklog rollup.
 type ProductivityCompileHandler struct {
-	db *store.DB
-	// runCmd is the subprocess factory. Tests inject a stub here so
-	// the handler can be exercised without a real `claude` binary on
-	// the test runner. The second return is a parsed result envelope
-	// (text + token usage) extracted from the CLI's
-	// `--output-format=json` output.
-	//
-	// modelKey is the caller-supplied model selection from the request
-	// (validated against compileModelAllowlist before reaching this fn).
-	runCmd func(ctx context.Context, projectPath, day, modelKey string) (claudeRunResult, error)
+	db       *store.DB
+	registry *CompileJobRegistry
 }
 
 // compileModelAllowlist constrains which models the productivity page's
@@ -68,49 +55,32 @@ var compileModelAllowlist = map[string]string{
 // cost. Users can opt into Opus from the productivity page header.
 const defaultCompileModel = "sonnet"
 
-// NewProductivityCompileHandler constructs a handler that shells out
-// via the real `claude` CLI. Tests should construct the struct literal
-// directly to supply a stub runCmd.
+// NewProductivityCompileHandler constructs a handler whose registry
+// shells out via the real `claude` CLI. Tests construct the struct
+// literal directly with a registry built around a stub runCmd.
 func NewProductivityCompileHandler(db *store.DB) *ProductivityCompileHandler {
-	return &ProductivityCompileHandler{db: db, runCmd: spawnClaudeProductivitySync}
+	return &ProductivityCompileHandler{
+		db:       db,
+		registry: NewCompileJobRegistry(db, spawnClaudeProductivitySync),
+	}
 }
 
-// productivityCompileRequest is the POST body. Both fields are
-// required — unlike /worklog/reflect/run which defaults Day to today,
-// /api/productivity/compile demands an explicit day because its whole
-// purpose is to back-fill compiled cards for specific (often past)
-// days.
-type productivityCompileRequest struct {
-	ProjectPath string `json:"project_path"`
-	Day         string `json:"day"`
-	// Model is one of compileModelAllowlist's keys ("sonnet" | "opus").
-	// Optional: omitted/empty → defaultCompileModel. Unknown values are
-	// rejected with 400 — never silently coerced.
+// compileStartRequest is the POST /compile/start body. Day is required
+// (the action back-fills a specific day); model is optional and defaults
+// to defaultCompileModel.
+type compileStartRequest struct {
+	Day   string `json:"day"`
 	Model string `json:"model,omitempty"`
 }
 
-// productivityCompileResponse mirrors reflectRunResponse so the UI's
-// "Compile" button can render the same inline output panel as the
-// "Run /klyne:reflect now" button.
-type productivityCompileResponse struct {
-	ProjectPath string `json:"project_path"`
-	Day         string `json:"day"`
-	Status      string `json:"status"` // "ok" | "error" | "timeout"
-	Output      string `json:"output"`
-	DurationMs  int64  `json:"duration_ms"`
-	Error       string `json:"error,omitempty"`
-}
-
-// Run handles POST /api/productivity/compile.
-func (h *ProductivityCompileHandler) Run(w http.ResponseWriter, r *http.Request) {
-	var req productivityCompileRequest
+// Start handles POST /api/productivity/compile/start. Validates day +
+// model, computes the floor-based pending set, and launches a detached
+// background job (idempotent per day). Returns the initial CompileJob,
+// or {"status":"none"} when nothing is pending.
+func (h *ProductivityCompileHandler) Start(w http.ResponseWriter, r *http.Request) {
+	var req compileStartRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
-		return
-	}
-	req.ProjectPath = strings.TrimSpace(req.ProjectPath)
-	if req.ProjectPath == "" {
-		http.Error(w, "missing project_path", http.StatusBadRequest)
 		return
 	}
 	dayStr := strings.TrimSpace(req.Day)
@@ -122,7 +92,6 @@ func (h *ProductivityCompileHandler) Run(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "invalid day: must be YYYY-MM-DD", http.StatusBadRequest)
 		return
 	}
-
 	modelKey := strings.TrimSpace(req.Model)
 	if modelKey == "" {
 		modelKey = defaultCompileModel
@@ -132,59 +101,43 @@ func (h *ProductivityCompileHandler) Run(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Allowlist: same gate as /worklog/reflect/run.
-	rollup, err := store.ListWorklogRollup(r.Context(), h.db)
+	// If a job is already running for this day, return it unchanged — no
+	// re-discovery, no second spawn (idempotent).
+	if existing, ok := h.registry.Status(dayStr); ok && existing.Status == "running" {
+		writeJSON(w, http.StatusOK, existing)
+		return
+	}
+
+	pending, err := discoverPendingCompileServices(r.Context(), h.db, dayStr)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	allowed := false
-	for _, p := range rollup {
-		if p.ProjectPath == req.ProjectPath {
-			allowed = true
-			break
-		}
-	}
-	if !allowed {
-		http.Error(w, "project_path not in worklog rollup", http.StatusForbidden)
+	if len(pending) == 0 {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "none"})
 		return
 	}
 
-	// Opus 4.7 on a 24-card service can run 5-7 minutes. Bumped from 5m
-	// → 10m so large services (klyne itself most notably) finish without
-	// a context-deadline kill.
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
-	defer cancel()
+	job := h.registry.Start(dayStr, modelKey, pending)
+	writeJSON(w, http.StatusOK, job)
+}
 
-	start := time.Now()
-	result, runErr := h.runCmd(ctx, req.ProjectPath, dayStr, modelKey)
-	dur := time.Since(start).Milliseconds()
-
-	resp := productivityCompileResponse{
-		ProjectPath: req.ProjectPath,
-		Day:         dayStr,
-		Output:      result.Output,
-		DurationMs:  dur,
+// Status handles GET /api/productivity/compile/status?day=YYYY-MM-DD.
+func (h *ProductivityCompileHandler) Status(w http.ResponseWriter, r *http.Request) {
+	dayStr := strings.TrimSpace(r.URL.Query().Get("day"))
+	if dayStr == "" {
+		http.Error(w, "missing day", http.StatusBadRequest)
+		return
 	}
-	switch {
-	case runErr == nil:
-		resp.Status = "ok"
-	case ctx.Err() == context.DeadlineExceeded:
-		resp.Status = "timeout"
-		resp.Error = "subprocess exceeded 10m budget"
-	default:
-		resp.Status = "error"
-		resp.Error = runErr.Error()
+	if _, err := time.ParseInLocation("2006-01-02", dayStr, time.Local); err != nil {
+		http.Error(w, "invalid day: must be YYYY-MM-DD", http.StatusBadRequest)
+		return
 	}
-
-	// Record token usage for the dashboard's "Klyne is X% of today's
-	// Claude usage" tile. Persist regardless of subprocess status —
-	// failed/timeout runs still consumed tokens up to the cut-off and
-	// the user should see them.
-	persistKlyneUsage(r.Context(), h.db, req.ProjectPath, dayStr,
-		"productivity_sync", result, resp.Status, dur)
-
-	writeJSON(w, http.StatusOK, resp)
+	if job, ok := h.registry.Status(dayStr); ok {
+		writeJSON(w, http.StatusOK, job)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "none"})
 }
 
 // spawnClaudeProductivitySync is the production runCmd: shells out to
@@ -266,4 +219,4 @@ func spawnClaudeProductivitySync(ctx context.Context, projectPath, day, modelKey
 }
 
 // Compile-time guard against silent contract drift on the route const.
-var _ = api.RouteProductivityCompile
+var _ = api.RouteProductivityCompileStart
