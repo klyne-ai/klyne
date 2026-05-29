@@ -21,13 +21,14 @@
   worklog-entries-pending + next-scheduled fields directly.
 -->
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
-  import { fetchProductivityDates, runReflect, compileProductivity, fetchKlyneUsage, type ProductivityReport, type ProductivityService, type ProductivitySessionStat, type KlyneUsageResponse, type CompileModel } from '$lib/api.js';
+  import { fetchProductivityDates, runReflect, startCompile, getCompileStatus, isCompileJob, fetchKlyneUsage, type ProductivityReport, type ProductivityService, type ProductivitySessionStat, type KlyneUsageResponse, type CompileModel, type CompileJob } from '$lib/api.js';
   import { applyHiddenFilter, hiddenSessionIds, hideMany, clearHidden } from '$lib/hidden-sessions.svelte';
   import ConcurrencyTimeline from '$lib/components/productivity/ConcurrencyTimeline.svelte';
   import WhatWasDoneCard from '$lib/dashboard/pages/productivity/WhatWasDoneCard.svelte';
+  import { SHOW_REFLECTIONS } from '$lib/featureFlags';
   import AskKlyneDrawer from '$lib/components/AskKlyneDrawer.svelte';
   import { sessionUrl } from '$lib/dashboard/url-state.js';
 
@@ -77,10 +78,55 @@
     compileModel = next;
     try { localStorage.setItem(COMPILE_MODEL_KEY, next); } catch { /* private mode: in-memory only */ }
   }
-  let compileRunning = $state(false);
-  let compileDone    = $state(0);
-  let compileTotal   = $state(0);
-  let compileError   = $state<string | null>(null);
+  // Detached background compile (2026-05-29). The daemon owns the job;
+  // the page polls status every 2s and reattaches to a running job on
+  // mount, so a reload no longer kills an in-flight compile.
+  let compileJob = $state<CompileJob | null>(null);
+  let compilePanelOpen = $state(false);
+  let compileError = $state<string | null>(null);
+  let compilePollFails = 0;
+  let compilePoll: ReturnType<typeof setInterval> | null = null;
+  // Day the current view targets — single-day report exposes rep.day.
+  // Local-date (NOT UTC) — matches localDateKey/rangeFor day math elsewhere
+  // so a running job near midnight keys to the same day the server uses.
+  const compileDay = $derived(rep?.day ?? localDateKey(Date.now()));
+  const compileRunning = $derived(compileJob?.status === 'running');
+  const compileDone = $derived(
+    (compileJob?.services ?? []).filter(s => s.status === 'done' || s.status === 'failed').length,
+  );
+  const compileTotal = $derived(compileJob?.services?.length ?? 0);
+
+  function stopCompilePoll(): void {
+    if (compilePoll) { clearInterval(compilePoll); compilePoll = null; }
+  }
+  function startCompilePoll(day: string): void {
+    stopCompilePoll();
+    compilePollFails = 0;
+    compilePoll = setInterval(async () => {
+      try {
+        const s = await getCompileStatus(day);
+        compilePollFails = 0;
+        compileError = null; // recovered — clear any prior transient error
+        if (isCompileJob(s)) {
+          compileJob = s;
+          if (s.status !== 'running') {
+            stopCompilePoll();
+            await load({ refresh: true }); // compiled cards now exist
+          }
+        } else {
+          // {status:'none'} — job evaporated (daemon restart). Stop.
+          compileJob = null;
+          stopCompilePoll();
+        }
+      } catch (e) {
+        compilePollFails += 1;
+        if (compilePollFails >= 4) {
+          stopCompilePoll();
+          compileError = e instanceof Error ? e.message : String(e);
+        }
+      }
+    }, 2000);
+  }
 
   // Ask Klyne drawer: ephemeral chat with stop_summaries context scoped
   // to the page's current (services → projects, since, until) view.
@@ -93,35 +139,21 @@
     )),
   );
 
-  async function runCompileForAllPendingServices() {
+  async function runCompile(): Promise<void> {
     if (compileRunning || !rep) return;
-    // Only services whose what_was_done exists but is NOT llm_compiled
-    // need the second-pass LLM. Dedup by project_path so cross-service
-    // shared paths don't double-spawn.
-    const targets = Array.from(new Map(
-      (rep.services ?? [])
-        .filter(s => s.what_was_done && !s.what_was_done.llm_compiled && !!s.project_path)
-        .map(s => [s.project_path as string, s.project_path as string]),
-    ).keys());
-    if (targets.length === 0) return;
-    const dayStr = rep.day ?? new Date().toISOString().slice(0, 10);
-    compileRunning = true;
+    const day = compileDay;
     compileError = null;
-    compileDone = 0;
-    compileTotal = targets.length;
     try {
-      for (const p of targets) {
-        try {
-          await compileProductivity(p, dayStr, compileModel);
-        } catch (e) {
-          if (!compileError) compileError = e instanceof Error ? e.message : String(e);
-        } finally {
-          compileDone += 1;
-        }
+      const s = await startCompile(day, compileModel);
+      if (isCompileJob(s)) {
+        compileJob = s;
+        compilePanelOpen = true;
+        startCompilePoll(day);
+      } else {
+        compileJob = null; // nothing pending
       }
-      await load({ refresh: true });
-    } finally {
-      compileRunning = false;
+    } catch (e) {
+      compileError = e instanceof Error ? e.message : String(e);
     }
   }
   async function runReflectForAllProjects() {
@@ -175,6 +207,11 @@
     return key === 'custom' ? 'calendar day' : RANGE_LABELS[key];
   }
   let rangeKey = $state<RangeKey>('today');
+  // Compile is inherently per-day: rep.day is the range START for multi-day
+  // presets, so the ✨ Compile CTA is only offered on single-day views to
+  // avoid targeting just the first day of a week. A running job's progress
+  // pill still shows for any range.
+  const isSingleDay = $derived(rangeKey !== 'this_week' && rangeKey !== 'last_week');
   let calendarOpen = $state(false);
   let availableDays = $state<string[]>([]);
   let calendarMonth = $state<Date>(new Date());
@@ -427,9 +464,25 @@
       const saved = localStorage.getItem(COMPILE_MODEL_KEY);
       if (saved === 'sonnet' || saved === 'opus') compileModel = saved;
     } catch { /* private mode: stay on default */ }
+    // Reload survival: if a compile is already running for the current
+    // day, reattach the pill + resume polling.
+    (async () => {
+      try {
+        const day = rep?.day ?? localDateKey(Date.now());
+        const s = await getCompileStatus(day);
+        // A user-initiated runCompile during this await wins — don't clobber it.
+        if (compileJob) return;
+        if (isCompileJob(s) && s.status === 'running') {
+          compileJob = s;
+          startCompilePoll(day);
+        }
+      } catch { /* transient; the pill simply won't reattach */ }
+    })();
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   });
+
+  onDestroy(() => stopCompilePoll());
 
   function onKey(ev: KeyboardEvent) {
     const tgt = ev.target as HTMLElement | null;
@@ -1071,33 +1124,37 @@
         {@const needsSync = v.reflection_status !== 'current' || pendingNew > 0}
         {@const pendingCompileCount = v.pending_compile ?? 0}
         {@const alerts = topAlerts(v.services)}
-        <span class="pill pill-{v.reflection_status === 'current' ? 'ok' : v.reflection_status === 'stale' ? 'warn' : 'alert'} pill-sm">
-          <span class="dot dot-{v.reflection_status === 'current' ? 'ok' : v.reflection_status === 'stale' ? 'warn' : 'alert'}"></span>{reflectionLabel(v.reflection_status)}
-        </span>
-        <button
-          class="pill pill-action pill-sm"
-          class:is-highlighted={needsSync}
-          onclick={runReflectForAllProjects}
-          disabled={reflectRunning}
-          title="Spawn /klyne:reflect for every project in this window">
-          {#if reflectRunning}
-            {reflectDone}/{reflectTotal}…
-          {:else}
-            ▶ Reflect
-            {#if needsSync && pendingNew > 0}<span class="pill-action-badge mono">{pendingNew}</span>{/if}
-          {/if}
-        </button>
-        {#if pendingCompileCount > 0}
+        {#if SHOW_REFLECTIONS}
+          <span class="pill pill-{v.reflection_status === 'current' ? 'ok' : v.reflection_status === 'stale' ? 'warn' : 'alert'} pill-sm">
+            <span class="dot dot-{v.reflection_status === 'current' ? 'ok' : v.reflection_status === 'stale' ? 'warn' : 'alert'}"></span>{reflectionLabel(v.reflection_status)}
+          </span>
+          <button
+            class="pill pill-action pill-sm"
+            class:is-highlighted={needsSync}
+            onclick={runReflectForAllProjects}
+            disabled={reflectRunning}
+            title="Spawn /klyne:reflect for every project in this window">
+            {#if reflectRunning}
+              {reflectDone}/{reflectTotal}…
+            {:else}
+              ▶ Reflect
+              {#if needsSync && pendingNew > 0}<span class="pill-action-badge mono">{pendingNew}</span>{/if}
+            {/if}
+          </button>
+        {/if}
+        {#if compileRunning}
           <button
             class="pill pill-action pill-sm is-highlighted"
-            onclick={runCompileForAllPendingServices}
-            disabled={compileRunning}
-            title="Spawn /klyne:productivity-sync to compile cohesive Tier 1 prose from this day's typed reflections">
-            {#if compileRunning}
-              {compileDone}/{compileTotal}…
-            {:else}
-              ✨ Compile<span class="pill-action-badge mono">{pendingCompileCount}</span>
-            {/if}
+            onclick={() => (compilePanelOpen = !compilePanelOpen)}
+            title="Compiling in the background — click for per-service detail">
+            ⟳ Compiling… {compileDone}/{compileTotal}
+          </button>
+        {:else if pendingCompileCount > 0 && isSingleDay}
+          <button
+            class="pill pill-action pill-sm is-highlighted"
+            onclick={runCompile}
+            title="Spawn /klyne:productivity-sync to compile cohesive Tier 1 prose from this day's stop summaries">
+            ✨ Compile<span class="pill-action-badge mono">{pendingCompileCount}</span>
           </button>
         {/if}
         {#if alerts.length > 0}
@@ -1135,6 +1192,30 @@
       <button class="btn-primary" onclick={copyForStandup}>{copied ? '✓ Copied' : 'Copy ⌘C'}</button>
     </div>
   </header>
+
+  {#if compilePanelOpen && compileJob}
+    <div class="compile-panel" role="dialog" aria-label="Compile progress">
+      <div class="compile-panel-hd">
+        <span class="mono">Compile · {compileJob.day} · {compileJob.model}</span>
+        <span class="mono dim">{compileDone}/{compileTotal} · {compileJob.status}</span>
+        <button class="btn-ghost btn-square" onclick={() => (compilePanelOpen = false)} title="Close">×</button>
+      </div>
+      <ul class="compile-svc-list">
+        {#each compileJob.services as svc (svc.project_path)}
+          <li class="compile-svc compile-svc-{svc.status}">
+            <span class="compile-svc-dot dot dot-{svc.status === 'done' ? 'ok' : svc.status === 'failed' ? 'alert' : svc.status === 'running' ? 'warn' : 'idle'}"></span>
+            <span class="compile-svc-name mono">{svc.service}</span>
+            <span class="compile-svc-state mono dim">{svc.status}</span>
+            {#if svc.status === 'running' && svc.started_at > 0}
+              <span class="compile-svc-elapsed mono dim">{Math.round((Date.now() - svc.started_at) / 1000)}s</span>
+            {/if}
+            {#if svc.error}<span class="compile-svc-err mono">{svc.error}</span>{/if}
+          </li>
+        {/each}
+      </ul>
+      {#if compileError}<div class="compile-panel-err mono">{compileError}</div>{/if}
+    </div>
+  {/if}
 
   {#if loading && rep}
     <div class="range-loading mono" role="status" aria-live="polite">
@@ -1306,7 +1387,7 @@
                 {/each}
               </div>
             {/if}
-            {#if legacyBullets.length > 0}
+            {#if SHOW_REFLECTIONS && legacyBullets.length > 0}
               <ol class="bul-list">
                 {#each legacyBullets as b, i (b.title + i)}
                   {@const tone = chipTone(b.chip)}
@@ -1326,7 +1407,7 @@
               </ol>
             {/if}
           </div>
-          {#if headlineTxt}
+          {#if SHOW_REFLECTIONS && headlineTxt}
             <footer class="col-foot mono dim">{headlineTxt}</footer>
           {/if}
         </section>
@@ -1910,6 +1991,16 @@
   .dot-ok    { background: var(--ok); }
   .dot-warn  { background: var(--warn); }
   .dot-alert { background: var(--alert); }
+  .dot-idle { background: #666; }
+
+  /* compile progress panel (background-compile detail, 2026-05-29) */
+  .compile-panel { margin: 0.5rem 0 1rem; padding: 0.75rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-card); }
+  .compile-panel-hd { display: flex; align-items: center; gap: 0.75rem; justify-content: space-between; margin-bottom: 0.5rem; }
+  .compile-svc-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.35rem; }
+  .compile-svc { display: flex; align-items: center; gap: 0.5rem; }
+  .compile-svc-name { flex: 0 0 auto; }
+  .compile-svc-err { color: var(--alert); flex: 1 1 auto; }
+  .compile-panel-err { color: var(--alert); margin-top: 0.5rem; font-size: 11px; }
 
   /* buttons */
   .btn-ghost { display: inline-flex; align-items: center; justify-content: center; height: 28px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--fg-soft); font-family: var(--font-mono); font-size: 11px; cursor: pointer; gap: 4px; }

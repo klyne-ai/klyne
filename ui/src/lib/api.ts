@@ -445,34 +445,70 @@ export async function runReflect(
 }
 
 /**
- * POST /productivity/compile — spawn `/klyne:productivity-sync` (LLM #2)
- * for one (project, day). Reads typed worklog_reflections rows and
- * writes an LLM-compiled WhatWasDoneCard with cohesive Tier 1 prose +
- * llm_compiled=true.
- *
- * `model` selects which Claude model the backend pins on --model.
- * Allowlisted server-side; only 'sonnet' and 'opus' accepted today.
- * Default is 'sonnet' (cheaper; ~1/7 the cost of Opus per A/B).
+ * Detached background compile (replaces the old blocking
+ * POST /productivity/compile). `startCompile` launches one background job
+ * for a day (idempotent per day); `getCompileStatus` polls its progress.
+ * The job survives a page reload — the daemon owns the goroutine.
  */
 export type CompileModel = 'sonnet' | 'opus';
 
-export async function compileProductivity(
-  projectPath: string,
+export interface CompileServiceState {
+  service: string;
+  project_path: string;
+  status: 'queued' | 'running' | 'done' | 'failed';
+  started_at: number;
+  finished_at: number;
+  error?: string;
+}
+
+export interface CompileJob {
+  id: string;
+  day: string;
+  model: CompileModel;
+  status: 'running' | 'done' | 'partial' | 'failed';
+  started_at: number;
+  finished_at: number;
+  services: CompileServiceState[];
+}
+
+/** Server returns either a live job or {status:'none'} when none ran. */
+export type CompileStatus = CompileJob | { status: 'none' };
+
+export function isCompileJob(s: CompileStatus): s is CompileJob {
+  return (s as CompileJob).id !== undefined;
+}
+
+export async function startCompile(
   day: string,
   model: CompileModel = 'sonnet',
   signal?: AbortSignal,
-): Promise<{ project_path: string; day: string; status: string; output: string; duration_ms: number; error?: string }> {
-  const res = await fetch(`${API_BASE}/api/productivity/compile`, {
+): Promise<CompileStatus> {
+  const res = await fetch(`${API_BASE}/api/productivity/compile/start`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ project_path: projectPath, day, model }),
+    body: JSON.stringify({ day, model }),
     signal,
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
-    throw new ApiError(res.status, text, `compileProductivity failed (${res.status})`);
+    throw new ApiError(res.status, text, `startCompile failed (${res.status})`);
   }
-  return await res.json();
+  return (await res.json()) as CompileStatus;
+}
+
+export async function getCompileStatus(
+  day: string,
+  signal?: AbortSignal,
+): Promise<CompileStatus> {
+  const res = await fetch(
+    `${API_BASE}/api/productivity/compile/status?day=${encodeURIComponent(day)}`,
+    { signal },
+  );
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new ApiError(res.status, text, `getCompileStatus failed (${res.status})`);
+  }
+  return (await res.json()) as CompileStatus;
 }
 
 // ---------------------------------------------------------------------------
