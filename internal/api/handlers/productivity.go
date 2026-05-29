@@ -526,13 +526,17 @@ func (h *ProductivityHandler) hydrateSnapshotReflections(
 }
 
 // hydrateWhatWasDone attaches the typed §1.2 What-was-done cards onto
-// each Service in rep. An LLM-compiled snapshot card (llm_compiled=true)
-// is preferred when present; otherwise the card is built purely from the
-// deterministic L1 stop_summaries floor via BuildFloorFromStopSummaries +
-// MergeFloorIntoCard (D1, 2026-05-29: the reflection read was dropped —
-// the headline productivity experience is reflection-independent). Always
-// emits — services with no L1 floor land with WhatWasDone == nil so the UI
-// can fall back to the legacy bullets path without ambiguity.
+// each Service in rep. A FRESH LLM-compiled snapshot card
+// (llm_compiled=true, no newer stop_summary since it was compiled) is
+// preferred as-is; a STALE compiled card (new summaries arrived after the
+// compile) is refreshed by merging the current L1 floor and has its badge
+// dropped so the day is re-offered for compile. Absent a compiled card the
+// card is built purely from the deterministic L1 stop_summaries floor via
+// BuildFloorFromStopSummaries + MergeFloorIntoCard (D1, 2026-05-29: the
+// reflection read was dropped — the headline productivity experience is
+// reflection-independent). Always emits — services with no L1 floor land
+// with WhatWasDone == nil so the UI can fall back to the legacy bullets
+// path without ambiguity.
 //
 // Errors are logged-but-not-fatal: the typed panel is a UX enrichment;
 // the rest of the dashboard MUST render even if the per-project floor
@@ -542,13 +546,16 @@ func hydrateWhatWasDone(
 ) {
 	for i := range rep.Services {
 		svc := &rep.Services[i]
+		svc.WhatWasDone = nil
 
-		// LLM-compiled override: if the day's productivity_snapshots row
+		// LLM-compiled snapshot: if the day's productivity_snapshots row
 		// contains a card for this service with llm_compiled=true (written
-		// by PersistLLMCompiledCard during /klyne:productivity-sync), prefer
-		// it. Today's path bypasses tryReadSnapshotDay so without this we'd
-		// always re-derive via ComposeWWD and the Sonnet-written tldr +
-		// llm_compiled badge would never surface on today's view.
+		// by PersistLLMCompiledCard during /klyne:productivity-sync), capture
+		// it along with the time it was compiled (snapshot.UpdatedAt). Today's
+		// path bypasses tryReadSnapshotDay so without this the Sonnet-written
+		// tldr + llm_compiled badge would never surface on today's view.
+		var compiled *productivity.WhatWasDoneCard
+		var compiledAt int64
 		if snap, ok, err := store.GetDailyProductivitySnapshot(ctx, db, svc.ProjectPath, dayStr); err == nil && ok && strings.TrimSpace(snap.PayloadJSON) != "" {
 			var saved productivity.Report
 			if err := json.Unmarshal([]byte(snap.PayloadJSON), &saved); err == nil {
@@ -565,36 +572,58 @@ func hydrateWhatWasDone(
 					}
 					if sk == key || sk == base {
 						cardCopy := *ssvc.WhatWasDone
-						svc.WhatWasDone = &cardCopy
+						compiled = &cardCopy
+						compiledAt = snap.UpdatedAt
 						break
 					}
-				}
-				if svc.WhatWasDone != nil && svc.WhatWasDone.LLMCompiled {
-					continue
 				}
 			}
 		}
 
-		// Reflection-independent (D1, 2026-05-29): the pre-compile card is
-		// built purely from the deterministic L1 stop_summaries floor. The
-		// former ListReflectionsForProjectDay + ComposeWWD branch was
-		// removed — MergeFloorIntoCard(key, nil, floor) already returns a
-		// complete card from the floor alone, and the headline productivity
-		// experience no longer reads the (dark-launched-off) reflection layer.
-		svc.WhatWasDone = nil
+		// Freshness gate: a compiled card is preferred AS-IS (badge kept,
+		// not pending) only while no new stop_summary has landed since it
+		// was compiled. On a transient ts-read error we treat it as fresh so
+		// a flaky read can't trigger a spurious recompile loop.
+		if compiled != nil {
+			latest, lerr := productivity.LatestFloorTurnTs(ctx, db.Read(), svc.ProjectPath, dayStr)
+			if lerr != nil || latest <= compiledAt {
+				svc.WhatWasDone = compiled
+				continue
+			}
+		}
+
+		// Build (or refresh) the card from the deterministic L1 floor.
+		// compiled == nil: reflection-independent floor-only card (D1).
+		// compiled != nil: the card is STALE (newer summaries arrived) — we
+		// merge the current floor to surface any new tickets and drop the
+		// llm_compiled badge so the day is re-offered for compile.
 		floor, ferr := productivity.BuildFloorFromStopSummaries(ctx, db.Read(), svc.ProjectPath, dayStr)
 		if ferr != nil {
 			log.Printf("productivity: l1 floor for %s/%s: %v", svc.ProjectPath, dayStr, ferr)
+			// Keep the stale card visible (marked pending) rather than dropping it.
+			if compiled != nil {
+				compiled.LLMCompiled = false
+				svc.WhatWasDone = compiled
+			}
 			continue
 		}
-		if len(floor) > 0 {
-			serviceKey := serviceKeyForLookup(*svc)
-			if serviceKey == "" {
-				serviceKey = basePath(svc.ProjectPath)
+		serviceKey := serviceKeyForLookup(*svc)
+		if serviceKey == "" {
+			serviceKey = basePath(svc.ProjectPath)
+		}
+		if merged := productivity.MergeFloorIntoCard(serviceKey, compiled, floor); merged != nil {
+			// Stale day: force the badge off so pending_compile re-counts it
+			// even when the floor added no NEW ticket (e.g. more work on a
+			// ticket already in the card) — MergeFloorIntoCard only clears the
+			// flag when it appends a new ticket. For a never-compiled day
+			// (compiled == nil) the floor-only card is already non-llm.
+			if compiled != nil {
+				merged.LLMCompiled = false
 			}
-			if merged := productivity.MergeFloorIntoCard(serviceKey, nil, floor); merged != nil {
-				svc.WhatWasDone = merged
-			}
+			svc.WhatWasDone = merged
+		} else if compiled != nil {
+			compiled.LLMCompiled = false
+			svc.WhatWasDone = compiled
 		}
 	}
 }

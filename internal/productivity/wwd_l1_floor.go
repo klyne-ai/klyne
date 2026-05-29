@@ -86,6 +86,66 @@ var (
 // per-day bucketing. The SQL query mirrors ListReflectionsForProjectDay's
 // localtime conversion so the floor's day boundary lines up with the
 // reflection layer's day boundary.
+// floorTurnAdmitted reports whether a stop_summaries turn contributes to
+// the L1 floor. A turn is admitted only when its summary is non-empty, is
+// not a purely tool-only turn (/klyne:reflect, /productivity-sync,
+// /klyne:bootstrap, etc. — self-referencing noise), and — for
+// recap_visible=0 rows — carries a substantial signal. Centralised so the
+// floor and the freshness check (LatestFloorTurnTs) admit the exact same
+// turns.
+func floorTurnAdmitted(summary string, visible int) bool {
+	summary = strings.TrimSpace(summary)
+	if summary == "" {
+		return false
+	}
+	if isToolOnlySummary(summary) {
+		return false
+	}
+	if visible == 0 && !floorIsSubstantial(summary) {
+		return false
+	}
+	return true
+}
+
+// LatestFloorTurnTs returns the newest ts among stop_summaries turns that
+// the L1 floor would ADMIT for a (project_path, local-day) bucket, or 0
+// when none. It applies floorTurnAdmitted, so a day's freshness reflects
+// exactly the turns the floor surfaces — a tool-only run (e.g. the headless
+// /klyne:productivity-sync compile itself) does NOT make a compiled day
+// look stale. Used to decide whether a day's llm_compiled card is out of
+// date relative to new user work.
+func LatestFloorTurnTs(ctx context.Context, db dbReader, projectPath, dayStr string) (int64, error) {
+	const q = `
+SELECT ts, COALESCE(ai_drafted_summary,''), recap_visible
+  FROM stop_summaries
+ WHERE project_path = ?
+   AND date(ts / 1000, 'unixepoch', 'localtime') = ?`
+	rows, err := db.QueryContext(ctx, q, projectPath, dayStr)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close() //nolint:errcheck
+	var latest int64
+	for rows.Next() {
+		var ts int64
+		var summary string
+		var visible int
+		if err := rows.Scan(&ts, &summary, &visible); err != nil {
+			return 0, err
+		}
+		if !floorTurnAdmitted(summary, visible) {
+			continue
+		}
+		if ts > latest {
+			latest = ts
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	return latest, nil
+}
+
 func BuildFloorFromStopSummaries(
 	ctx context.Context, db dbReader, projectPath, dayStr string,
 ) ([]L1FloorDetail, error) {
@@ -116,23 +176,7 @@ SELECT session_id, ts, COALESCE(ai_drafted_summary,''), COALESCE(last_bash,''),
 			return nil, err
 		}
 		t.summary = strings.TrimSpace(t.summary)
-		if t.summary == "" {
-			continue
-		}
-		// Suppress purely tool-only turns (/klyne:reflect, /productivity-sync,
-		// /klyne:bootstrap, etc.) whose only signal is the tool invocation
-		// itself. These are correctly marked recap_visible=0 upstream and
-		// their summaries describe the tool run, not user work — they
-		// would otherwise dominate the dashboard with self-referencing
-		// noise once the floor included recap_visible=0 rows with
-		// substantial summaries.
-		if isToolOnlySummary(t.summary) {
-			continue
-		}
-		// recap_visible=0 is admitted only when the summary carries a
-		// substantial signal — the floor must defeat over-aggressive
-		// suppression but cannot become a noise sink.
-		if t.visible == 0 && !floorIsSubstantial(t.summary) {
+		if !floorTurnAdmitted(t.summary, t.visible) {
 			continue
 		}
 		turns = append(turns, t)

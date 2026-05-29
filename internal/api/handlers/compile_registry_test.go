@@ -147,3 +147,40 @@ func TestDiscoverPending_EmptyWhenNoFloor(t *testing.T) {
 		t.Errorf("pending = %+v, want empty (no floor on that day)", pending)
 	}
 }
+
+func TestDiscoverPending_SkipsFreshCompiledDay(t *testing.T) {
+	t.Parallel()
+	db := newReflectTestStore(t)
+	const proj = "/proj/fresh"
+	ts := int64(1_716_700_000_000)
+	day := dayForTs(ts)
+	seedStopSummary(t, db, proj, "s1", ts, "CLI-1452 shipped")
+	seedCompiledSnapshot(t, db, proj, "fresh", day, ts+1000, "CLI-1452 shipped") // compiled after the summary
+
+	pending, err := discoverPendingCompileServices(context.Background(), db, day)
+	if err != nil {
+		t.Fatalf("discover: %v", err)
+	}
+	if len(pending) != 0 {
+		t.Errorf("pending = %+v, want empty (fresh compiled day must not be re-offered)", pending)
+	}
+}
+
+func TestDiscoverPending_ReoffersStaleCompiledDay(t *testing.T) {
+	t.Parallel()
+	db := newReflectTestStore(t)
+	const proj = "/proj/stale"
+	ts := int64(1_716_700_000_000)
+	day := dayForTs(ts)
+	seedStopSummary(t, db, proj, "s1", ts, "CLI-1452 shipped")
+	seedCompiledSnapshot(t, db, proj, "stale", day, ts+1000, "CLI-1452 shipped")
+	seedStopSummary(t, db, proj, "s2", ts+5000, "CLI-1452 follow-up") // newer than compile → stale
+
+	pending, err := discoverPendingCompileServices(context.Background(), db, day)
+	if err != nil {
+		t.Fatalf("discover: %v", err)
+	}
+	if len(pending) != 1 || pending[0].ProjectPath != proj {
+		t.Fatalf("pending = %+v, want one entry for %s (stale day re-offered)", pending, proj)
+	}
+}

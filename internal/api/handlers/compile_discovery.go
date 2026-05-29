@@ -12,10 +12,12 @@ import (
 
 // discoverPendingCompileServices returns the floor-based pending set for a
 // day: one entry per worklog-rollup project that (a) has a non-empty L1
-// stop_summaries floor for the day AND (b) has no llm_compiled snapshot
-// card yet. This is the SAME rule the dashboard's pending_compile count
-// uses after D1 (what_was_done is floor-derived and non-llm_compiled),
-// so server and dashboard agree on what needs compiling (spec D3).
+// stop_summaries floor for the day AND (b) does NOT have a FRESH
+// llm_compiled snapshot card. A compiled card is stale (and thus
+// re-offered) when newer stop_summaries landed after it was compiled —
+// see hasFreshLLMCompiledCard. This is the SAME freshness rule
+// hydrateWhatWasDone applies for the dashboard's pending_compile count, so
+// server and dashboard agree on what needs compiling (spec D3).
 func discoverPendingCompileServices(ctx context.Context, db *store.DB, dayStr string) ([]CompileServiceState, error) {
 	rollup, err := store.ListWorklogRollup(ctx, db)
 	if err != nil {
@@ -27,7 +29,7 @@ func discoverPendingCompileServices(ctx context.Context, db *store.DB, dayStr st
 		if p.ProjectPath == "" || seen[p.ProjectPath] {
 			continue
 		}
-		if hasLLMCompiledCard(ctx, db, p.ProjectPath, dayStr) {
+		if hasFreshLLMCompiledCard(ctx, db, p.ProjectPath, dayStr) {
 			continue
 		}
 		floor, ferr := productivity.BuildFloorFromStopSummaries(ctx, db.Read(), p.ProjectPath, dayStr)
@@ -52,22 +54,42 @@ func discoverPendingCompileServices(ctx context.Context, db *store.DB, dayStr st
 	return pending, nil
 }
 
-// hasLLMCompiledCard reports whether the (project, day) snapshot already
-// carries any service card with llm_compiled=true — the "done" signal a
-// prior compile leaves behind. Mirrors hydrateWhatWasDone's snapshot read.
-func hasLLMCompiledCard(ctx context.Context, db *store.DB, projectPath, dayStr string) bool {
+// llmCompiledCardAt reports whether the (project, day) snapshot carries
+// any service card with llm_compiled=true — the "done" signal a prior
+// compile leaves behind — and the time it was compiled
+// (snapshot.UpdatedAt). compiledAt is 0 when no compiled card exists.
+// Mirrors hydrateWhatWasDone's snapshot read.
+func llmCompiledCardAt(ctx context.Context, db *store.DB, projectPath, dayStr string) (compiled bool, compiledAt int64) {
 	snap, ok, err := store.GetDailyProductivitySnapshot(ctx, db, projectPath, dayStr)
 	if err != nil || !ok || strings.TrimSpace(snap.PayloadJSON) == "" {
-		return false
+		return false, 0
 	}
 	var saved productivity.Report
 	if err := json.Unmarshal([]byte(snap.PayloadJSON), &saved); err != nil {
-		return false
+		return false, 0
 	}
 	for i := range saved.Services {
 		if saved.Services[i].WhatWasDone != nil && saved.Services[i].WhatWasDone.LLMCompiled {
-			return true
+			return true, snap.UpdatedAt
 		}
 	}
-	return false
+	return false, 0
+}
+
+// hasFreshLLMCompiledCard reports whether the (project, day) has a
+// compiled card that is still current — i.e. no stop_summary has landed
+// since it was compiled. A stale card (newer summaries exist) returns
+// false so discovery re-includes the day and the dashboard re-offers
+// Compile. On a transient read error it treats the card as fresh, so a
+// flaky read never triggers a spurious recompile loop.
+func hasFreshLLMCompiledCard(ctx context.Context, db *store.DB, projectPath, dayStr string) bool {
+	compiled, compiledAt := llmCompiledCardAt(ctx, db, projectPath, dayStr)
+	if !compiled {
+		return false
+	}
+	latest, err := productivity.LatestFloorTurnTs(ctx, db.Read(), projectPath, dayStr)
+	if err != nil {
+		return true
+	}
+	return latest <= compiledAt
 }
