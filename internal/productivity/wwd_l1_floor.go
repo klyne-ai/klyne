@@ -88,14 +88,25 @@ var (
 // reflection layer's day boundary.
 // floorTurnAdmitted reports whether a stop_summaries turn contributes to
 // the L1 floor. A turn is admitted only when its summary is non-empty, is
-// not a purely tool-only turn (/klyne:reflect, /productivity-sync,
-// /klyne:bootstrap, etc. — self-referencing noise), and — for
-// recap_visible=0 rows — carries a substantial signal. Centralised so the
-// floor and the freshness check (LatestFloorTurnTs) admit the exact same
-// turns.
-func floorTurnAdmitted(summary string, visible int) bool {
+// not a klyne tool-run turn (a session whose prompt invoked a /klyne:…
+// slash command — productivity-sync, reflect, bootstrap, etc.), is not a
+// purely tool-only summary, and — for recap_visible=0 rows — carries a
+// substantial signal. Centralised so the floor and the freshness check
+// (LatestFloorTurnTs) admit the exact same turns.
+//
+// The lastUser check is the load-bearing exclusion for freshness: the
+// headless /klyne:productivity-sync compile run ends its own session,
+// writing a stop_summary whose AI-drafted prose ("Wrote 3 cards … CLI-…")
+// would otherwise be admitted with ts > the card's compile time and make
+// the just-compiled day look perpetually stale (recompile loop). Keying
+// off the invoking prompt is structural and robust where prose-matching
+// (isToolOnlySummary) is not.
+func floorTurnAdmitted(summary, lastUser string, visible int) bool {
 	summary = strings.TrimSpace(summary)
 	if summary == "" {
+		return false
+	}
+	if isKlyneToolPrompt(lastUser) {
 		return false
 	}
 	if isToolOnlySummary(summary) {
@@ -107,6 +118,16 @@ func floorTurnAdmitted(summary string, visible int) bool {
 	return true
 }
 
+// isKlyneToolPrompt reports whether a turn's user prompt invoked a klyne
+// slash command (e.g. "/klyne:productivity-sync project_path=… day=…",
+// "/klyne:reflect", "/klyne:bootstrap"). Such turns are klyne's own
+// machinery, never user work, so they must not contribute to — or refresh
+// the staleness of — the L1 floor.
+func isKlyneToolPrompt(lastUser string) bool {
+	s := strings.ToLower(strings.TrimSpace(lastUser))
+	return strings.HasPrefix(s, "/klyne:") || strings.HasPrefix(s, "/productivity-sync")
+}
+
 // LatestFloorTurnTs returns the newest ts among stop_summaries turns that
 // the L1 floor would ADMIT for a (project_path, local-day) bucket, or 0
 // when none. It applies floorTurnAdmitted, so a day's freshness reflects
@@ -116,7 +137,7 @@ func floorTurnAdmitted(summary string, visible int) bool {
 // date relative to new user work.
 func LatestFloorTurnTs(ctx context.Context, db dbReader, projectPath, dayStr string) (int64, error) {
 	const q = `
-SELECT ts, COALESCE(ai_drafted_summary,''), recap_visible
+SELECT ts, COALESCE(ai_drafted_summary,''), COALESCE(last_user,''), recap_visible
   FROM stop_summaries
  WHERE project_path = ?
    AND date(ts / 1000, 'unixepoch', 'localtime') = ?`
@@ -128,12 +149,12 @@ SELECT ts, COALESCE(ai_drafted_summary,''), recap_visible
 	var latest int64
 	for rows.Next() {
 		var ts int64
-		var summary string
+		var summary, lastUser string
 		var visible int
-		if err := rows.Scan(&ts, &summary, &visible); err != nil {
+		if err := rows.Scan(&ts, &summary, &lastUser, &visible); err != nil {
 			return 0, err
 		}
-		if !floorTurnAdmitted(summary, visible) {
+		if !floorTurnAdmitted(summary, lastUser, visible) {
 			continue
 		}
 		if ts > latest {
@@ -151,7 +172,7 @@ func BuildFloorFromStopSummaries(
 ) ([]L1FloorDetail, error) {
 	const q = `
 SELECT session_id, ts, COALESCE(ai_drafted_summary,''), COALESCE(last_bash,''),
-       recap_visible
+       COALESCE(last_user,''), recap_visible
   FROM stop_summaries
  WHERE project_path = ?
    AND date(ts / 1000, 'unixepoch', 'localtime') = ?
@@ -167,16 +188,17 @@ SELECT session_id, ts, COALESCE(ai_drafted_summary,''), COALESCE(last_bash,''),
 		ts        int64
 		summary   string
 		bash      string
+		lastUser  string
 		visible   int
 	}
 	var turns []pendingTurn
 	for rows.Next() {
 		var t pendingTurn
-		if err := rows.Scan(&t.sessionID, &t.ts, &t.summary, &t.bash, &t.visible); err != nil {
+		if err := rows.Scan(&t.sessionID, &t.ts, &t.summary, &t.bash, &t.lastUser, &t.visible); err != nil {
 			return nil, err
 		}
 		t.summary = strings.TrimSpace(t.summary)
-		if !floorTurnAdmitted(t.summary, t.visible) {
+		if !floorTurnAdmitted(t.summary, t.lastUser, t.visible) {
 			continue
 		}
 		turns = append(turns, t)
@@ -585,6 +607,42 @@ func floorTruncateText(s string, maxLen int) string {
 		cut = cut[:idx]
 	}
 	return strings.TrimRight(cut, " ,.;:-") + "…"
+}
+
+// CardTicketIDs returns the set of L1 ticket IDs a WhatWasDone card already
+// covers — from narrative card TicketIDs plus any CLI-NNNN reference in the
+// narrative titles/bodies/summary or the Tier2 detail text/evidence. Used
+// to decide whether a compiled card still covers the current L1 floor; an
+// uncovered floor ticket means the day still has compile work outstanding
+// (e.g. a second service under the same project_path, or a ticket the LLM
+// under-cited). Returns an empty (non-nil) set for a nil card.
+func CardTicketIDs(card *WhatWasDoneCard) map[string]bool {
+	out := map[string]bool{}
+	if card == nil {
+		return out
+	}
+	add := func(s string) {
+		for _, tk := range floorTicketRe.FindAllString(s, -1) {
+			out[tk] = true
+		}
+	}
+	if card.Narrative != nil {
+		add(card.Narrative.Summary)
+		for _, c := range card.Narrative.Cards {
+			if c.TicketID != "" {
+				out[c.TicketID] = true
+			}
+			add(c.Title)
+			add(c.Body)
+		}
+	}
+	for _, d := range card.Tier2.Details {
+		add(d.Text)
+		for _, ev := range d.Evidence {
+			add(ev)
+		}
+	}
+	return out
 }
 
 // uniqStrings returns xs with duplicates removed, preserving first-seen

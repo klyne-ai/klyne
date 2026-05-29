@@ -570,7 +570,14 @@ func hydrateWhatWasDone(
 					if sk == "" {
 						sk = basePath(ssvc.ProjectPath)
 					}
-					if sk == key || sk == base {
+					// Match on the snapshot key directly OR its basename, so a
+					// card persisted under an org-qualified repo (e.g.
+					// "klyne-ai/klyne") still matches a live service resolved to
+					// the bare repo name ("klyne"). Without the basename compare
+					// the card would be missed, the service would render as a
+					// floor-only (pending) card, and discovery would disagree —
+					// a permanently-stuck ✨ Compile button.
+					if sk == key || sk == base || basePath(sk) == key || basePath(sk) == base {
 						cardCopy := *ssvc.WhatWasDone
 						compiled = &cardCopy
 						compiledAt = snap.UpdatedAt

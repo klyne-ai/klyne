@@ -10,14 +10,11 @@ import (
 	"github.com/klyne-ai/klyne/internal/store"
 )
 
-// discoverPendingCompileServices returns the floor-based pending set for a
-// day: one entry per worklog-rollup project that (a) has a non-empty L1
-// stop_summaries floor for the day AND (b) does NOT have a FRESH
-// llm_compiled snapshot card. A compiled card is stale (and thus
-// re-offered) when newer stop_summaries landed after it was compiled —
-// see hasFreshLLMCompiledCard. This is the SAME freshness rule
-// hydrateWhatWasDone applies for the dashboard's pending_compile count, so
-// server and dashboard agree on what needs compiling (spec D3).
+// discoverPendingCompileServices returns the pending set for a day: one
+// entry per worklog-rollup project for which projectNeedsCompile is true.
+// The pending rule matches what the dashboard's per-service pending_compile
+// count reflects (spec D3), so the ✨ Compile pill and the start route
+// agree on what needs compiling.
 func discoverPendingCompileServices(ctx context.Context, db *store.DB, dayStr string) ([]CompileServiceState, error) {
 	rollup, err := store.ListWorklogRollup(ctx, db)
 	if err != nil {
@@ -29,15 +26,12 @@ func discoverPendingCompileServices(ctx context.Context, db *store.DB, dayStr st
 		if p.ProjectPath == "" || seen[p.ProjectPath] {
 			continue
 		}
-		if hasFreshLLMCompiledCard(ctx, db, p.ProjectPath, dayStr) {
+		need, nerr := projectNeedsCompile(ctx, db, p.ProjectPath, dayStr)
+		if nerr != nil {
+			log.Printf("compile: pending check for %s/%s: %v", p.ProjectPath, dayStr, nerr)
 			continue
 		}
-		floor, ferr := productivity.BuildFloorFromStopSummaries(ctx, db.Read(), p.ProjectPath, dayStr)
-		if ferr != nil {
-			log.Printf("compile: floor discovery for %s/%s: %v", p.ProjectPath, dayStr, ferr)
-			continue
-		}
-		if len(floor) == 0 {
+		if !need {
 			continue
 		}
 		seen[p.ProjectPath] = true
@@ -54,42 +48,69 @@ func discoverPendingCompileServices(ctx context.Context, db *store.DB, dayStr st
 	return pending, nil
 }
 
-// llmCompiledCardAt reports whether the (project, day) snapshot carries
-// any service card with llm_compiled=true — the "done" signal a prior
-// compile leaves behind — and the time it was compiled
-// (snapshot.UpdatedAt). compiledAt is 0 when no compiled card exists.
-// Mirrors hydrateWhatWasDone's snapshot read.
-func llmCompiledCardAt(ctx context.Context, db *store.DB, projectPath, dayStr string) (compiled bool, compiledAt int64) {
+// projectNeedsCompile reports whether (project, day) has outstanding
+// compile work, using the SAME freshness + coverage rule the dashboard's
+// per-service pending_compile count reflects (spec D3). Pending when the L1
+// floor is non-empty AND any of:
+//   - no llm_compiled card exists yet;
+//   - a newer floor-admitted summary landed since the card was compiled
+//     (stale by time — new work, even on an already-cited ticket);
+//   - the floor contains a ticket the compiled cards don't yet cover —
+//     e.g. a SECOND service under the same project_path that was never
+//     compiled, or a ticket the LLM under-cited. This coverage check is
+//     what keeps discovery from skipping a whole project_path just because
+//     ONE of its services already has a fresh card (the dead-Compile-button
+//     bug).
+//
+// A transient floor/freshness read error degrades to "fresh" (not pending)
+// so a flaky read never triggers a spurious recompile.
+func projectNeedsCompile(ctx context.Context, db *store.DB, projectPath, dayStr string) (bool, error) {
+	floor, err := productivity.BuildFloorFromStopSummaries(ctx, db.Read(), projectPath, dayStr)
+	if err != nil {
+		return false, err
+	}
+	if len(floor) == 0 {
+		return false, nil
+	}
+	compiled, compiledAt, covered := compiledFloorCoverage(ctx, db, projectPath, dayStr)
+	if !compiled {
+		return true, nil
+	}
+	if latest, lerr := productivity.LatestFloorTurnTs(ctx, db.Read(), projectPath, dayStr); lerr == nil && latest > compiledAt {
+		return true, nil
+	}
+	for _, f := range floor {
+		if f.TicketID != "" && !covered[f.TicketID] {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// compiledFloorCoverage reads the (project, day) snapshot and returns
+// whether any llm_compiled card exists, the time it was compiled
+// (snapshot.UpdatedAt), and the set of ticket IDs those compiled cards
+// already cover. Mirrors hydrateWhatWasDone's snapshot read.
+func compiledFloorCoverage(ctx context.Context, db *store.DB, projectPath, dayStr string) (compiled bool, compiledAt int64, covered map[string]bool) {
+	covered = map[string]bool{}
 	snap, ok, err := store.GetDailyProductivitySnapshot(ctx, db, projectPath, dayStr)
 	if err != nil || !ok || strings.TrimSpace(snap.PayloadJSON) == "" {
-		return false, 0
+		return false, 0, covered
 	}
 	var saved productivity.Report
 	if err := json.Unmarshal([]byte(snap.PayloadJSON), &saved); err != nil {
-		return false, 0
+		return false, 0, covered
 	}
 	for i := range saved.Services {
-		if saved.Services[i].WhatWasDone != nil && saved.Services[i].WhatWasDone.LLMCompiled {
-			return true, snap.UpdatedAt
+		c := saved.Services[i].WhatWasDone
+		if c == nil || !c.LLMCompiled {
+			continue
+		}
+		compiled = true
+		compiledAt = snap.UpdatedAt
+		for tk := range productivity.CardTicketIDs(c) {
+			covered[tk] = true
 		}
 	}
-	return false, 0
-}
-
-// hasFreshLLMCompiledCard reports whether the (project, day) has a
-// compiled card that is still current — i.e. no stop_summary has landed
-// since it was compiled. A stale card (newer summaries exist) returns
-// false so discovery re-includes the day and the dashboard re-offers
-// Compile. On a transient read error it treats the card as fresh, so a
-// flaky read never triggers a spurious recompile loop.
-func hasFreshLLMCompiledCard(ctx context.Context, db *store.DB, projectPath, dayStr string) bool {
-	compiled, compiledAt := llmCompiledCardAt(ctx, db, projectPath, dayStr)
-	if !compiled {
-		return false
-	}
-	latest, err := productivity.LatestFloorTurnTs(ctx, db.Read(), projectPath, dayStr)
-	if err != nil {
-		return true
-	}
-	return latest <= compiledAt
+	return compiled, compiledAt, covered
 }

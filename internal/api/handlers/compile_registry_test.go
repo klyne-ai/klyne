@@ -166,6 +166,27 @@ func TestDiscoverPending_SkipsFreshCompiledDay(t *testing.T) {
 	}
 }
 
+func TestDiscoverPending_MultiServicePartialCompile(t *testing.T) {
+	t.Parallel()
+	db := newReflectTestStore(t)
+	const proj = "/proj/multi"
+	ts := int64(1_716_700_000_000)
+	day := dayForTs(ts)
+	// Floor spans two tickets (two services' worth of work under one path).
+	seedStopSummary(t, db, proj, "s1", ts, "CLI-1001 service A work")
+	seedStopSummary(t, db, proj, "s2", ts+100, "CLI-2002 service B work")
+	// A fresh compiled card covers only CLI-1001; CLI-2002 is uncompiled.
+	seedCompiledSnapshot(t, db, proj, "multi", day, ts+1000, "CLI-1001 service A work")
+
+	pending, err := discoverPendingCompileServices(context.Background(), db, day)
+	if err != nil {
+		t.Fatalf("discover: %v", err)
+	}
+	if len(pending) != 1 || pending[0].ProjectPath != proj {
+		t.Fatalf("pending = %+v, want one entry for %s (CLI-2002 uncovered → re-offer; the old any-card skip was the dead-button bug)", pending, proj)
+	}
+}
+
 func TestDiscoverPending_ReoffersStaleCompiledDay(t *testing.T) {
 	t.Parallel()
 	db := newReflectTestStore(t)

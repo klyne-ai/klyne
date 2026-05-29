@@ -111,6 +111,15 @@
           compileJob = s;
           if (s.status !== 'running') {
             stopCompilePoll();
+            // Surface a persistent error when the job didn't fully succeed
+            // (partial/failed). compileJob stays set so the ⚠ pill + detail
+            // panel remain available; without this a failed service silently
+            // drops the spinner and re-shows the ✨ Compile CTA with no cause.
+            const failed = s.services.filter(x => x.status === 'failed');
+            if (failed.length > 0) {
+              const detail = failed[0].error ? `: ${failed[0].error}` : '';
+              compileError = `${failed.length} of ${s.services.length} service${s.services.length === 1 ? '' : 's'} failed to compile${detail}`;
+            }
             await load({ refresh: true }); // compiled cards now exist
           }
         } else {
@@ -455,8 +464,9 @@
     // freshly-recomputed range — same defence against post-midnight
     // staleness as the URL guard above.
     const c = loadCached();
+    let initialLoad: Promise<void> = Promise.resolve();
     if (c && c.since === since && c.until === until) { rep = c.rep; loadedAt = c.loadedAt; loading = false; }
-    else void load();
+    else initialLoad = load();
     void loadAvailableDays();
     // Hydrate the compile-model picker from localStorage. Anything other
     // than the two known keys is dropped and we fall back to Sonnet.
@@ -464,13 +474,17 @@
       const saved = localStorage.getItem(COMPILE_MODEL_KEY);
       if (saved === 'sonnet' || saved === 'opus') compileModel = saved;
     } catch { /* private mode: stay on default */ }
-    // Reload survival: if a compile is already running for the current
-    // day, reattach the pill + resume polling.
+    // Reload survival: if a compile is already running for the day being
+    // viewed, reattach the pill + resume polling. Await the initial report
+    // load first so rep.day is populated — otherwise on a cache miss we'd
+    // fall back to today and fail to reattach a job running for a past day.
     (async () => {
       try {
-        const day = rep?.day ?? localDateKey(Date.now());
+        await initialLoad;
+        // A user-initiated runCompile during the await wins — don't clobber it.
+        if (compileJob) return;
+        const day = compileDay; // rep.day once loaded, else today (local)
         const s = await getCompileStatus(day);
-        // A user-initiated runCompile during this await wins — don't clobber it.
         if (compileJob) return;
         if (isCompileJob(s) && s.status === 'running') {
           compileJob = s;
@@ -1148,6 +1162,14 @@
             onclick={() => (compilePanelOpen = !compilePanelOpen)}
             title="Compiling in the background — click for per-service detail">
             ⟳ Compiling… {compileDone}/{compileTotal}
+          </button>
+        {:else if compileJob && (compileJob.status === 'partial' || compileJob.status === 'failed')}
+          {@const failedCount = compileJob.services.filter(s => s.status === 'failed').length}
+          <button
+            class="pill pill-alert pill-sm"
+            onclick={() => (compilePanelOpen = !compilePanelOpen)}
+            title="Compile finished with errors — click for per-service detail">
+            ⚠ Compile failed<span class="pill-action-badge mono">{failedCount}</span>
           </button>
         {:else if pendingCompileCount > 0 && isSingleDay}
           <button

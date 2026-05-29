@@ -53,6 +53,14 @@ func dayForTs(ts int64) string {
 // base summary), so the ticket-bearing prose is written there.
 func seedStopSummary(t *testing.T, db *store.DB, projectPath, sessionID string, ts int64, summary string) {
 	t.Helper()
+	seedStopSummaryAs(t, db, projectPath, sessionID, ts, summary, "do the thing")
+}
+
+// seedStopSummaryAs is seedStopSummary with an explicit last_user prompt, so
+// tests can simulate a klyne tool-run turn (e.g. last_user
+// "/klyne:productivity-sync …") that the floor must exclude.
+func seedStopSummaryAs(t *testing.T, db *store.DB, projectPath, sessionID string, ts int64, summary, lastUser string) {
+	t.Helper()
 	if err := store.UpsertStopSummaryWithWorklog(context.Background(), db,
 		store.StopSummary{
 			SessionID:   sessionID,
@@ -60,7 +68,7 @@ func seedStopSummary(t *testing.T, db *store.DB, projectPath, sessionID string, 
 			ProjectPath: projectPath,
 			CLI:         "claude",
 			Summary:     summary,
-			LastUser:    "do the thing",
+			LastUser:    lastUser,
 		},
 		store.WorklogColumns{RecapVisible: 1, Importance: 5, DraftState: "accepted", AIDraftedSummary: summary},
 	); err != nil {
@@ -153,17 +161,21 @@ func TestLatestFloorTurnTs_ExcludesToolOnlyAndEmptyDay(t *testing.T) {
 	ts := int64(1_716_700_000_000)
 	day := dayForTs(ts)
 	seedStopSummary(t, db, proj, "s1", ts, "CLI-1 real work")
-	// A LATER tool-only turn (e.g. the headless productivity-sync compile
-	// itself) must NOT advance the floor's latest ts — otherwise compiling
-	// a day would immediately make it look stale again.
+	// A LATER tool-only turn (prose-detected) must NOT advance latest.
 	seedStopSummary(t, db, proj, "s2", ts+9000, "Ran /klyne:productivity-sync compile")
+	// A LATER klyne tool-run turn detected by last_user (prose looks like
+	// real work) must ALSO be excluded — the load-bearing fix against the
+	// compile's own session summary restaling the day.
+	seedStopSummaryAs(t, db, proj, "s3", ts+12000,
+		"Wrote 2 narrative cards covering CLI-9 and CLI-8",
+		"/klyne:productivity-sync project_path="+proj+" day="+day)
 
 	got, err := productivity.LatestFloorTurnTs(context.Background(), db.Read(), proj, day)
 	if err != nil {
 		t.Fatalf("LatestFloorTurnTs: %v", err)
 	}
 	if got != ts {
-		t.Errorf("latest = %d, want %d (newest FLOOR-ADMITTED turn; tool-only excluded)", got, ts)
+		t.Errorf("latest = %d, want %d (newest FLOOR-ADMITTED turn; tool-only + klyne tool-run excluded)", got, ts)
 	}
 	empty, err := productivity.LatestFloorTurnTs(context.Background(), db.Read(), proj, "2000-01-01")
 	if err != nil {
@@ -171,6 +183,51 @@ func TestLatestFloorTurnTs_ExcludesToolOnlyAndEmptyDay(t *testing.T) {
 	}
 	if empty != 0 {
 		t.Errorf("latest for empty day = %d, want 0", empty)
+	}
+}
+
+func TestHydrateWhatWasDone_CompileRunSummaryDoesNotRestale(t *testing.T) {
+	t.Parallel()
+	db := newReflectTestStore(t)
+	const proj = "/proj/loop"
+	ts := int64(1_716_700_000_000)
+	day := dayForTs(ts)
+	seedStopSummary(t, db, proj, "s1", ts, "CLI-1452 shipped")
+	seedCompiledSnapshot(t, db, proj, "loop", day, ts+1000, "CLI-1452 shipped")
+	// The headless /klyne:productivity-sync compile ends its OWN session,
+	// writing a stop_summary (ts > compiledAt) with ticket-bearing prose.
+	// Keyed off last_user it must be excluded from the floor, else the
+	// just-compiled day would look perpetually stale (recompile loop).
+	seedStopSummaryAs(t, db, proj, "compile-run", ts+5000,
+		"Wrote 3 narrative cards for loop covering CLI-1452, CLI-1340",
+		"/klyne:productivity-sync project_path=/proj/loop day="+day)
+
+	rep := productivity.Report{Services: []productivity.Service{{ProjectPath: proj, Repo: "loop"}}}
+	hydrateWhatWasDone(context.Background(), db, &rep, day)
+
+	wwd := rep.Services[0].WhatWasDone
+	if wwd == nil || !wwd.LLMCompiled {
+		t.Fatalf("WhatWasDone = %+v, want fresh (kept compiled) — the compile's own session summary must not restale the day", wwd)
+	}
+}
+
+func TestHydrateWhatWasDone_MatchesCompiledCardByRepoBasename(t *testing.T) {
+	t.Parallel()
+	db := newReflectTestStore(t)
+	const proj = "/work/klyne"
+	day := "2026-05-26"
+	// Snapshot card persisted under an org-qualified repo key; the live
+	// service resolves to the bare repo name. Hydrate must still match it
+	// via basename (else dashboard shows pending while discovery says fresh
+	// → dead Compile button).
+	seedCompiledSnapshot(t, db, proj, "klyne-ai/klyne", day, 1_716_600_000_000, "CLI-1452 shipped")
+
+	rep := productivity.Report{Services: []productivity.Service{{ProjectPath: proj, Repo: "klyne"}}}
+	hydrateWhatWasDone(context.Background(), db, &rep, day)
+
+	wwd := rep.Services[0].WhatWasDone
+	if wwd == nil || !wwd.LLMCompiled {
+		t.Fatalf("WhatWasDone = %+v, want the org-qualified compiled card matched by basename", wwd)
 	}
 }
 
