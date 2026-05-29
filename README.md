@@ -2,7 +2,7 @@
 
 **The local productivity layer for engineers who code with AI.**
 
-klyne installs a one-line hook in Claude Code, Codex CLI, and Cursor so the assistant ends each useful reply with a `KLYNE_SUMMARY` line. klyne captures those summaries into local SQLite and turns them into a worklog, productivity dashboard, weekly reflection, runbooks, and context-rescue tools — without proxying your chats or running a second model.
+klyne installs a one-line hook in Claude Code, Codex CLI, and Cursor so the assistant ends each useful reply with a `KLYNE_SUMMARY` line. klyne captures those summaries into local SQLite and turns them into a worklog, productivity dashboard, runbooks, and context-rescue tools — without proxying your chats or running an always-on background model. (Optional prose-synthesis steps spawn a local `claude` only when you click them — see [Privacy](#privacy-model).)
 
 [Install](#install-in-60-seconds) | [Dashboard](#dashboard) | [How it works](#how-it-works) | [Privacy](#privacy-model) | [Contributing](#contributing)
 
@@ -43,14 +43,17 @@ klyne runs at `http://127.0.0.1:7878` and stays local to your machine.
 | **Insights** | Token economics, model mix, project ranking, activity rhythm, and cache behavior. |
 | **Runbooks** | Project/global memories the AI can recall before risky commands. |
 
+> The **Worklog** tab and the weekly-reflection surfaces are currently behind a feature flag (`SHOW_REFLECTIONS` in `ui/src/lib/featureFlags.ts`, dark-launched off) while the Compile-driven productivity view is evaluated. The reflection backend, MCP tools, and `worklog_reflections` table stay intact — flip the flag to restore the UI. The productivity "what was done" card does not depend on reflections.
+
 ### Productivity dashboard — what's deterministic
 
 The productivity tab offers four ranges: **Today**, **Yesterday**, **This Week** (Mon→now, ISO week), **Last Week** (Mon→Sun prior). Past days are snapshot-backed so reloads show the same numbers; today is recomputed live since the day isn't done yet.
 
-- Daily snapshots are written either by `/klyne:reflect` (authoritative — your blessed summary) or by the dashboard handler on first read of a past day (lazy backfill). Reflection snapshots beat live snapshots; running `/klyne:reflect` again refreshes the day.
+- The **"what was done" card is built deterministically** from your captured `stop_summaries` (the per-turn `KLYNE_SUMMARY` data) plus `git log` — **no model runs to render the dashboard.**
+- An optional **Compile** button runs a second, opt-in synthesis pass (`/klyne:productivity-sync`) that spawns a **local `claude` subprocess** to rewrite the card as cohesive prose and mark it `llm_compiled`. It runs as a **detached background job** (survives page reload), shows a progress pill, and only ever runs when you click it (pick Sonnet or Opus per run). Without it, the deterministic card stands on its own.
+- Past-day snapshots are written by the dashboard handler on first read (lazy backfill), or refreshed when a Compile persists its `llm_compiled` card for the day.
 - Merged-PR data comes from `gh pr list` and is TTL-cached; you don't need `gh` installed, but the PR column will be empty without it.
 - Hit the **Refresh** button (or `?refresh=1`) to force a recompute that bypasses both snapshots and the PR cache.
-- All productivity numbers are computed locally from your sessions/messages and `git log` — **no LLM is called** in the dashboard's data path. LLM use is quarantined to `/klyne:reflect`, which only runs when you invoke it.
 
 <details>
 <summary>What a captured worklog row contains</summary>
@@ -178,7 +181,7 @@ klyne uses standard Claude Code, Codex, and Cursor hook events:
 2. The assistant writes the reply in the same chat, on the same subscription you were already using.
 3. `Stop` (Claude/Codex) reads the just-written JSONL, or `afterAgentResponse` (Cursor) receives the turn in-process; klyne extracts the summary, computes deterministic event tags, assigns an importance score, and writes SQLite.
 
-Typical marginal cost is roughly `80` input tokens plus `50` output tokens per turn. The daemon does not spawn `claude --print`, `codex`, `ollama`, or any API client.
+Typical marginal cost is roughly `80` input tokens plus `50` output tokens per turn, paid inside your normal session. **Recording a turn spawns no model** — no `claude --print`, `codex`, `ollama`, or API client runs in the capture flow. (The only daemon-side model calls are the explicit, opt-in **Compile / Reflect / Ask Klyne** actions described under [Privacy](#privacy-model).)
 
 For one-shot Claude runs that skip `UserPromptSubmit`, klyne uses `SessionStart` to inject the same instruction.
 
@@ -210,7 +213,7 @@ klyne is designed around four hard boundaries:
 | **Local-first** | Reads `~/.claude/projects/*.jsonl` and `~/.codex/sessions/*.jsonl`; Cursor data arrives in-process via the `afterAgentResponse` hook (no Cursor file is read). Stores SQLite under `~/.klyne/`. |
 | **No network calls** | The web UI binds to `127.0.0.1`; the daemon does not phone home. |
 | **No telemetry** | There is no opt-out because there is no opt-in. |
-| **No daemon-side LM subprocesses** | Synthesis happens inside your normal Claude, Codex, or Cursor turn, not in a background model runner. |
+| **No automatic / hidden LLM** | The per-turn capture flow and the dashboard's data path run no model — synthesis defaults to your normal Claude/Codex/Cursor turn. Three **opt-in** actions spawn a local `claude` subprocess *when you click them*: **Compile** (`/klyne:productivity-sync`, a detached background job), **Reflect** (`/klyne:reflect`), and **Ask Klyne** (`/api/ask`). All are same-origin + project-path-allowlist gated, run on your own machine, and never fire on their own. |
 
 See [docs/SECURITY.md](docs/SECURITY.md) for the threat model.
 
@@ -248,7 +251,7 @@ node test/e2e/harness.mjs decision
 node test/e2e/harness.mjs trivial
 ```
 
-The end-to-end scenarios assert that daemon-side AI subprocesses stay at zero. If a future change reintroduces a hidden model runner, the tests fail.
+The end-to-end scenarios assert that the **per-turn capture flow** spawns no daemon-side model — the only `claude --print` seen while a turn is recorded is your own (the harness watches `ps` to prove it). The opt-in Compile / Reflect / Ask actions are explicit and sit outside this path; if a future change makes the capture flow call a model on its own, the tests fail.
 
 ## How klyne is different
 
@@ -284,7 +287,7 @@ klyne is MIT-licensed and welcomes contributions from engineers who code with AI
 
 The bar:
 
-- **Deterministic.** No new daemon-side LM calls.
+- **Deterministic.** The per-turn capture flow and dashboard render stay model-free; any new daemon-side LM call must be explicit, user-invoked, and security-gated (same-origin + allowlist).
 - **Local-first.** No new outbound network calls unless explicitly configured off by default.
 - **Cross-CLI.** Features should cover Claude Code, Codex CLI, and Cursor, or document the gap.
 - **Tested.** README claims should map to reproducible tests.
