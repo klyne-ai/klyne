@@ -473,13 +473,11 @@ func isSnapshotBarebones(rep productivity.Report) bool {
 // read is indistinguishable from a live recompute for the reflection
 // layer.
 //
-// Also lazy-composes the typed What-was-done cards (§1.2 of
-// docs/plan/2026-05-26-wwd-typed-cards.md) by running
-// productivity.ComposeWWD over the same per-day reflection rows. A
-// persisted snapshot may already carry a Service.WhatWasDone pointer
-// (the reflection-recorder writes it on commit) — re-composing on read
-// keeps the panel honest if any reflection row was deleted or edited
-// (catch-up reflects).
+// Also hydrates the typed What-was-done cards via hydrateWhatWasDone,
+// which (since D1, 2026-05-29) prefers an llm_compiled snapshot card and
+// otherwise builds the card purely from the deterministic L1
+// stop_summaries floor — reflection-independent. Re-deriving on read
+// keeps the card honest even if the persisted payload is stale.
 //
 // dayStr is parsed in the local zone to match the recorder's day
 // labelling (reflection_recorder.go uses day.Local() since the fix in
@@ -519,24 +517,26 @@ func (h *ProductivityHandler) hydrateSnapshotReflections(
 		// message that depends on the union of per-day statuses.
 	}
 
-	// Lazy-compose the typed What-was-done cards from the day's
-	// worklog_reflections rows. ComposeWWD skips legacy prose-only
-	// rows (BodyJSON empty), so this is a no-op for services whose
-	// reflections never opted into the typed payload — exactly the
-	// behaviour the UI's "fall back to legacy bullets" path expects.
+	// Hydrate the typed What-was-done cards from the L1 stop_summaries
+	// floor (or a preferred llm_compiled snapshot). Services with no
+	// floor land with WhatWasDone == nil, so the UI falls back to the
+	// legacy bullets path.
 	hydrateWhatWasDone(ctx, h.db, rep, dayStr)
 	return nil
 }
 
 // hydrateWhatWasDone attaches the typed §1.2 What-was-done cards onto
-// each Service in rep by running ComposeWWD over the day's reflection
-// rows per-project. Always emits — services with no typed reflection
-// land with WhatWasDone == nil so the UI can fall back to the legacy
-// bullets path without ambiguity.
+// each Service in rep. An LLM-compiled snapshot card (llm_compiled=true)
+// is preferred when present; otherwise the card is built purely from the
+// deterministic L1 stop_summaries floor via BuildFloorFromStopSummaries +
+// MergeFloorIntoCard (D1, 2026-05-29: the reflection read was dropped —
+// the headline productivity experience is reflection-independent). Always
+// emits — services with no L1 floor land with WhatWasDone == nil so the UI
+// can fall back to the legacy bullets path without ambiguity.
 //
 // Errors are logged-but-not-fatal: the typed panel is a UX enrichment;
-// the rest of the dashboard MUST render even if the per-project
-// reflection read fails.
+// the rest of the dashboard MUST render even if the per-project floor
+// read fails.
 func hydrateWhatWasDone(
 	ctx context.Context, db *store.DB, rep *productivity.Report, dayStr string,
 ) {
@@ -575,66 +575,24 @@ func hydrateWhatWasDone(
 			}
 		}
 
-		rows, err := store.ListReflectionsForProjectDay(ctx, db, svc.ProjectPath, dayStr)
-		if err != nil {
-			log.Printf("productivity: wwd hydrate %s/%s: %v", svc.ProjectPath, dayStr, err)
-			svc.WhatWasDone = nil
-			continue
-		}
-		cards := productivity.ComposeWWD(rows)
-		// At most one card per service per (project, day) — the payload
-		// schema scopes one row to one service, and ComposeWWD groups
-		// by service. Find the matching card by Service basename; nil
-		// when no typed reflection landed.
-		var match *productivity.WhatWasDoneCard
-		key := serviceKeyForLookup(*svc)
-		for j := range cards {
-			if cards[j].Service == key {
-				match = &cards[j]
-				break
-			}
-		}
-		// Defensive fallback: when the service-key disagrees (e.g. the
-		// writer keyed by basename and the Repo string is e.g.
-		// "klyne-ai/klyne"), match by basename of svc.ProjectPath.
-		if match == nil {
-			base := basePath(svc.ProjectPath)
-			for j := range cards {
-				if cards[j].Service == base {
-					match = &cards[j]
-					break
-				}
-			}
-		}
-		// Last resort: if there is exactly one card and the service
-		// list only contains one service, attach it — covers the
-		// single-project recompose-stub case where Repo is empty.
-		if match == nil && len(cards) == 1 && len(rep.Services) == 1 {
-			match = &cards[0]
-		}
-		if match != nil {
-			cardCopy := *match
-			svc.WhatWasDone = &cardCopy
-		} else {
-			svc.WhatWasDone = nil
-		}
-
-		// L1 floor merge (2026-05-26 fix): regardless of whether an LLM
-		// card landed, compute the deterministic floor from L1
-		// stop_summaries and merge in any ticket the LLM/L3 layer missed.
-		// This is the dashboard's safety net — over-aggressive upstream
-		// suppression or an under-citing LLM can no longer produce a
-		// 1-detail card for a day that touched 7 tickets.
+		// Reflection-independent (D1, 2026-05-29): the pre-compile card is
+		// built purely from the deterministic L1 stop_summaries floor. The
+		// former ListReflectionsForProjectDay + ComposeWWD branch was
+		// removed — MergeFloorIntoCard(key, nil, floor) already returns a
+		// complete card from the floor alone, and the headline productivity
+		// experience no longer reads the (dark-launched-off) reflection layer.
+		svc.WhatWasDone = nil
 		floor, ferr := productivity.BuildFloorFromStopSummaries(ctx, db.Read(), svc.ProjectPath, dayStr)
 		if ferr != nil {
 			log.Printf("productivity: l1 floor for %s/%s: %v", svc.ProjectPath, dayStr, ferr)
-		} else if len(floor) > 0 {
-			serviceKey := key
+			continue
+		}
+		if len(floor) > 0 {
+			serviceKey := serviceKeyForLookup(*svc)
 			if serviceKey == "" {
 				serviceKey = basePath(svc.ProjectPath)
 			}
-			merged := productivity.MergeFloorIntoCard(serviceKey, svc.WhatWasDone, floor)
-			if merged != nil {
+			if merged := productivity.MergeFloorIntoCard(serviceKey, nil, floor); merged != nil {
 				svc.WhatWasDone = merged
 			}
 		}
