@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/klyne-ai/klyne/internal/productivity"
+	"github.com/klyne-ai/klyne/internal/projectpath"
 	"github.com/klyne-ai/klyne/internal/store"
 )
 
@@ -368,6 +369,15 @@ func (h *ProductivityHandler) computeLiveReport(
 		return productivity.Report{}, err
 	}
 
+	// Surface work captured in NON-git directories (e.g. Codex scratch
+	// dirs under ~/Documents/Codex/<date>/...). DiscoverRepos drops any
+	// project_path that is not inside a git work tree, so those projects
+	// never become Services and their "what was done" cards never render —
+	// even though their stop_summaries describe real work. Add a
+	// summary-only Service for each such project that has an admissible L1
+	// floor for the day so hydrateWhatWasDone builds its card.
+	rep.Services = appendNonGitSummaryServices(ctx, h.db, rep.Services, in.Day)
+
 	// NOTE: Layer-2 GitHub enrichment (merged_prs) and the current
 	// FETCH_HEAD mtime (git_fetched_at) are NOT applied here. They are
 	// derived once at the end of Get() against the union window so a
@@ -376,6 +386,83 @@ func (h *ProductivityHandler) computeLiveReport(
 	// snapshots free of external/time-derived data — a snapshot stores
 	// only what is locally deterministic for the day.
 	return rep, nil
+}
+
+// appendNonGitSummaryServices surfaces work captured in non-git
+// directories. DiscoverRepos (internal/productivity/discover.go)
+// intentionally drops project_paths that are not inside a git work tree,
+// to suppress parent-dir / observer-session noise. But that same filter
+// hides legitimate work done outside a repo — most notably Codex sessions
+// whose cwd is a scratch dir like ~/Documents/Codex/<date>/<name>. Those
+// sessions still emit KLYNE_SUMMARY turns into stop_summaries; they just
+// have no Service to carry a card.
+//
+// For each project_path with stop_summaries on the day that is not already
+// represented in services, we build the deterministic L1 floor and, when
+// it is non-empty, append a summary-only Service (no commits / ship-state)
+// so hydrateWhatWasDone renders its card. The floor-admissible gate is a
+// stronger noise filter than the blanket git gate: bare parent-dir /
+// observer turns carry no admissible KLYNE_SUMMARY content, so they
+// produce an empty floor and are not surfaced.
+func appendNonGitSummaryServices(
+	ctx context.Context, db *store.DB, services []productivity.Service, dayStr string,
+) []productivity.Service {
+	seen := map[string]bool{}
+	for _, s := range services {
+		seen[projectpath.Canonical(s.ProjectPath)] = true
+	}
+
+	rows, err := db.Read().QueryContext(ctx, `
+		SELECT DISTINCT project_path FROM stop_summaries
+		 WHERE date(ts / 1000, 'unixepoch', 'localtime') = ?`, dayStr)
+	if err != nil {
+		log.Printf("productivity: non-git summary discovery for %s: %v", dayStr, err)
+		return services
+	}
+	var paths []string
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			_ = rows.Close()
+			log.Printf("productivity: non-git summary scan for %s: %v", dayStr, err)
+			return services
+		}
+		paths = append(paths, p)
+	}
+	if cerr := rows.Close(); cerr != nil {
+		log.Printf("productivity: non-git summary rows for %s: %v", dayStr, cerr)
+		return services
+	}
+
+	for _, p := range paths {
+		if strings.TrimSpace(p) == "" {
+			continue
+		}
+		canon := projectpath.Canonical(p)
+		if seen[canon] {
+			continue
+		}
+		floor, ferr := productivity.BuildFloorFromStopSummaries(ctx, db.Read(), canon, dayStr)
+		if ferr != nil {
+			log.Printf("productivity: non-git floor for %s/%s: %v", canon, dayStr, ferr)
+			continue
+		}
+		if len(floor) == 0 {
+			continue
+		}
+		seen[canon] = true
+		services = append(services, productivity.Service{
+			Repo:         productivity.RepoName(canon),
+			ProjectPath:  canon,
+			Branches:     []productivity.Branch{},
+			Risks:        []productivity.RiskSignal{},
+			MinutesByCLI: map[string]int{},
+			MergedPRs:    []productivity.MergedPR{},
+			// No git scan backs this service; it is a jsonl-only card.
+			ManualOnly: true,
+		})
+	}
+	return services
 }
 
 // tryReadSnapshotDay loads every per-project snapshot row for one
