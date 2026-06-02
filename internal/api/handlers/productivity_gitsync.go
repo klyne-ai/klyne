@@ -16,7 +16,7 @@ import (
 // computed against the LOCAL mirror of origin (origin/*). If the user
 // hasn't run `git fetch` recently those refs are stale — that is the
 // same root cause as the original "PRs merged shows 0" bug
-// (operations-app #400 had merged on GitHub, but the squash commit
+// (ops-app #400 had merged on GitHub, but the squash commit
 // wasn't in the local origin/main). To keep the dashboard honest we
 // piggyback on the merged-PR cache TTL: when a repo's last fetch is
 // older than prCacheTTL() we run `git fetch --no-tags origin` before

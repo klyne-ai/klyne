@@ -764,6 +764,11 @@ export interface MessageListQuery {
   branch?: string;
   /** Filter to messages emitted from this working directory. */
   cwd?: string;
+  /** When true, the server returns only conversational prose turns
+   *  (user/assistant with non-empty content), dropping tool results,
+   *  system advisories, and empty-content tool-call envelopes. Lets a
+   *  shallow tail read reach real turns on tool-heavy (e.g. codex) sessions. */
+  conversational?: boolean;
 }
 
 export interface CostSummaryQuery {

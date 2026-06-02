@@ -153,6 +153,12 @@ func (h *SessionsHandler) Messages(w http.ResponseWriter, r *http.Request) {
 		filter.Cwd = q.Get("cwd")
 		filter.CwdSet = true
 	}
+	// conversational=1/true restricts to user/assistant prose turns — used by
+	// the Live cockpit card so its 3-message tail reaches past tool/system
+	// noise instead of rendering "no recent turns" on tool-heavy sessions.
+	if v := q.Get("conversational"); v == "1" || v == "true" {
+		filter.ConversationalOnly = true
+	}
 
 	msgs, err := store.ListMessagesBySessionFiltered(r.Context(), h.db, id, limit, before, order, filter)
 	if err != nil {
@@ -276,4 +282,21 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// maxJSONBodyBytes caps a request body. The POST handlers in this package
+// carry small JSON envelopes (a question, a project path, a day); 1 MiB is
+// generous head-room while bounding a local-DoS via an unbounded body.
+const maxJSONBodyBytes = 1 << 20 // 1 MiB
+
+// decodeJSONBody decodes the request body into dst with a hard size cap
+// (http.MaxBytesReader) so a misbehaving/oversized body can't exhaust
+// memory, and rejects unknown fields. Returns the decoder's error; callers
+// map it to 400. Use this at every POST decode site instead of a bare
+// json.NewDecoder(r.Body).
+func decodeJSONBody(w http.ResponseWriter, r *http.Request, dst any) error {
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	return dec.Decode(dst)
 }

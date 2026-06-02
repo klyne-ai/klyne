@@ -69,6 +69,64 @@ func TestTakeSnapshot_FallbackNonGit(t *testing.T) {
 	}
 }
 
+func TestTakeSnapshot_FallbackSkipsSecretsAndUses0600(t *testing.T) {
+	dir := t.TempDir()
+	// Ordinary file (should be copied).
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Secret material + VCS internals (should be skipped).
+	mustWrite := func(rel, content string) {
+		p := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mustWrite(".env", "SECRET=1")
+	mustWrite(".env.local", "SECRET=2")
+	mustWrite("server.pem", "-----BEGIN-----")
+	mustWrite("id_rsa", "PRIVATEKEY")
+	mustWrite(".npmrc", "//registry/:_authToken=x")
+	mustWrite(".git/config", "[core]")
+	mustWrite("node_modules/pkg/index.js", "module.exports={}")
+
+	snapRoot := t.TempDir()
+	res, err := safety.TakeSnapshot(context.Background(), dir, snapRoot)
+	if err != nil {
+		t.Fatalf("TakeSnapshot: %v", err)
+	}
+	if res.FallbackDir == "" {
+		t.Fatal("expected FallbackDir")
+	}
+
+	// a.txt copied with mode 0600.
+	info, err := os.Stat(filepath.Join(res.FallbackDir, "a.txt"))
+	if err != nil {
+		t.Fatalf("a.txt missing from snapshot: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Errorf("copied file mode = %o; want 0600", got)
+	}
+
+	for _, skipped := range []string{".env", ".env.local", "server.pem", "id_rsa", ".npmrc", ".git", "node_modules"} {
+		if _, err := os.Stat(filepath.Join(res.FallbackDir, skipped)); !os.IsNotExist(err) {
+			t.Errorf("denylisted entry %q should not have been copied (err=%v)", skipped, err)
+		}
+	}
+}
+
+func TestRestoreGitStash_RejectsInvalidSHA(t *testing.T) {
+	ctx := context.Background()
+	for _, bad := range []string{"--upstream", "-f", "not hex!", "zzzz", "12345" /* too short */} {
+		if err := safety.RestoreGitStash(ctx, t.TempDir(), bad); err == nil {
+			t.Errorf("RestoreGitStash(%q) = nil; want validation error", bad)
+		}
+	}
+}
+
 func TestTakeSnapshot_GitRepo_WithChanges(t *testing.T) {
 	dir := t.TempDir()
 	initGitRepo(t, dir)

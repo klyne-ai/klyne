@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/klyne-ai/klyne/internal/api"
@@ -30,6 +31,23 @@ func (h *ProjectDeleteHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 	dryRun := isTruthy(r.URL.Query().Get("dry_run"))
 
+	// Allowlist: a real (non-dry-run) delete may only target a path klyne
+	// already knows about (it appears in the worklog rollup). dry_run is the
+	// confirmation-preview path and stays open so the UI can show impact even
+	// for paths on the edge of the known set. An unknown non-dry-run path is
+	// rejected with 403 — the endpoint is not a generic row-wipe vector.
+	if !dryRun {
+		known, err := isKnownProjectPath(r.Context(), h.db, projectPath)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if !known {
+			http.Error(w, "path not in known project set", http.StatusForbidden)
+			return
+		}
+	}
+
 	counts, err := store.DeleteProjectScopedRows(r.Context(), h.db, projectPath, dryRun)
 	if err != nil {
 		http.Error(w, "delete failed", http.StatusInternalServerError)
@@ -40,6 +58,24 @@ func (h *ProjectDeleteHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		Deleted: !dryRun,
 		Counts:  counts,
 	})
+}
+
+// isKnownProjectPath reports whether projectPath appears in the worklog
+// rollup — the same allowlist /worklog/reflect/run uses to gate subprocess
+// spawns. Shared by the project-delete and code-review-context handlers so a
+// caller-supplied path can never reach a destructive/filesystem-touching code
+// path unless klyne already indexed it.
+func isKnownProjectPath(ctx context.Context, db *store.DB, projectPath string) (bool, error) {
+	rollup, err := store.ListWorklogRollup(ctx, db)
+	if err != nil {
+		return false, err
+	}
+	for _, p := range rollup {
+		if p.ProjectPath == projectPath {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func isTruthy(s string) bool {

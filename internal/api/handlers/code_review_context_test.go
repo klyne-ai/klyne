@@ -1,6 +1,7 @@
 package handlers_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -13,12 +14,42 @@ import (
 
 	"github.com/klyne-ai/klyne/internal/api"
 	"github.com/klyne-ai/klyne/internal/api/handlers"
+	"github.com/klyne-ai/klyne/internal/store"
 )
+
+// openCRCTestDB opens a temp store and seeds projectRoot into the worklog
+// rollup so the allowlist check passes for it (and rejects any other path).
+func openCRCTestDB(t *testing.T, projectRoot string) *store.DB {
+	t.Helper()
+	db, err := store.Open(context.Background(), t.TempDir()+"/test.db")
+	if err != nil {
+		t.Fatalf("open test store: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if projectRoot != "" {
+		err := store.UpsertStopSummaryWithWorklog(context.Background(), db,
+			store.StopSummary{
+				SessionID:   "crc-seed",
+				Ts:          10_000,
+				ProjectPath: projectRoot,
+				CLI:         "claude",
+				Summary:     "seed",
+				LastUser:    "user",
+			},
+			store.WorklogColumns{RecapVisible: 1, Importance: 5, DraftState: "accepted"},
+		)
+		if err != nil {
+			t.Fatalf("seed allowlist: %v", err)
+		}
+	}
+	return db
+}
 
 func TestCodeReviewContext_Absent(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	body := doCodeReviewContext(t, root)
+	db := openCRCTestDB(t, root)
+	body := doCodeReviewContext(t, db, root)
 	if body.Detected {
 		t.Error("Detected = true, want false for absent dir")
 	}
@@ -33,6 +64,7 @@ func TestCodeReviewContext_Absent(t *testing.T) {
 func TestCodeReviewContext_Present(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
+	db := openCRCTestDB(t, root)
 	dir := filepath.Join(root, ".code-review-graph")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
@@ -48,7 +80,7 @@ func TestCodeReviewContext_Present(t *testing.T) {
 		t.Fatalf("write summary: %v", err)
 	}
 
-	body := doCodeReviewContext(t, root)
+	body := doCodeReviewContext(t, db, root)
 	if !body.Detected {
 		t.Fatal("expected Detected=true")
 	}
@@ -66,6 +98,7 @@ func TestCodeReviewContext_Present(t *testing.T) {
 func TestCodeReviewContext_Malformed(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
+	db := openCRCTestDB(t, root)
 	dir := filepath.Join(root, ".code-review-graph")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
@@ -75,7 +108,7 @@ func TestCodeReviewContext_Malformed(t *testing.T) {
 	}
 
 	r := chi.NewRouter()
-	h := handlers.NewCodeReviewContextHandler()
+	h := handlers.NewCodeReviewContextHandler(db)
 	r.Get(api.RouteCodeReviewContext, h.Get)
 	srv := httptest.NewServer(r)
 	t.Cleanup(srv.Close)
@@ -93,12 +126,50 @@ func TestCodeReviewContext_Malformed(t *testing.T) {
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Errorf("expected 500 for malformed summary.json, got %d", resp.StatusCode)
 	}
+	// The 500 body must NOT echo the inspected path (info-leak guard #8).
+	var bodyMap map[string]any
+	_ = json.NewDecoder(resp.Body).Decode(&bodyMap)
+	if _, hasPath := bodyMap["project_root"]; hasPath {
+		t.Error("malformed-path 500 body leaks project_root")
+	}
+	if msg, _ := bodyMap["error"].(string); msg != "internal error" {
+		t.Errorf("error = %q, want generic %q", msg, "internal error")
+	}
 }
 
-func doCodeReviewContext(t *testing.T, projectRoot string) api.CodeReviewContextResponse {
+// TestCodeReviewContext_UnknownRootRejected verifies finding #8: a
+// project_root that is NOT in the known-project set is rejected with 403
+// (no filesystem probing oracle).
+func TestCodeReviewContext_UnknownRootRejected(t *testing.T) {
+	t.Parallel()
+	// Seed a DIFFERENT path so the requested one is unknown.
+	db := openCRCTestDB(t, "/some/known/project")
+
+	r := chi.NewRouter()
+	h := handlers.NewCodeReviewContextHandler(db)
+	r.Get(api.RouteCodeReviewContext, h.Get)
+	srv := httptest.NewServer(r)
+	t.Cleanup(srv.Close)
+
+	u, _ := url.Parse(srv.URL + api.RouteCodeReviewContext)
+	q := u.Query()
+	q.Set("project_root", t.TempDir()) // a real dir, but not in the allowlist
+	u.RawQuery = q.Encode()
+
+	resp, err := http.Get(u.String())
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("expected 403 for unknown project_root, got %d", resp.StatusCode)
+	}
+}
+
+func doCodeReviewContext(t *testing.T, db *store.DB, projectRoot string) api.CodeReviewContextResponse {
 	t.Helper()
 	r := chi.NewRouter()
-	h := handlers.NewCodeReviewContextHandler()
+	h := handlers.NewCodeReviewContextHandler(db)
 	r.Get(api.RouteCodeReviewContext, h.Get)
 	srv := httptest.NewServer(r)
 	t.Cleanup(srv.Close)

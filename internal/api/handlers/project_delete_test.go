@@ -47,8 +47,10 @@ func seedHandlerProjectRows(t *testing.T, db *store.DB, projectPath string) {
 			t.Fatalf("seed exec: %v", err)
 		}
 	}
-	exec(`INSERT INTO stop_summaries (session_id, ts, project_path, summary)
-	      VALUES ('s1', 1000, ?, 'x')`, projectPath)
+	// recap_visible=1 so the path appears in ListWorklogRollup — the
+	// allowlist a real (non-dry-run) delete now requires (#9).
+	exec(`INSERT INTO stop_summaries (session_id, ts, project_path, summary, recap_visible)
+	      VALUES ('s1', 1000, ?, 'x', 1)`, projectPath)
 	exec(`INSERT INTO decisions (id, ts, project_path, text)
 	      VALUES ('d1', 1, ?, 'd')`, projectPath)
 }
@@ -111,6 +113,45 @@ func TestProjectDelete_DryRunReturnsCountsAndDoesNotMutate(t *testing.T) {
 	_ = json.NewDecoder(resp2.Body).Decode(&body2)
 	if body2.Counts.Total != 2 {
 		t.Errorf("dry-run is not read-only: got %d, want 2", body2.Counts.Total)
+	}
+}
+
+// TestProjectDelete_RealDeleteUnknownPathRejected verifies finding #9: a
+// non-dry-run delete of a path NOT in the known-project set returns 403 and
+// does not mutate. dry_run for the same unknown path is still allowed.
+func TestProjectDelete_RealDeleteUnknownPathRejected(t *testing.T) {
+	db := openProjectDeleteHandlerDB(t)
+	// Seed a DIFFERENT known path so the rollup is non-empty but the target
+	// below is unknown.
+	seedHandlerProjectRows(t, db, "/proj/known")
+
+	srv := httptest.NewServer(newProjectDeleteRouter(t, db))
+	t.Cleanup(srv.Close)
+
+	const unknown = "/proj/unknown"
+
+	// Real delete → 403.
+	q := url.Values{"path": {unknown}}
+	req, _ := http.NewRequest(http.MethodDelete, srv.URL+api.RouteProjectDelete+"?"+q.Encode(), nil)
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("real delete of unknown path: got %d, want 403", resp.StatusCode)
+	}
+
+	// dry_run for the unknown path is still allowed (preview, no mutation).
+	qd := url.Values{"path": {unknown}, "dry_run": {"true"}}
+	reqd, _ := http.NewRequest(http.MethodDelete, srv.URL+api.RouteProjectDelete+"?"+qd.Encode(), nil)
+	respd, err := srv.Client().Do(reqd)
+	if err != nil {
+		t.Fatalf("dry-run request: %v", err)
+	}
+	defer respd.Body.Close() //nolint:errcheck
+	if respd.StatusCode != http.StatusOK {
+		t.Errorf("dry-run of unknown path: got %d, want 200", respd.StatusCode)
 	}
 }
 

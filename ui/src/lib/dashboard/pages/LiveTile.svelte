@@ -19,6 +19,7 @@
   let expandBtn = $state<HTMLButtonElement | null>(null);
   let expandOpen = $state(false);
   let expandOrigin = $state<{ x: number; y: number } | null>(null);
+  // `recent` arrives newest-first (fetched order:'desc', conversational-only).
   const conversational = $derived(recent.filter(isConversationalMessage));
   const hiddenCount = $derived(Math.max(0, conversational.length - 3));
 
@@ -33,7 +34,11 @@
     expandOpen = true;
   }
 
-  const tail = $derived(recent.filter(isConversationalMessage).slice(-3));
+  // The 3 most-recent turns, newest at top — `conversational` is already
+  // newest-first, so take the head, not the tail. (The old `.slice(-3)`
+  // took the 3 *oldest* of the window, which only looked right when a
+  // session had ≤3 conversational rows in its raw tail.)
+  const tail = $derived(conversational.slice(0, 3));
   const lastAgo = $derived(relAgo(tickMs - thread.last_msg_at));
   const isLive = $derived(tickMs - thread.last_msg_at < 60_000);
   const isHidden = $derived(hiddenSessionIds().has(thread.session_id));

@@ -238,6 +238,13 @@ func parseRepoSlug(raw string) string {
 	if owner == "" || name == "" || strings.ContainsAny(owner, "@ ") {
 		return ""
 	}
+	// Reject a leading-dash owner or name: the slug is later passed as the
+	// value of `gh pr list --repo <slug>`, and a "-..."-prefixed token could
+	// be reinterpreted as a flag by gh. Real GitHub owners/repos never start
+	// with '-', so this only rejects malformed/hostile remotes.
+	if strings.HasPrefix(owner, "-") || strings.HasPrefix(name, "-") {
+		return ""
+	}
 	return owner + "/" + name
 }
 

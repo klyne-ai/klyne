@@ -252,3 +252,95 @@ func TestSameOriginOnly_RejectsNullOriginOnPost(t *testing.T) {
 		t.Errorf("expected 403 for Origin: null on POST, got %d", w.Code)
 	}
 }
+
+// TestSameOriginOnly_RejectsExternalOriginOnGET verifies finding #5: an
+// external Origin on a GET (some GETs have side effects, e.g.
+// /api/productivity?refresh=1 spawns git fetch) is rejected. Previously the
+// Origin check only ran for non-GET methods.
+func TestSameOriginOnly_RejectsExternalOriginOnGET(t *testing.T) {
+	t.Parallel()
+
+	router := api.NewRouter(api.Deps{
+		Mounters: []api.RouterMounter{&fakeMount{path: "/ping", status: http.StatusOK}},
+	})
+
+	req := newLoopbackRequest(http.MethodGet, "/ping")
+	req.Host = "127.0.0.1:7878"
+	req.Header.Set("Origin", "http://evil.com")
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for external Origin on GET, got %d", w.Code)
+	}
+}
+
+// TestSameOriginOnly_AllowsGETWithMatchingLoopbackOrigin verifies that a GET
+// whose Origin matches the request's own loopback host:port is permitted
+// (the legitimate same-origin browser case).
+func TestSameOriginOnly_AllowsGETWithMatchingLoopbackOrigin(t *testing.T) {
+	t.Parallel()
+
+	router := api.NewRouter(api.Deps{
+		Mounters: []api.RouterMounter{&fakeMount{path: "/ping", status: http.StatusOK}},
+	})
+
+	req := newLoopbackRequest(http.MethodGet, "/ping")
+	req.Host = "127.0.0.1:7878"
+	req.Header.Set("Origin", "http://127.0.0.1:7878")
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 for matching loopback Origin on GET, got %d", w.Code)
+	}
+}
+
+// TestSameOriginOnly_RejectsCrossPortLoopbackOrigin verifies finding #6: a
+// page served by ANOTHER loopback port (a different origin) is rejected even
+// though its Origin host is loopback. The Origin's port must match the
+// request's own Host port.
+func TestSameOriginOnly_RejectsCrossPortLoopbackOrigin(t *testing.T) {
+	t.Parallel()
+
+	router := api.NewRouter(api.Deps{
+		Mounters: []api.RouterMounter{&fakeMount{path: "/ping", status: http.StatusOK}},
+	})
+
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		req := newLoopbackRequest(method, "/ping")
+		req.Host = "127.0.0.1:7878"
+		// Different loopback port — a separate dev server's page.
+		req.Header.Set("Origin", "http://127.0.0.1:3000")
+
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		if w.Code != http.StatusForbidden {
+			t.Errorf("%s: expected 403 for cross-port loopback Origin, got %d", method, w.Code)
+		}
+	}
+}
+
+// TestSameOriginOnly_AllowsGETWithNoOrigin_Sanity re-confirms that a request
+// with NO Origin still passes on GET (curl / CLI / same-origin fetch).
+func TestSameOriginOnly_AllowsPostWithNoOrigin(t *testing.T) {
+	t.Parallel()
+
+	router := api.NewRouter(api.Deps{
+		Mounters: []api.RouterMounter{&fakeMount{path: "/ping", status: http.StatusOK}},
+	})
+
+	req := newLoopbackRequest(http.MethodPost, "/ping")
+	req.Host = "127.0.0.1:7878"
+	// No Origin header — CLI / curl.
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 for loopback POST with no Origin, got %d", w.Code)
+	}
+}

@@ -259,3 +259,32 @@ func TestAsk_TruncatesLargeContext(t *testing.T) {
 		t.Errorf("TruncatedToN = %d, want 200", got.TruncatedToN)
 	}
 }
+
+// TestAsk_OversizedBodyRejected verifies finding #7: a request body larger
+// than the shared MaxBytesReader cap is rejected (decode fails → 400) rather
+// than being read unbounded into memory. Uses POST /api/ask, one of the four
+// guarded sites.
+func TestAsk_OversizedBodyRejected(t *testing.T) {
+	t.Parallel()
+	db := newReflectTestStore(t)
+	runner := &stubAskRunner{output: "ok"}
+	srv := httptest.NewServer(newAskRouter(t, db, runner))
+	t.Cleanup(srv.Close)
+
+	// Build a valid-JSON body whose "question" field is well over the 1 MiB
+	// cap so MaxBytesReader trips during decode.
+	huge := strings.Repeat("x", (1<<20)+1024)
+	body, _ := json.Marshal(map[string]any{"question": huge})
+
+	resp, err := http.Post(srv.URL+api.RouteAsk, "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("oversized body: got %d, want 400", resp.StatusCode)
+	}
+	if len(runner.calls) != 0 {
+		t.Errorf("subprocess should not have been spawned, got %d calls", len(runner.calls))
+	}
+}

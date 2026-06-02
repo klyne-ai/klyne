@@ -179,6 +179,16 @@ type MessageFilter struct {
 	Cwd       string
 	BranchSet bool // distinguishes "filter by empty string" from "no filter"
 	CwdSet    bool
+
+	// ConversationalOnly restricts the result to rows a human would read in a
+	// conversational view: role user/assistant with non-empty content. It
+	// drops tool results, system advisories, and the empty-content assistant
+	// "tool-call envelope" rows that codex/Claude Code emit between prose
+	// turns. This mirrors the UI's isConversationalMessage predicate so the
+	// Live cockpit card can request "the last N turns" directly instead of
+	// fetching a shallow raw tail and filtering client-side — which silently
+	// renders "no recent turns" whenever the newest rows are all non-prose.
+	ConversationalOnly bool
 }
 
 // ListMessagesBySessionFiltered is the most general read path: ordered,
@@ -223,6 +233,11 @@ WHERE session_id = ?`
 		q += " AND cwd = ?"
 		args = append(args, filter.Cwd)
 	}
+	if filter.ConversationalOnly {
+		// Mirror isConversationalMessage (ui/src/lib/messageFilters.ts):
+		// only user/assistant rows with non-empty trimmed content survive.
+		q += " AND role IN ('user','assistant') AND TRIM(content) <> ''"
+	}
 	q += " ORDER BY ts " + dir + ", id " + dir + " LIMIT ?"
 	args = append(args, limit)
 
@@ -261,6 +276,11 @@ func scanMessage(r messageScanner) (*connectors.Message, error) {
 		model           sql.NullString
 		toolCallsJSON   string
 		toolResultsJSON string
+		// tokens_in/tokens_out/cost_usd are NULLable in the schema; scan via
+		// NullInt64/NullFloat64 and coalesce to 0 so a NULL row does not error.
+		tokensIn  sql.NullInt64
+		tokensOut sql.NullInt64
+		costUSD   sql.NullFloat64
 	)
 
 	err := r.Scan(
@@ -271,11 +291,11 @@ func scanMessage(r messageScanner) (*connectors.Message, error) {
 		&m.Content,
 		&toolCallsJSON,
 		&toolResultsJSON,
-		&m.TokensIn,
-		&m.TokensOut,
+		&tokensIn,
+		&tokensOut,
 		&m.CachedReadTokens,
 		&m.CachedWriteTokens,
-		&m.CostUSD,
+		&costUSD,
 		&model,
 		&m.Ts,
 		&m.GitBranch,
@@ -286,6 +306,9 @@ func scanMessage(r messageScanner) (*connectors.Message, error) {
 	}
 
 	m.Role = connectors.Role(role)
+	m.TokensIn = tokensIn.Int64
+	m.TokensOut = tokensOut.Int64
+	m.CostUSD = costUSD.Float64
 	if parentUUID.Valid {
 		m.ParentUUID = parentUUID.String
 	}

@@ -16,7 +16,7 @@ The host LLM auto-resolves the session from the current working directory. The o
 
 `/compact` is destructive from the AI's point of view — after compaction, the original turns are replaced by a summary in the AI's visible context. They are NOT deleted from disk. klyne reads them back from the source JSONL on demand.
 
-A real example from the maintainer's machine: session `15009012` (`oms-service`) ran `/compact` three times. The largest event shrank **793,401 tokens → 9,002** — an 88× compression ratio. Every recoverable token is in JSONL on disk; klyne hands them back when the user asks.
+A real example from the maintainer's machine: session `15009012` (`orders-service`) ran `/compact` three times. The largest event shrank **793,401 tokens → 9,002** — an 88× compression ratio. Every recoverable token is in JSONL on disk; klyne hands them back when the user asks.
 
 ## What's returned
 

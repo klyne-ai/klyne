@@ -16,9 +16,12 @@ package otelexport
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"path/filepath"
 	"time"
 
 	"github.com/klyne-ai/klyne/internal/connectors"
@@ -47,6 +50,14 @@ type Filter struct {
 	SinceMs           int64
 	MaxSessions       int
 	MaxMsgsPerSession int
+	// RedactPaths controls how klyne.project_path is emitted. When true
+	// (the default behaviour callers should use), the attribute carries only
+	// the path BASENAME and a separate klyne.project_hash (short sha256 of
+	// the absolute path) is added so spans can still be grouped per project
+	// without leaking the user's home directory or internal project names to
+	// whatever collector the file is later uploaded to. When false, the full
+	// absolute path is emitted verbatim.
+	RedactPaths bool
 }
 
 // Emit writes one JSON-lines span per assistant message to w. Sessions
@@ -85,7 +96,7 @@ func Emit(ctx context.Context, db *store.DB, engine *cost.Engine, w io.Writer, f
 				prev = m
 				continue
 			}
-			span := buildSpan(s, prev, m, engine)
+			span := buildSpan(s, prev, m, engine, f.RedactPaths)
 			if err := enc.Encode(span); err != nil {
 				return count, fmt.Errorf("otel: encode span: %w", err)
 			}
@@ -100,7 +111,7 @@ func Emit(ctx context.Context, db *store.DB, engine *cost.Engine, w io.Writer, f
 // preceding message (typically a user message — used to anchor
 // start_time so the span has non-zero duration when timestamps are
 // available).
-func buildSpan(s *connectors.Session, prev *connectors.Message, m *connectors.Message, engine *cost.Engine) Span {
+func buildSpan(s *connectors.Session, prev *connectors.Message, m *connectors.Message, engine *cost.Engine, redactPaths bool) Span {
 	start := m.Ts
 	if prev != nil && prev.Ts > 0 && prev.Ts < start {
 		start = prev.Ts
@@ -110,31 +121,50 @@ func buildSpan(s *connectors.Session, prev *connectors.Message, m *connectors.Me
 	if engine != nil {
 		costUSD = engine.Cost(m.TokensIn, m.TokensOut, m.CachedReadTokens, m.CachedWriteTokens, m.Model)
 	}
+	attrs := map[string]any{
+		"gen_ai.system":                         "anthropic",
+		"gen_ai.request.model":                  m.Model,
+		"gen_ai.usage.input_tokens":             m.TokensIn,
+		"gen_ai.usage.output_tokens":            m.TokensOut,
+		"gen_ai.usage.cache_read_input_tokens":  m.CachedReadTokens,
+		"gen_ai.usage.cache_write_input_tokens": m.CachedWriteTokens,
+		"gen_ai.cost.usd":                       costUSD,
+		"klyne.session_id":                      s.ID,
+		"klyne.cli":                             string(s.CLI),
+	}
+	if redactPaths {
+		// Basename only + short hash of the absolute path so consumers can
+		// group spans per project without leaking the full filesystem path.
+		attrs["klyne.project_path"] = filepath.Base(s.ProjectPath)
+		attrs["klyne.project_hash"] = shortHashPath(s.ProjectPath)
+	} else {
+		attrs["klyne.project_path"] = s.ProjectPath
+	}
 	return Span{
-		TraceID:   deriveTraceID(s.ID),
-		SpanID:    deriveSpanID(m.ID),
-		Name:      "gen_ai.completion",
-		Kind:      "SPAN_KIND_INTERNAL",
-		StartTime: time.UnixMilli(start).UTC().Format(time.RFC3339Nano),
-		EndTime:   time.UnixMilli(end).UTC().Format(time.RFC3339Nano),
-		Attributes: map[string]any{
-			"gen_ai.system":                          "anthropic",
-			"gen_ai.request.model":                   m.Model,
-			"gen_ai.usage.input_tokens":              m.TokensIn,
-			"gen_ai.usage.output_tokens":             m.TokensOut,
-			"gen_ai.usage.cache_read_input_tokens":   m.CachedReadTokens,
-			"gen_ai.usage.cache_write_input_tokens":  m.CachedWriteTokens,
-			"gen_ai.cost.usd":                        costUSD,
-			"klyne.session_id":                       s.ID,
-			"klyne.cli":                              string(s.CLI),
-			"klyne.project_path":                     s.ProjectPath,
-		},
+		TraceID:    deriveTraceID(s.ID),
+		SpanID:     deriveSpanID(m.ID),
+		Name:       "gen_ai.completion",
+		Kind:       "SPAN_KIND_INTERNAL",
+		StartTime:  time.UnixMilli(start).UTC().Format(time.RFC3339Nano),
+		EndTime:    time.UnixMilli(end).UTC().Format(time.RFC3339Nano),
+		Attributes: attrs,
 		Resource: map[string]any{
 			"service.name":      "klyne",
 			"service.namespace": "ai-coding-cli",
 		},
 		Status: map[string]string{"code": "STATUS_CODE_UNSET"},
 	}
+}
+
+// shortHashPath returns the first 12 hex chars of the sha256 of p. Empty
+// for an empty path. Stable across runs so the same project always maps to
+// the same hash without revealing the path itself.
+func shortHashPath(p string) string {
+	if p == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(p))
+	return hex.EncodeToString(sum[:])[:12]
 }
 
 // deriveTraceID returns a 32-hex-char trace id derived from the session

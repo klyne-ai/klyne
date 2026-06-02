@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-const KLYNE_BIN = process.env.KLYNE_BIN || "/Users/mohitpatel/.local/bin/klyne";
+const KLYNE_BIN = process.env.KLYNE_BIN || "klyne";
 
 /**
  * Seed two config files inside the project dir:

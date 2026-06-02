@@ -55,7 +55,7 @@ type productivityRecomposeResponse struct {
 // Run handles POST /api/productivity/recompose.
 func (h *ProductivityRecomposeHandler) Run(w http.ResponseWriter, r *http.Request) {
 	var req productivityRecomposeRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(w, r, &req); err != nil {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
 		return
 	}

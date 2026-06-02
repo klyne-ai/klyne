@@ -10,6 +10,7 @@
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
+  import { SHOW_REFLECTIONS } from '$lib/featureFlags';
 
   interface Props {
     projects: ProjectAggregate[];
@@ -138,7 +139,7 @@
         </div>
 
         <!-- Row 3: stale/cold reflection pill (spec §5.3) -->
-        {#if state !== 'fresh'}
+        {#if SHOW_REFLECTIONS && state !== 'fresh'}
           <div>
             <span
               class="pill"

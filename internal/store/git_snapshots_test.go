@@ -28,9 +28,9 @@ func TestInsertGitSnapshot(t *testing.T) {
 	captured := time.Date(2026, 5, 19, 11, 30, 0, 0, time.UTC)
 	s := &store.GitSnapshot{
 		SessionID:      "sess-snap",
-		ProjectPath:    "/repos/consultation-service",
-		RepoName:       "consultation-service",
-		WorktreePath:   "/repos/consultation-service",
+		ProjectPath:    "/repos/consult-service",
+		RepoName:       "consult-service",
+		WorktreePath:   "/repos/consult-service",
 		Branch:         "feat/CLI-1396-pipeline",
 		HeadSHA:        "abc123def456",
 		AheadCount:     9,
@@ -64,10 +64,10 @@ SELECT session_id, project_path, repo_name, worktree_path, branch, head_sha,
 	if gotSession != "sess-snap" {
 		t.Errorf("session_id = %q, want sess-snap", gotSession)
 	}
-	if gotProject != "/repos/consultation-service" {
+	if gotProject != "/repos/consult-service" {
 		t.Errorf("project_path = %q", gotProject)
 	}
-	if gotRepo != "consultation-service" {
+	if gotRepo != "consult-service" {
 		t.Errorf("repo_name = %q", gotRepo)
 	}
 	if gotBranch != "feat/CLI-1396-pipeline" {
@@ -109,8 +109,8 @@ func TestInsertGitSnapshot_NilDirtyFilesBecomesEmptyJSON(t *testing.T) {
 	db := openGitSnapshotsDB(t)
 
 	s := &store.GitSnapshot{
-		ProjectPath: "/repos/oms-service",
-		RepoName:    "oms-service",
+		ProjectPath: "/repos/orders-service",
+		RepoName:    "orders-service",
 		DirtyFiles:  nil,
 	}
 	if err := store.InsertGitSnapshot(ctx, db, s); err != nil {

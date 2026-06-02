@@ -78,6 +78,23 @@ func (heartbeatEvent) Payload() any      { return nil }
 // line rather than a data frame.
 var HeartbeatSentinel Event = heartbeatEvent{}
 
+// SeqEvent wraps an Event with the ring/sequence id the hub assigned to it
+// in Publish. Subscribers receive SeqEvent values (both for live and
+// replayed events) so the SSE handler can emit the SAME id it would replay
+// against in Last-Event-ID — closing the gap where a per-frame counter
+// diverged from the ring's h.seq key. Heartbeats are still delivered as the
+// bare HeartbeatSentinel (no seq, no id: line).
+//
+// SeqEvent itself implements Event by delegating to the wrapped event, so
+// existing consumers that call EventName()/Payload() keep working.
+type SeqEvent struct {
+	Seq   uint64
+	Inner Event
+}
+
+func (e SeqEvent) EventName() string { return e.Inner.EventName() }
+func (e SeqEvent) Payload() any      { return e.Inner.Payload() }
+
 // ---------------------------------------------------------------------------
 // Constructor helpers (one per W0 event type)
 // ---------------------------------------------------------------------------
@@ -244,7 +261,10 @@ func (h *Hub) heartbeatLoop() {
 func (h *Hub) Publish(ev Event) {
 	id := h.seq.Add(1)
 	h.rb.push(id, ev)
-	h.broadcast(ev, false)
+	// Deliver the assigned seq alongside the event so the SSE handler emits
+	// it as the `id:` field — the exact value a later Last-Event-ID replay
+	// keys the ring on.
+	h.broadcast(SeqEvent{Seq: id, Inner: ev}, false)
 }
 
 // broadcast sends ev to all subscribers. If addToRing is true the event is
@@ -321,7 +341,7 @@ func (h *Hub) SubscribeWithReplay(afterID uint64) (<-chan Event, func()) {
 	missed := h.rb.since(afterID)
 	for _, entry := range missed {
 		select {
-		case ch <- entry.event:
+		case ch <- SeqEvent{Seq: entry.id, Inner: entry.event}:
 		default:
 			h.cfg.logger.Warn("sse hub: replay dropped event",
 				slog.Uint64("id", entry.id))

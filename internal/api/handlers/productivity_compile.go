@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -79,7 +80,7 @@ type compileStartRequest struct {
 // or {"status":"none"} when nothing is pending.
 func (h *ProductivityCompileHandler) Start(w http.ResponseWriter, r *http.Request) {
 	var req compileStartRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(w, r, &req); err != nil {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
 		return
 	}
@@ -196,6 +197,17 @@ func spawnClaudeProductivitySync(ctx context.Context, projectPath, day, modelKey
 		return claudeRunResult{}, fmt.Errorf("productivity-compile: unknown model key %q", modelKey)
 	}
 
+	// projectPath is transcript-derived and is interpolated into the
+	// free-text prompt below while running --permission-mode
+	// bypassPermissions, so validate it before use: it must be an absolute
+	// path to an existing directory and must not contain newlines or other
+	// control characters that could smuggle extra prompt instructions.
+	// (argv passing of the prompt is preserved; this guards the interpolated
+	// content itself.)
+	if err := validateProjectPath(projectPath); err != nil {
+		return claudeRunResult{}, fmt.Errorf("productivity-compile: %w", err)
+	}
+
 	// The slash command body reads `project_path=<...> day=<...>` from
 	// the user prompt to drive its tool calls. Pass them inline.
 	prompt := fmt.Sprintf("/klyne:productivity-sync project_path=%s day=%s", projectPath, day)
@@ -210,12 +222,46 @@ func spawnClaudeProductivitySync(ctx context.Context, projectPath, day, modelKey
 		prompt,
 	)
 	cmd.Dir = projectPath
+	// WaitDelay bounds how long Wait() blocks after ctx is cancelled/killed.
+	// Without it, an orphaned `klyne mcp` grandchild (no Setpgid) keeps the
+	// captured stdout/stderr pipe write-end open after the direct `claude`
+	// child is SIGKILLed on the deadline, so Wait() would block forever and
+	// wedge the compile job. WaitDelay converts that hang into a clean error.
+	cmd.WaitDelay = 5 * time.Second
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	runErr := cmd.Run()
 	res := parseClaudeRunResult(stdout.Bytes(), stderr.Bytes(), syncModel)
 	return res, runErr
+}
+
+// validateProjectPath rejects a project path that is unsafe to interpolate
+// into a bypassPermissions prompt. It requires an absolute path to an
+// existing directory with no newline or other control characters. Returns
+// a descriptive error suitable for failing/skipping the service.
+func validateProjectPath(p string) error {
+	if p == "" {
+		return fmt.Errorf("project_path is empty")
+	}
+	if !filepath.IsAbs(p) {
+		return fmt.Errorf("project_path is not absolute: %q", p)
+	}
+	for _, r := range p {
+		// Reject newlines and any C0/C1 control characters; these are the
+		// vectors that could inject extra prompt lines or terminal escapes.
+		if r == '\n' || r == '\r' || r < 0x20 || r == 0x7f {
+			return fmt.Errorf("project_path contains control characters")
+		}
+	}
+	info, err := os.Stat(p)
+	if err != nil {
+		return fmt.Errorf("project_path does not exist: %q", p)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("project_path is not a directory: %q", p)
+	}
+	return nil
 }
 
 // Compile-time guard against silent contract drift on the route const.

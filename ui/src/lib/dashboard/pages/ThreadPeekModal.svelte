@@ -153,7 +153,10 @@
   let prevOverflow = '';
   onMount(() => {
     if (!seeded) {
-      messages = initialMessages;
+      // initialMessages arrives newest-first (order:'desc'); sort to
+      // chronological so the transcript doesn't render reversed before
+      // the async fetch re-sorts.
+      messages = sortMessages(initialMessages);
       seeded = true;
     }
     window.addEventListener('keydown', onKey);

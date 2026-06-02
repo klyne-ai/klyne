@@ -117,7 +117,7 @@ func TestHandleRecordReflection_EnrichesWithGitSubstrate(t *testing.T) {
 	// shippedLedger section disappears, so the test then asserts on a
 	// missing "Shipped" header. Seed the test author explicitly so the
 	// filter keeps them.
-	productivity.SetUserEmailAliases([]string{"coders@clinikk.com"})
+	productivity.SetUserEmailAliases([]string{"team@example.com"})
 	t.Cleanup(func() { productivity.SetUserEmailAliases(nil) })
 	db := withBootstrapDB(t)
 
@@ -139,13 +139,13 @@ func TestHandleRecordReflection_EnrichesWithGitSubstrate(t *testing.T) {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
 	}
-	run(when, "u@u", "init", "-q", "-b", "feat/CLI-1396-pipeline")
+	run(when, "u@u", "init", "-q", "-b", "feat/TICKET-1396-pipeline")
 	if err := os.WriteFile(filepath.Join(repo, "a.go"), []byte("package a\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// Identity seed includes coders@clinikk.com (the env identity).
-	run(when, "coders@clinikk.com", "add", "a.go")
-	run(when, "coders@clinikk.com", "commit", "-m", "wire pipeline entrypoint")
+	// Identity seed includes team@example.com (the env identity).
+	run(when, "team@example.com", "add", "a.go")
+	run(when, "team@example.com", "commit", "-m", "wire pipeline entrypoint")
 
 	in := RecordReflectionInput{
 		ProjectPath: repo,
@@ -172,7 +172,7 @@ func TestHandleRecordReflection_EnrichesWithGitSubstrate(t *testing.T) {
 	if !strings.Contains(body, "Shipped") {
 		t.Errorf("git substrate Shipped ledger missing from body:\n%s", body)
 	}
-	if !strings.Contains(body, "CLI-1396") {
+	if !strings.Contains(body, "TICKET-1396") {
 		t.Errorf("ticket id missing from enriched body:\n%s", body)
 	}
 }

@@ -115,7 +115,7 @@ func InstallCodexHooks(binaryPath string) (*CodexHookInstallReport, error) {
 	if err := os.MkdirAll(filepath.Dir(hooksPath), 0o750); err != nil {
 		return nil, fmt.Errorf("mkdir %s: %w", filepath.Dir(hooksPath), err)
 	}
-	if err := os.WriteFile(hooksPath, append(out, '\n'), 0o600); err != nil {
+	if err := writeFileAtomic(hooksPath, append(out, '\n'), 0o600); err != nil {
 		return nil, fmt.Errorf("write %s: %w", hooksPath, err)
 	}
 
@@ -251,6 +251,24 @@ func isKlyneCodexHook(h map[string]any) bool {
 //   - Updated: replaced a legacy `codex_hooks` flag or flipped from
 //     false → true.
 //   - Added: file or section didn't carry the flag at all.
+// tomlValueIsTrue reports whether the value side of a `key = value`
+// TOML line is the boolean literal `true`. It strips a trailing inline
+// comment and trims whitespace, then compares the bare token to
+// "true". A quoted `"true"`/`'true'` is a STRING, not the boolean, so
+// it deliberately does NOT match — that's the bug this guards against
+// (`hooks = "untrue"` previously satisfied a naive Contains check).
+func tomlValueIsTrue(raw string) bool {
+	v := raw
+	// Drop an inline comment. A '#' inside a quoted string is not a
+	// comment, but the only values we care about are bare booleans
+	// (true/false) and quoted strings; a bare boolean never contains
+	// '#', so cutting at the first '#' is safe for our purposes.
+	if hash := strings.IndexByte(v, '#'); hash >= 0 {
+		v = v[:hash]
+	}
+	return strings.TrimSpace(v) == "true"
+}
+
 func ensureCodexHooksFeatureFlag() (InstallAction, error) {
 	path, err := codexConfigPath()
 	if err != nil {
@@ -296,17 +314,22 @@ func ensureCodexHooksFeatureFlag() (InstallAction, error) {
 		if !inFeatures {
 			continue
 		}
-		// Inside [features] — look for the flag.
-		if strings.HasPrefix(trimmed, "hooks") &&
-			strings.Contains(trimmed, "=") {
+		// Inside [features] — look for the flag. Parse the key
+		// EXACTLY (split on the first '=', trim the left side, require
+		// equality) so `hooks_experimental = true` or `hooks = "untrue"`
+		// are not misread as the canonical `hooks = true`.
+		eq := strings.IndexByte(trimmed, '=')
+		if eq < 0 {
+			continue
+		}
+		key := strings.TrimSpace(trimmed[:eq])
+		switch key {
+		case "hooks":
 			hooksLineIdx = i
-			// Parse the value side.
-			if strings.Contains(trimmed, "true") {
+			if tomlValueIsTrue(trimmed[eq+1:]) {
 				sawHooksTrue = true
 			}
-		}
-		if strings.HasPrefix(trimmed, "codex_hooks") &&
-			strings.Contains(trimmed, "=") {
+		case "codex_hooks":
 			sawDeprecated = true
 			deprecatedLineIdx = i
 		}
@@ -376,7 +399,7 @@ func writeLines(path string, lines []string) error {
 	if !strings.HasSuffix(out, "\n") {
 		out += "\n"
 	}
-	if err := os.WriteFile(path, []byte(out), 0o600); err != nil {
+	if err := writeFileAtomic(path, []byte(out), 0o600); err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
 	return nil

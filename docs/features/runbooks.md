@@ -126,8 +126,8 @@ The tool IDs keep their `_memory` suffix for back-compat with existing integrati
 {
   "text": "RUNBOOK: add-secret-to-openbao-bucket … (multi-line OK)",
   "scope": "project",                          // "project" (default) | "global"
-  "project_path": "/Users/.../consultation-service",   // optional — defaults to cwd
-  "cwd": "/Users/.../consultation-service",             // optional — used to fill project_path
+  "project_path": "/Users/.../consult-service",   // optional — defaults to cwd
+  "cwd": "/Users/.../consult-service",             // optional — used to fill project_path
   "tags": ["runbook", "secrets", "openbao"],
   "session_id": "optional — pin to one session"
 }
@@ -139,7 +139,7 @@ Returns `{ id, ts, scope, project_path }`.
 
 ```jsonc
 {
-  "cwd": "/Users/.../consultation-service",  // optional — used to default project_path
+  "cwd": "/Users/.../consult-service",  // optional — used to default project_path
   "project_path": "...",                      // optional explicit override
   "query": "secret",                          // optional substring filter, case-insensitive
   "tag": "runbook",                           // optional single-tag filter
@@ -151,7 +151,7 @@ Returns:
 
 ```jsonc
 {
-  "project_path": "/Users/.../consultation-service",
+  "project_path": "/Users/.../consult-service",
   "project_memories": [/* decisions where project_path matches */],
   "global_memories":  [/* decisions where project_path == "" */],
   "project_count": 3,

@@ -112,6 +112,44 @@ func TestCompileRegistry_StatusNoneForUnknownDay(t *testing.T) {
 	}
 }
 
+// TestCompileRegistry_WatchdogTerminatesWedgedJob verifies finding #2: a
+// runCmd that ignores its context and never returns must NOT pin the day's
+// slot as "running" forever. With a tiny overall budget the job-level
+// watchdog forces a terminal "failed" status and frees the slot, so a
+// subsequent Start re-launches a fresh job (idempotency only holds while a
+// job is genuinely running within its window).
+func TestCompileRegistry_WatchdogTerminatesWedgedJob(t *testing.T) {
+	t.Parallel()
+	stuck := make(chan struct{})
+	t.Cleanup(func() { close(stuck) }) // release the wedged goroutine at test end
+	reg := NewCompileJobRegistry(nil, func(ctx context.Context, projectPath, day, modelKey string) (claudeRunResult, error) {
+		// Deliberately ignore ctx — simulate a runCmd that hangs past its
+		// deadline (the WaitDelay-less subprocess wedge at the registry level).
+		<-stuck
+		return claudeRunResult{}, nil
+	})
+	// Tiny budget so the watchdog fires fast.
+	reg.perServiceTimeout = 40 * time.Millisecond
+	reg.jobSlack = 40 * time.Millisecond
+
+	pending := []CompileServiceState{{Service: "a", ProjectPath: "/p/a", Status: "queued"}}
+	reg.Start("2026-05-26", "sonnet", pending)
+
+	final := waitForStatus(t, reg, "2026-05-26")
+	if final.Status != "failed" {
+		t.Errorf("wedged job final Status = %q, want failed", final.Status)
+	}
+	if final.FinishedAt == 0 {
+		t.Error("wedged job FinishedAt not set; slot is not freed")
+	}
+
+	// The slot is free: a new Start launches a fresh job.
+	next := reg.Start("2026-05-26", "sonnet", pending)
+	if next.Status != "running" {
+		t.Errorf("re-Start after watchdog Status = %q, want running (slot should be free)", next.Status)
+	}
+}
+
 func TestDiscoverPending_FloorWithoutCompiledCard(t *testing.T) {
 	t.Parallel()
 	db := newReflectTestStore(t)

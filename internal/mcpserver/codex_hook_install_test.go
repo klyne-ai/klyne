@@ -213,3 +213,80 @@ func TestInstallCodexHooks_PreservesForeignHooks(t *testing.T) {
 		t.Error("klyne Stop hook command was not installed")
 	}
 }
+
+// TestInstallCodexHooks_PrefixCollision_NotAlreadyInstalled guards the
+// feature-flag key parser: a sibling key like `hooks_experimental =
+// true` must NOT be misread as the canonical `hooks = true`. Before the
+// fix, a `HasPrefix(trimmed,"hooks") && Contains(trimmed,"true")` check
+// reported AlreadyInstalled and never wrote the real flag, so Codex
+// capture silently never fired. After the fix the installer must add
+// `hooks = true`.
+func TestInstallCodexHooks_PrefixCollision_NotAlreadyInstalled(t *testing.T) {
+	home := withFakeHomeForCodex(t)
+	cfg := filepath.Join(home, ".codex", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(cfg), 0o750); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	const before = `[features]
+hooks_experimental = true
+`
+	if err := os.WriteFile(cfg, []byte(before), 0o600); err != nil {
+		t.Fatalf("seed config.toml: %v", err)
+	}
+
+	rep, err := InstallCodexHooks("/opt/klyne/bin/klyne-hook")
+	if err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	if rep.FeatureFlag == InstallActionAlreadyInstalled {
+		t.Fatalf("feature flag action = AlreadyInstalled; want Added — `hooks_experimental` must not satisfy the `hooks` flag")
+	}
+
+	got, err := os.ReadFile(cfg)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	gotS := string(got)
+	if !strings.Contains(gotS, "hooks = true") {
+		t.Errorf("canonical `hooks = true` was not written:\n%s", gotS)
+	}
+	if !strings.Contains(gotS, "hooks_experimental = true") {
+		t.Errorf("sibling key `hooks_experimental` was clobbered:\n%s", gotS)
+	}
+}
+
+// TestInstallCodexHooks_QuotedUntrueNotTrue guards the value parser: a
+// string value like `hooks = "untrue"` must NOT count as the boolean
+// `true`. Before the fix a `Contains(trimmed,"true")` check matched it
+// and reported AlreadyInstalled. After the fix the installer recognises
+// the `hooks` key but sees the value is not the boolean true, so it
+// FLIPS the line to `hooks = true` (Updated).
+func TestInstallCodexHooks_QuotedUntrueNotTrue(t *testing.T) {
+	home := withFakeHomeForCodex(t)
+	cfg := filepath.Join(home, ".codex", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(cfg), 0o750); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	const before = `[features]
+hooks = "untrue"
+`
+	if err := os.WriteFile(cfg, []byte(before), 0o600); err != nil {
+		t.Fatalf("seed config.toml: %v", err)
+	}
+
+	rep, err := InstallCodexHooks("/opt/klyne/bin/klyne-hook")
+	if err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	if rep.FeatureFlag == InstallActionAlreadyInstalled {
+		t.Fatalf("feature flag action = AlreadyInstalled; want Updated — `hooks = \"untrue\"` is a string, not the boolean true")
+	}
+
+	got, err := os.ReadFile(cfg)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if !strings.Contains(string(got), "hooks = true") {
+		t.Errorf("`hooks = true` was not written:\n%s", string(got))
+	}
+}

@@ -37,7 +37,7 @@ func TestRuleSkipReadOnly(t *testing.T) {
 	// Regression: a commit-then-push flow where the push lands in its own
 	// turn (LastBash="git push", no Edit tool call in that turn) MUST pass.
 	// Pre-fix, this dropped — silently losing the actual ship signal of
-	// the day. See operations-app 2026-05-26 15:31:53 (commit e88e57a0).
+	// the day. See ops-app 2026-05-26 15:31:53 (commit e88e57a0).
 	if drop, reason := ruleSkipReadOnly(Entry{LastBash: "git push"}); drop {
 		t.Errorf("git push (separate turn) must pass; dropped: %s", reason)
 	}

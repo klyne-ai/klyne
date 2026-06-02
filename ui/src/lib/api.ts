@@ -176,7 +176,8 @@ export async function fetchMessages(
     before: opts?.before,
     order: opts?.order,
     branch: opts?.branch,
-    cwd: opts?.cwd
+    cwd: opts?.cwd,
+    conversational: opts?.conversational ? '1' : undefined
   });
 }
 

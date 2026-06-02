@@ -30,7 +30,7 @@ import { STATUS } from "../lib/report.js";
 
 export const name = "06-runbook-auto-recall";
 
-const KLYNE_BIN = process.env.KLYNE_BIN || "/Users/mohitpatel/.local/bin/klyne";
+const KLYNE_BIN = process.env.KLYNE_BIN || "klyne";
 
 // Secret token the model can ONLY know by recalling the runbook body.
 // Distinctive enough not to appear in any model's training data.
@@ -47,7 +47,7 @@ const RUNBOOK_BODY = [
   RUNBOOK_TITLE,
   "",
   'When you see "Cannot POST /v1/webhooks/labstack/lab-orders" in dev:',
-  "  1. The webhook lives in consultation-service, NOT oms-service.",
+  "  1. The webhook lives in consult-service, NOT orders-service.",
   "  2. Branch feat/labstack-integration must be deployed to dev.",
   `  3. Confirmation token after applying the fix: ${SECRET}.`,
 ].join("\n");
@@ -140,7 +140,7 @@ export async function run({ keepTmp = false, noClaude = false } = {}) {
     // --- 3. The core assertion: secret token in the response ---
     const responseHasSecret = (r.text || "").includes(SECRET);
     const responseMentionsConsultationService =
-      (r.text || "").toLowerCase().includes("consultation-service");
+      (r.text || "").toLowerCase().includes("consult-service");
 
     steps.push({
       name: "PRIMARY: response contains the secret token (proves auto-recall)",
@@ -151,11 +151,11 @@ export async function run({ keepTmp = false, noClaude = false } = {}) {
     });
 
     steps.push({
-      name: "SECONDARY: response mentions consultation-service (also runbook-only)",
+      name: "SECONDARY: response mentions consult-service (also runbook-only)",
       status: responseMentionsConsultationService ? STATUS.PASS : STATUS.SKIP,
       detail: responseMentionsConsultationService
-        ? "Response includes 'consultation-service' (the runbook's key directive)."
-        : "Response did not mention 'consultation-service'. Not a hard failure — the secret-token check is the load-bearing one.",
+        ? "Response includes 'consult-service' (the runbook's key directive)."
+        : "Response did not mention 'consult-service'. Not a hard failure — the secret-token check is the load-bearing one.",
     });
 
     return finish(steps, evidence, costUsd, dir, keepTmp);

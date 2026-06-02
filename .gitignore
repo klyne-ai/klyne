@@ -8,7 +8,8 @@ bench-output.json
 
 # Node / SvelteKit
 node_modules/
-ui/build/
+ui/build/*
+!ui/build/.gitkeep
 ui/.svelte-kit/
 dist/
 
@@ -49,5 +50,17 @@ docs/handoffs/
 docs/plan/
 docs/research/
 docs/marketing/
+docs/superpowers/
 
 screenshots/
+
+# Local scratch artifacts (real captured session data — never publish)
+/*.png
+/*.jpg
+/*.jpeg
+ops-app-*.json
+productivity-card-*.json
+productivity-*.png
+v2-*.png
+# Walkthrough screenshots contain real session/project data — re-capture sanitized before tracking
+docs/assets/walkthrough-*

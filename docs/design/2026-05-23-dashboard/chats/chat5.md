@@ -413,7 +413,7 @@ _[tool: screenshot_user_view]_
 Productivity page now matches:
 - **22 May 2026** masthead with `reflection current` + `2 flags · review before EOD` pills
 - **8 bullets · 1833 chars** (the standup copy summary)
-- **Triage cards:** `01 UNPUSHED COMMITS · operations-app · claude/brave-agnes…` (35 commits) and `02 · trackIt · claude/build-ios-app-xe…` (23 commits) with the exact commit messages
+- **Triage cards:** `01 UNPUSHED COMMITS · ops-app · claude/brave-agnes…` (35 commits) and `02 · trackIt · claude/build-ios-app-xe…` (23 commits) with the exact commit messages
 - **All risks** sidebar showing 11 open · 0 noise · 0 drifted with the new categories (Credential exposure 0, Stalled migration 2, Uncommitted edits 5, Unpushed signal 4, Drifted from main 0, Ephemeral worktrees 0)
 - **What was done** · 7 reflections today · 5 sessions, with the new T1/T2 timestamped expandable reflection cards (NOTE/SHIPPED/MERGED/RISK pills top-right, "▾ hide N details" / "▸ view N details" disclosure)
 

@@ -197,6 +197,62 @@ func TestCost_KnownModel(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// TestResolveRates_DatedModelID — a dated transcript model ID resolves to the
+// undated family rate. Real transcripts emit `claude-sonnet-4-5-20250929`,
+// but pricing.json keys are undated (`claude-sonnet-4-5`); without
+// normalization the lookup misses and cost silently becomes $0.
+// ---------------------------------------------------------------------------
+
+func TestResolveRates_DatedModelID(t *testing.T) {
+	e := newTestEngine(t)
+
+	want, ok := e.Lookup("claude-sonnet-4-5")
+	if !ok {
+		t.Fatal("claude-sonnet-4-5 missing from pricing table")
+	}
+
+	// Dated ID must resolve to the undated family rate via Lookup.
+	got, ok := e.Lookup("claude-sonnet-4-5-20250929")
+	if !ok {
+		t.Fatalf("Lookup(dated): expected ok=true, got false")
+	}
+	if got != want {
+		t.Fatalf("Lookup(dated) rates = %+v; want %+v", got, want)
+	}
+
+	// And Cost() on the dated ID must match Cost() on the undated ID.
+	gotCost := e.Cost(1_000_000, 500_000, 0, 0, "claude-sonnet-4-5-20250929")
+	wantCost := e.Cost(1_000_000, 500_000, 0, 0, "claude-sonnet-4-5")
+	if math.Abs(gotCost-wantCost) > 1e-9 {
+		t.Fatalf("Cost(dated)=%v; want %v (undated)", gotCost, wantCost)
+	}
+	if gotCost == 0 {
+		t.Fatalf("Cost(dated) returned $0 — dated ID failed to resolve")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestResolveRates_UnknownStaysZero — a genuinely unknown model (even after
+// date stripping / prefix fallback) still returns 0 and ok=false; we do NOT
+// fabricate a rate.
+// ---------------------------------------------------------------------------
+
+func TestResolveRates_UnknownStaysZero(t *testing.T) {
+	e := newTestEngine(t)
+
+	if _, ok := e.Lookup("totally-unknown-vendor-model"); ok {
+		t.Fatalf("Lookup(unknown): expected ok=false")
+	}
+	// A dated unknown family must not borrow an unrelated family's rate.
+	if _, ok := e.Lookup("mystery-model-20250929"); ok {
+		t.Fatalf("Lookup(dated unknown): expected ok=false")
+	}
+	if got := e.Cost(100_000, 50_000, 0, 0, "totally-unknown-vendor-model"); got != 0 {
+		t.Fatalf("Cost(unknown): expected 0, got %v", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // TestCost_UnknownModel_LogsAndReturnsZero — unknown model returns 0.
 // The warning log is a side-effect we cannot easily intercept without a log
 // hook; we just assert the return value is 0.

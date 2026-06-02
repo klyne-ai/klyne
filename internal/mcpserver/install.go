@@ -195,7 +195,7 @@ func installClaude(binaryPath string) (*InstallReport, error) {
 	if err != nil {
 		return nil, fmt.Errorf("marshal %s: %w", path, err)
 	}
-	if err := os.WriteFile(path, append(out, '\n'), 0o600); err != nil {
+	if err := writeFileAtomic(path, append(out, '\n'), 0o600); err != nil {
 		return nil, fmt.Errorf("write %s: %w", path, err)
 	}
 	return &InstallReport{Platform: PlatformClaude, Path: path, Action: action}, nil
@@ -254,7 +254,7 @@ func installCodex(binaryPath string) (*InstallReport, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return nil, fmt.Errorf("mkdir %s: %w", filepath.Dir(path), err)
 	}
-	if err := os.WriteFile(path, out, 0o600); err != nil {
+	if err := writeFileAtomic(path, out, 0o600); err != nil {
 		return nil, fmt.Errorf("write %s: %w", path, err)
 	}
 	return &InstallReport{Platform: PlatformCodex, Path: path, Action: action}, nil

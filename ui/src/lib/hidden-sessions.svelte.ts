@@ -18,11 +18,12 @@
 import type { ProductivityReport, ProductivitySessionStat, ProductivityActiveInterval } from './api';
 
 const STORAGE_KEY = 'klyne.productivity.hiddenSessions';
+const REPO_STORAGE_KEY = 'klyne.productivity.hiddenRepos';
 
-function load(): Set<string> {
+function load(key = STORAGE_KEY): Set<string> {
   if (typeof localStorage === 'undefined') return new Set();
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(key);
     if (!raw) return new Set();
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) {
@@ -34,10 +35,10 @@ function load(): Set<string> {
   return new Set();
 }
 
-function persist(ids: Set<string>): void {
+function persist(ids: Set<string>, key = STORAGE_KEY): void {
   if (typeof localStorage === 'undefined') return;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify([...ids]));
+    localStorage.setItem(key, JSON.stringify([...ids]));
   } catch {
     /* quota / private mode → silently degrade */
   }
@@ -45,12 +46,16 @@ function persist(ids: Set<string>): void {
 
 // Reactive Svelte 5 rune-state container.
 const state = $state<{ ids: Set<string> }>({ ids: load() });
+// Repo-level hidden set — distinct localStorage key, same shape/pattern.
+const repoState = $state<{ names: Set<string> }>({ names: load(REPO_STORAGE_KEY) });
 
 if (typeof window !== 'undefined') {
   // Cross-tab sync — another tab edited the list, mirror it here.
   window.addEventListener('storage', (e) => {
     if (e.key === STORAGE_KEY) {
       state.ids = load();
+    } else if (e.key === REPO_STORAGE_KEY) {
+      repoState.names = load(REPO_STORAGE_KEY);
     }
   });
 }
@@ -97,6 +102,36 @@ export function showMany(ids: Iterable<string>): void {
 export function clearHidden(): void {
   state.ids = new Set();
   persist(state.ids);
+}
+
+// ---------------------------------------------------------------------------
+// Repo-level hiding — mirrors the session-level helpers above but keyed by
+// repo name and persisted under its own localStorage key. Used by the
+// productivity ProjectFilters chip row to hide a whole project at once.
+// ---------------------------------------------------------------------------
+
+/** Returns the reactive Set of hidden repo names. Re-reads trigger re-renders. */
+export function hiddenRepoNames(): Set<string> {
+  return repoState.names;
+}
+
+/** Toggle a single repo name's hidden state. */
+export function toggleHiddenRepo(repo: string): void {
+  if (!repo) return;
+  const next = new Set(repoState.names);
+  if (next.has(repo)) {
+    next.delete(repo);
+  } else {
+    next.add(repo);
+  }
+  repoState.names = next;
+  persist(next, REPO_STORAGE_KEY);
+}
+
+/** Drop all hidden repo names. */
+export function clearHiddenRepos(): void {
+  repoState.names = new Set();
+  persist(repoState.names, REPO_STORAGE_KEY);
 }
 
 // ---------------------------------------------------------------------------

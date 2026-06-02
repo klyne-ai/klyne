@@ -178,7 +178,12 @@ func extractPaths(tc connectors.ToolCall) []string {
 		// — look at every top-level string value.
 		return looksLikePathsFromMap(args)
 	}
-	out := make([]string, 0, 2)
+	// The wanted keys are alternate spellings of ONE path (e.g. Read takes
+	// "file_path" or "path"), so this is a priority list: take the first
+	// present, non-empty key and stop. Appending for every present key
+	// would double-count a single touch when a tool input happens to carry
+	// both spellings — matching the apply_patch single-count branch below.
+	out := make([]string, 0, 1)
 	for _, k := range wanted {
 		raw, ok := args[k]
 		if !ok {
@@ -200,6 +205,7 @@ func extractPaths(tc connectors.ToolCall) []string {
 			break
 		}
 		out = append(out, v)
+		break
 	}
 	return out
 }

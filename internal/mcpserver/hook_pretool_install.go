@@ -188,7 +188,7 @@ func saveSettingsRoot(path string, root map[string]any) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return fmt.Errorf("mkdir %s: %w", filepath.Dir(path), err)
 	}
-	if err := os.WriteFile(path, append(out, '\n'), 0o600); err != nil {
+	if err := writeFileAtomic(path, append(out, '\n'), 0o600); err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
 	return nil

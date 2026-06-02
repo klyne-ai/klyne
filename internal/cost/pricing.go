@@ -21,9 +21,16 @@ import (
 	_ "embed"
 	"fmt"
 	"log"
+	"regexp"
 
 	"github.com/klyne-ai/klyne/internal/config"
 )
+
+// dateSuffix matches a trailing `-YYYYMMDD` release-date suffix that real
+// transcripts append to model IDs (e.g. `claude-sonnet-4-5-20250929`).
+// pricing.json keys are the undated family IDs (`claude-sonnet-4-5`), so we
+// strip this before retrying the lookup.
+var dateSuffix = regexp.MustCompile(`-\d{8}$`)
 
 //go:embed pricing.json
 var embeddedPricing []byte
@@ -79,9 +86,54 @@ func New(cfg *config.Config) (*Engine, error) {
 
 // Lookup returns the PerTokenRates for the given model identifier and true,
 // or an empty PerTokenRates and false if the model is not in the table.
+//
+// The model key is normalized before lookup so dated transcript IDs resolve
+// to their undated pricing.json family entry — see resolveRates.
 func (e *Engine) Lookup(model string) (PerTokenRates, bool) {
-	r, ok := e.rates[model]
-	return r, ok
+	return e.resolveRates(model)
+}
+
+// resolveRates resolves a (possibly dated/over-specified) model identifier to
+// a pricing entry. Resolution order:
+//
+//  1. Exact match on the verbatim key.
+//  2. Strip a trailing `-YYYYMMDD` release-date suffix and retry exact match
+//     (`claude-sonnet-4-5-20250929` → `claude-sonnet-4-5`).
+//  3. Longest-prefix family fallback: pick the longest pricing.json key that
+//     the (date-stripped) model is a `<key>-...` extension of. This catches
+//     variant suffixes other than a date without ever matching across
+//     families (the `-` boundary check stops `gpt-5` from absorbing
+//     `gpt-5-mini`-style siblings into a shorter key when a longer one fits).
+//
+// Returns the matched rates and true, or the zero PerTokenRates and false
+// when nothing resolves. It never fabricates a rate.
+func (e *Engine) resolveRates(model string) (PerTokenRates, bool) {
+	if r, ok := e.rates[model]; ok {
+		return r, true
+	}
+	stripped := dateSuffix.ReplaceAllString(model, "")
+	if stripped != model {
+		if r, ok := e.rates[stripped]; ok {
+			return r, true
+		}
+	}
+	// Longest-prefix family fallback.
+	var bestKey string
+	for k := range e.rates {
+		if len(k) >= len(stripped) {
+			continue
+		}
+		// stripped must extend k at a `-` boundary: "<k>-...".
+		if stripped[:len(k)] == k && stripped[len(k)] == '-' {
+			if len(k) > len(bestKey) {
+				bestKey = k
+			}
+		}
+	}
+	if bestKey != "" {
+		return e.rates[bestKey], true
+	}
+	return PerTokenRates{}, false
 }
 
 // Cost returns the USD cost for the given token counts and model.
@@ -102,7 +154,7 @@ func (e *Engine) Lookup(model string) (PerTokenRates, bool) {
 // If the model is not found in the pricing table, Cost logs a warning and
 // returns 0 (not an error — matches spec §10 behaviour for unknown models).
 func (e *Engine) Cost(tokensIn, tokensOut, cachedRead, cachedWrite int64, model string) float64 {
-	r, ok := e.rates[model]
+	r, ok := e.resolveRates(model)
 	if !ok {
 		log.Printf("cost: unknown model %q — returning $0.00 (add to pricing.json to resolve)", model)
 		return 0

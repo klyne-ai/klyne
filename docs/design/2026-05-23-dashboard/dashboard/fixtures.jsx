@@ -15,7 +15,7 @@ const FX = {
       ],
     },
     {
-      id: "ef03ea3", project: "operations-app", cli: "claude", branch: "feature/CLI-1452-skip-payment-followup-tele", state: "idle",
+      id: "ef03ea3", project: "ops-app", cli: "claude", branch: "feature/TICKET-1452-skip-payment-followup-tele", state: "idle",
       lastAgo: "2m", msgs: 123, tokens: "81K", ctxPct: 64,
       tail: [
         { role: "claude", t: "16h", text: "Got it — separate flag. Since the backend currently triggers auto-discount on reason='Follow Up', we'll either coordinate a backend change or still send reason='Follow Up' under the hood when toggle is ON." },
@@ -25,7 +25,7 @@ const FX = {
       ],
     },
     {
-      id: "9b18dc1", project: "consultation-service", cli: "codex", branch: "feat/intake-form-v2", state: "live",
+      id: "9b18dc1", project: "consult-service", cli: "codex", branch: "feat/intake-form-v2", state: "live",
       lastAgo: "12s", msgs: 41, tokens: "32K", ctxPct: 38,
       tail: [
         { role: "codex", t: "12s", text: "Wired the new intake schema to /api/intake/v2 — running the contract tests now." },
@@ -34,16 +34,16 @@ const FX = {
       ],
     },
     {
-      id: "c4422f0", project: "product-service", cli: "claude", branch: "feature/labstack-rollout", state: "live",
+      id: "c4422f0", project: "product-svc", cli: "claude", branch: "feature/labstack-rollout", state: "live",
       lastAgo: "3s", msgs: 88, tokens: "62K", ctxPct: 71,
       tail: [
-        { role: "claude", t: "3s", text: "Ready to coordinate the labstack rollout across all four projects. Should I proceed in product-service first, then operations-app, then customer-service?" },
-        { role: "claude", t: "30s", text: "I see 12 references to the old labstack v1 client in product-service. Migration plan: 1) bump lab-client to v2.1.0, 2) swap LabReporter usage, 3) update three integration tests." },
-        { role: "claude", t: "1m", text: "Checked operations-app — it already uses v2 of the client. So we only need to bump product-service, consultation-service, and customer-service to match." },
+        { role: "claude", t: "3s", text: "Ready to coordinate the labstack rollout across all four projects. Should I proceed in product-svc first, then ops-app, then customer-svc?" },
+        { role: "claude", t: "30s", text: "I see 12 references to the old labstack v1 client in product-svc. Migration plan: 1) bump lab-client to v2.1.0, 2) swap LabReporter usage, 3) update three integration tests." },
+        { role: "claude", t: "1m", text: "Checked ops-app — it already uses v2 of the client. So we only need to bump product-svc, consult-service, and customer-svc to match." },
       ],
     },
     {
-      id: "0bd910c", project: "customer-service", cli: "claude", branch: "main", state: "idle",
+      id: "0bd910c", project: "customer-svc", cli: "claude", branch: "main", state: "idle",
       lastAgo: "16m", msgs: 218, tokens: "87K", ctxPct: 45,
       tail: [
         { role: "claude", t: "16m", text: "Pending: still waiting on your call on whether to bundle the migration with the labstack bump or ship them separately." },
@@ -51,7 +51,7 @@ const FX = {
       ],
     },
     {
-      id: "1ba92bc", project: "oms-service", cli: "codex", branch: "fix/inventory-sync-race", state: "idle",
+      id: "1ba92bc", project: "orders-service", cli: "codex", branch: "fix/inventory-sync-race", state: "idle",
       lastAgo: "1h", msgs: 27, tokens: "13K", ctxPct: 14,
       tail: [
         { role: "codex", t: "1h", text: "The race in inventory-sync looks like a missing lock around the receipt-batch flush. Adding sync.Mutex on InventoryStore.flush() should resolve it; need your sign-off before I push." },
@@ -65,21 +65,21 @@ const FX = {
     { kind: "acceleration", level: "warn", session: "191eef49", project: "klyne", ago: "18h", body: "klyne: per-turn cost has roughly doubled (latest turn ~6K uncached). Continuing here will burn through your 5-hour window faster than starting fresh — /klyne:handoff scope=current keeps the relevant context." },
     { kind: "hard_ceiling", level: "alert", session: "191eef49", project: "klyne", ago: "22h", body: "klyne: this session is 76% full — the next turn's prefix will keep growing. Run /klyne:handoff scope=current and start fresh." },
     { kind: "topic_shift", level: "warn", session: "191eef49", project: "klyne", ago: "1d", body: "klyne: your prompts have shifted topic since the session opened — about 73% of loaded files are stale relative to your new direction. Files still relevant: README.md, types.go, +page.svelte." },
-    { kind: "stale_context", level: "warn", session: "67ad9b21", project: "operations-app", ago: "1d", body: "klyne: 41% of loaded file context is stale. Recent prompts focus on /billing/ but loaded context skews to /onboarding/. Consider /klyne:handoff scope=current." },
-    { kind: "five_hour", level: "info", session: "0bd910c4", project: "consultation-service", ago: "2d", body: "klyne: you've been in this session ~4h 40m of a 5-hour cap — consider wrapping or running /klyne:handoff to preserve state." },
+    { kind: "stale_context", level: "warn", session: "67ad9b21", project: "ops-app", ago: "1d", body: "klyne: 41% of loaded file context is stale. Recent prompts focus on /billing/ but loaded context skews to /onboarding/. Consider /klyne:handoff scope=current." },
+    { kind: "five_hour", level: "info", session: "0bd910c4", project: "consult-service", ago: "2d", body: "klyne: you've been in this session ~4h 40m of a 5-hour cap — consider wrapping or running /klyne:handoff to preserve state." },
   ],
 
   advisorCounts: { all: 95, acceleration: 40, topic_shift: 29, stale_context: 24, hard_ceiling: 2 },
 
   // Top-level project index (Projects + Worklog merged)
   projects: [
-    { id: "klyne", path: "/Users/mohitpatel/Desktop/Project/klyne", clis: ["claude","codex"], sessions: 313, msgs: 4799, tokensIn: "534M", tokensOut: "3.3M", cost: "—", lastAgo: "0s", reflectionState: "stale", newSince: 3, spark: [4,6,8,12,14,11,18,22,28,34,30,40,52,48,55,60] },
-    { id: "operations-app", path: "/Users/mohitpatel/Desktop/Learning/operations-app", clis: ["claude"], sessions: 13, msgs: 1943, tokensIn: "667K", tokensOut: "14K", cost: "—", lastAgo: "3m", reflectionState: "fresh", newSince: 0, spark: [2,4,8,16,18,15,12,9,18,25,22,30,28,34,40,38] },
-    { id: "consultation-service", path: "/Users/mohitpatel/code/consultation-service", clis: ["claude","codex"], sessions: 5, msgs: 135, tokensIn: "19K", tokensOut: "1K", cost: "—", lastAgo: "20h", reflectionState: "fresh", newSince: 0, spark: [1,1,2,1,2,3,4,3,3,5,6,5,4,7,6,8] },
-    { id: "customer-service", path: "/Users/mohitpatel/code/customer-service", clis: ["claude"], sessions: 1, msgs: 218, tokensIn: "87K", tokensOut: "2K", cost: "—", lastAgo: "16h", reflectionState: "cold", newSince: 1, spark: [0,0,1,0,1,0,1,0,2,3,3,2,4,3,4,5] },
-    { id: "trackIt", path: "/Users/mohitpatel/Desktop/trackIt", clis: ["claude"], sessions: 1, msgs: 27, tokensIn: "7K", tokensOut: "200", cost: "—", lastAgo: "1d", reflectionState: "stale", newSince: 4, spark: [0,1,0,1,2,3,2,1,2,3,4,3,2,3,4,3] },
-    { id: "oms-service", path: "/Users/mohitpatel/code/oms-service", clis: ["codex"], sessions: 4, msgs: 87, tokensIn: "44K", tokensOut: "2K", cost: "—", lastAgo: "5h", reflectionState: "fresh", newSince: 0, spark: [1,2,3,5,4,3,2,4,3,2,1,2,3,2,1,2] },
-    { id: "product-service", path: "/Users/mohitpatel/code/product-service", clis: ["claude"], sessions: 8, msgs: 412, tokensIn: "98K", tokensOut: "4K", cost: "—", lastAgo: "1d", reflectionState: "cold", newSince: 8, spark: [0,0,0,1,2,4,6,8,10,12,11,14,16,18,15,14] },
+    { id: "klyne", path: "/Users/you/Desktop/Project/klyne", clis: ["claude","codex"], sessions: 313, msgs: 4799, tokensIn: "534M", tokensOut: "3.3M", cost: "—", lastAgo: "0s", reflectionState: "stale", newSince: 3, spark: [4,6,8,12,14,11,18,22,28,34,30,40,52,48,55,60] },
+    { id: "ops-app", path: "/Users/you/Desktop/Learning/ops-app", clis: ["claude"], sessions: 13, msgs: 1943, tokensIn: "667K", tokensOut: "14K", cost: "—", lastAgo: "3m", reflectionState: "fresh", newSince: 0, spark: [2,4,8,16,18,15,12,9,18,25,22,30,28,34,40,38] },
+    { id: "consult-service", path: "/Users/you/code/consult-service", clis: ["claude","codex"], sessions: 5, msgs: 135, tokensIn: "19K", tokensOut: "1K", cost: "—", lastAgo: "20h", reflectionState: "fresh", newSince: 0, spark: [1,1,2,1,2,3,4,3,3,5,6,5,4,7,6,8] },
+    { id: "customer-svc", path: "/Users/you/code/customer-svc", clis: ["claude"], sessions: 1, msgs: 218, tokensIn: "87K", tokensOut: "2K", cost: "—", lastAgo: "16h", reflectionState: "cold", newSince: 1, spark: [0,0,1,0,1,0,1,0,2,3,3,2,4,3,4,5] },
+    { id: "trackIt", path: "/Users/you/Desktop/trackIt", clis: ["claude"], sessions: 1, msgs: 27, tokensIn: "7K", tokensOut: "200", cost: "—", lastAgo: "1d", reflectionState: "stale", newSince: 4, spark: [0,1,0,1,2,3,2,1,2,3,4,3,2,3,4,3] },
+    { id: "orders-service", path: "/Users/you/code/orders-service", clis: ["codex"], sessions: 4, msgs: 87, tokensIn: "44K", tokensOut: "2K", cost: "—", lastAgo: "5h", reflectionState: "fresh", newSince: 0, spark: [1,2,3,5,4,3,2,4,3,2,1,2,3,2,1,2] },
+    { id: "product-svc", path: "/Users/you/code/product-svc", clis: ["claude"], sessions: 8, msgs: 412, tokensIn: "98K", tokensOut: "4K", cost: "—", lastAgo: "1d", reflectionState: "cold", newSince: 8, spark: [0,0,0,1,2,4,6,8,10,12,11,14,16,18,15,14] },
   ],
 
   // Sessions for the selected project's drill-in
@@ -91,7 +91,7 @@ const FX = {
     { id: "89d0fe64-cfb0-4d3e-a3b9-c22fbff2b50b", short: "89d0fe64", cli: "claude", title: "Wrote 2 daily reflections: **2026-05-21** → `ref-2026-05-21-1779436003269242000` (3 insights) — **…", state: "idle", msgs: 19, tokens: "11K", day: "Yesterday" },
     { id: "ec70b891-e5c5-4ca8-91d2-c7188013db72", short: "ec70b891", cli: "claude", title: "Both reflections recorded successfully. - **2026-05-20** → `ref-2026-05-20-1779382150875357000` (2…", state: "idle", msgs: 82, tokens: "29K", day: "May 21" },
     { id: "15492d08-0d59-40e8-9826-5b18cade4d3b", short: "15492d08", cli: "claude", title: "I can see the context — I made a mistake in my previous response by saying I'd skip the spec doc.", state: "idle", msgs: 12, tokens: "6K", day: "May 21" },
-    { id: "1676524d-2a03-4963-9937-a9ede88f51c2", short: "1676524d", cli: "claude", title: "## Rolling Summary **Context:** User is working on a Clinikk frontend customer management feature.", state: "idle", msgs: 4, tokens: "3K", day: "May 21" },
+    { id: "1676524d-2a03-4963-9937-a9ede88f51c2", short: "1676524d", cli: "claude", title: "## Rolling Summary **Context:** User is working on a Example frontend customer management feature.", state: "idle", msgs: 4, tokens: "3K", day: "May 21" },
   ],
 
   // Worklog reflections for the selected project (klyne)
@@ -99,7 +99,7 @@ const FX = {
     project: "klyne",
     state: "stale",
     newSince: 3,
-    refreshCmd: 'cd "/Users/mohitpatel/Desktop/Project/klyne" && claude -p --permission-mode bypassPermissions \'/klyne:reflect\'',
+    refreshCmd: 'cd "/Users/you/Desktop/Project/klyne" && claude -p --permission-mode bypassPermissions \'/klyne:reflect\'',
     reflections: [
       {
         date: "2026-05-22",
@@ -148,8 +148,8 @@ const FX = {
       { name: "klyne", tokens: "2.06B", trend: "0%", cacheHit: "95%", tokMsg: "75K", compact: "3503/3508", pct: 100 },
       { name: "Desktop", tokens: "701M", trend: "0%", cacheHit: "98%", tokMsg: "170K", compact: "17/15", pct: 34 },
       { name: "observer-sessions", tokens: "395M", trend: "0%", cacheHit: "88%", tokMsg: "34K", compact: "51/924", pct: 19 },
-      { name: "operations-app", tokens: "284M", trend: "+12%", cacheHit: "91%", tokMsg: "47K", compact: "12/120", pct: 14 },
-      { name: "consultation-service", tokens: "94M", trend: "-4%", cacheHit: "94%", tokMsg: "22K", compact: "3/20", pct: 5 },
+      { name: "ops-app", tokens: "284M", trend: "+12%", cacheHit: "91%", tokMsg: "47K", compact: "12/120", pct: 14 },
+      { name: "consult-service", tokens: "94M", trend: "-4%", cacheHit: "94%", tokMsg: "22K", compact: "3/20", pct: 5 },
     ],
     // Heatmap: 7 rows (weekdays), 14 cols (weeks). 0-4 intensity.
     heatmap: Array.from({length: 7}, (_, r) =>
@@ -172,10 +172,10 @@ const FX = {
     tags: ["bao", "dev", "infra", "labstack", "multi-repo", "openbao", "runbook", "secrets"],
     items: [
       { id: "d-97e7df766f", scope: "global", title: "OpenBao (bao) dev secrets runbook — DEV ONLY, not available on prod", ago: "3d", project: null, tags: ["runbook","secrets","openbao","bao","dev","infra"], body: "⚠ SCOPE: This applies to the dev environment only. Prod does NOT use this script / setup.\n\nBefore using, confirm the infra is configured for the current context and that you are pointed at dev.\n\nPre-req: check the infra is set up (OpenBao reachable, kubeconfig pointed at dev namespace, script present at ./scripts/openbao/bao-secrets.sh)." },
-      { id: "d-bc9f23cbf1", scope: "project", project: "product-service", title: "Labstack span spans 4 projects — multi-repo worktree note", ago: "3d", tags: ["labstack","multi-repo","runbook"], body: "Labstack work spans 4 projects, each with a labstack worktree. When working on labstack changes, check/update across all four: product-service, operations-app, consultation-service, customer-service. Coordinate the rollout by lab tag." },
-      { id: "d-201e2740b9", scope: "project", project: "operations-app", title: "Labstack worktree wiring for operations-app", ago: "3d", tags: ["labstack","multi-repo","runbook"], body: "Labstack work spans 4 projects. When working on labstack changes, check/update across all four. The worktree for operations-app lives at ../operations-app-labstack — push to its own branch first, never main." },
-      { id: "d-6410c7d3c5", scope: "project", project: "consultation-service", title: "Labstack worktree wiring for consultation-service", ago: "3d", tags: ["labstack","multi-repo","runbook"], body: "Labstack work spans 4 projects. When working on labstack changes, check/update across all four. Pair with operations-app PRs by attaching the same lab tag." },
-      { id: "d-9132ab44ef", scope: "project", project: "customer-service", title: "Customer-service labstack rollout — order of operations", ago: "5d", tags: ["labstack","runbook"], body: "Customer-service is the last in the labstack rollout chain. Wait for product-service, operations-app and consultation-service to be deployed and smoke-tested before merging here." },
+      { id: "d-bc9f23cbf1", scope: "project", project: "product-svc", title: "Labstack span spans 4 projects — multi-repo worktree note", ago: "3d", tags: ["labstack","multi-repo","runbook"], body: "Labstack work spans 4 projects, each with a labstack worktree. When working on labstack changes, check/update across all four: product-svc, ops-app, consult-service, customer-svc. Coordinate the rollout by lab tag." },
+      { id: "d-201e2740b9", scope: "project", project: "ops-app", title: "Labstack worktree wiring for ops-app", ago: "3d", tags: ["labstack","multi-repo","runbook"], body: "Labstack work spans 4 projects. When working on labstack changes, check/update across all four. The worktree for ops-app lives at ../ops-app-labstack — push to its own branch first, never main." },
+      { id: "d-6410c7d3c5", scope: "project", project: "consult-service", title: "Labstack worktree wiring for consult-service", ago: "3d", tags: ["labstack","multi-repo","runbook"], body: "Labstack work spans 4 projects. When working on labstack changes, check/update across all four. Pair with ops-app PRs by attaching the same lab tag." },
+      { id: "d-9132ab44ef", scope: "project", project: "customer-svc", title: "Customer-svc labstack rollout — order of operations", ago: "5d", tags: ["labstack","runbook"], body: "Customer-svc is the last in the labstack rollout chain. Wait for product-svc, ops-app and consult-service to be deployed and smoke-tested before merging here." },
     ],
   },
 
@@ -183,38 +183,38 @@ const FX = {
   // Mix of states: stale (newer entries since last reflection), cold (none yet), fresh (covered).
   worklogProjects: [
     {
-      project: "operations-app",
-      path: "/Users/mohitpatel/Desktop/Learning/operations-app",
+      project: "ops-app",
+      path: "/Users/you/Desktop/Learning/ops-app",
       state: "stale", newSince: 2,
       reflectedAgo: "18h", lastActivityAgo: "55m",
       latest: {
         date: "2026-05-22",
         evidence: "1 evidence · tier 1 · ai",
         bullets: [
-          "Day's highest-impact work landed on feature/CLI-1455-extend-fallback-slot-window, with the fallback slot window extension past 8 PM in create booking (f1aee959, +341/-153) as the headline visit-booking fix.",
+          "Day's highest-impact work landed on feature/TICKET-1455-extend-fallback-slot-window, with the fallback slot window extension past 8 PM in create booking (f1aee959, +341/-153) as the headline visit-booking fix.",
           "Working style was end-to-end fix-then-ship: the user repeatedly asked to 'fix this end to end', 'push this code', and explicitly requested separate tickets for follow-up issues rather than batching them into one branch.",
           "Visit-booking flexibility was the recurring theme alongside the fallback-slot fix: bookings were also allowed without member DOB or gender (b6e579fa), broadening the set of cases a booker can complete in one pass.",
           "Tickets were spun out per defect instead of piggybacking, indicating a preference for traceability — separate CLI tickets created and pushed in the same session as the underlying fix.",
         ],
-        shipped: ["`feature/CLI-1455-extend-fallback-slot-window` [CLI-1455] — pushed-to-remote, 3 commit(s), latest f1aee959 on 2026-05-22"],
+        shipped: ["`feature/TICKET-1455-extend-fallback-slot-window` [TICKET-1455] — pushed-to-remote, 3 commit(s), latest f1aee959 on 2026-05-22"],
         openLoops: [
-          "unpushed: `feature/CLI-1455-extend-fallback-slot-window` — 35 commit(s) ahead, not on origin (just now)",
-          "unpushed: `feature/CLI-1455-extend-fallback-slot-window` — 4 commit(s) ahead, not on origin (just now)",
+          "unpushed: `feature/TICKET-1455-extend-fallback-slot-window` — 35 commit(s) ahead, not on origin (just now)",
+          "unpushed: `feature/TICKET-1455-extend-fallback-slot-window` — 4 commit(s) ahead, not on origin (just now)",
         ],
       },
-      refreshCmd: 'cd "/Users/mohitpatel/Desktop/Learning/operations-app" && claude -p --permission-mode bypassPermissions \'/klyne:reflect\'',
+      refreshCmd: 'cd "/Users/you/Desktop/Learning/ops-app" && claude -p --permission-mode bypassPermissions \'/klyne:reflect\'',
     },
     {
-      project: "customer-service",
-      path: "/Users/mohitpatel/Desktop/Learning/customer-service",
+      project: "customer-svc",
+      path: "/Users/you/Desktop/Learning/customer-svc",
       state: "cold", newSince: 2,
       reflectedAgo: null, lastActivityAgo: "17h",
       latest: null,
-      refreshCmd: 'cd "/Users/mohitpatel/Desktop/Learning/customer-service" && claude -p --permission-mode bypassPermissions \'/klyne:reflect\'',
+      refreshCmd: 'cd "/Users/you/Desktop/Learning/customer-svc" && claude -p --permission-mode bypassPermissions \'/klyne:reflect\'',
     },
     {
       project: "klyne",
-      path: "/Users/mohitpatel/Desktop/Project/klyne",
+      path: "/Users/you/Desktop/Project/klyne",
       state: "stale", newSince: 3,
       reflectedAgo: "17h", lastActivityAgo: "16h",
       latest: {
@@ -228,11 +228,11 @@ const FX = {
         shipped: ["`init` — pushed-to-remote, 7 commit(s), latest fc16a029 on 2026-05-22"],
         openLoops: [],
       },
-      refreshCmd: 'cd "/Users/mohitpatel/Desktop/Project/klyne" && claude -p --permission-mode bypassPermissions \'/klyne:reflect\'',
+      refreshCmd: 'cd "/Users/you/Desktop/Project/klyne" && claude -p --permission-mode bypassPermissions \'/klyne:reflect\'',
     },
     {
-      project: "consultation-service",
-      path: "/Users/mohitpatel/code/consultation-service",
+      project: "consult-service",
+      path: "/Users/you/code/consult-service",
       state: "fresh", newSince: 0,
       reflectedAgo: "20h", lastActivityAgo: "20h",
       latest: {
@@ -245,15 +245,15 @@ const FX = {
         shipped: [],
         openLoops: [],
       },
-      refreshCmd: 'cd "/Users/mohitpatel/code/consultation-service" && claude -p --permission-mode bypassPermissions \'/klyne:reflect\'',
+      refreshCmd: 'cd "/Users/you/code/consult-service" && claude -p --permission-mode bypassPermissions \'/klyne:reflect\'',
     },
     {
-      project: "product-service",
-      path: "/Users/mohitpatel/code/product-service",
+      project: "product-svc",
+      path: "/Users/you/code/product-svc",
       state: "cold", newSince: 8,
       reflectedAgo: null, lastActivityAgo: "1d",
       latest: null,
-      refreshCmd: 'cd "/Users/mohitpatel/code/product-service" && claude -p --permission-mode bypassPermissions \'/klyne:reflect\'',
+      refreshCmd: 'cd "/Users/you/code/product-svc" && claude -p --permission-mode bypassPermissions \'/klyne:reflect\'',
     },
   ],
 

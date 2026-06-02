@@ -116,6 +116,28 @@ func TestOpen_CreatesDB(t *testing.T) {
 	}
 }
 
+// TestOpen_DBFileMode verifies that the database file is chmod'd to 0600
+// after Open so the sensitive transcripts it holds are not world-readable
+// even if the parent directory is traversable.
+func TestOpen_DBFileMode(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "perms.db")
+
+	db, err := store.Open(context.Background(), dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close() //nolint:errcheck
+
+	info, err := os.Stat(dbPath)
+	if err != nil {
+		t.Fatalf("stat db: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Errorf("db file mode = %o; want 0600", got)
+	}
+}
+
 // TestOpen_AppliesPRAGMAs verifies that all 6 spec §5 PRAGMAs are applied on
 // every connection.
 func TestOpen_AppliesPRAGMAs(t *testing.T) {

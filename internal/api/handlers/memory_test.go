@@ -38,7 +38,7 @@ func seedMemoryRows(t *testing.T, db *store.DB) {
 		{ID: "d-projA-1", Ts: now - 4000, ProjectPath: "/proj/auth-service", Text: "Use bao for secrets, not env files.", Tags: []string{"decision", "secrets"}},
 		{ID: "d-projA-2", Ts: now - 1000, ProjectPath: "/proj/auth-service", Text: "Bucket layout: auth-service/main holds prod, auth-service/staging holds staging.", Tags: []string{"infra"}},
 		// One project B memory (most recent — should sort first among projects).
-		{ID: "d-projB-1", Ts: now - 500, ProjectPath: "/proj/consultation-service", Text: "GoogleAI key lives in consultation-service/main bucket.", Tags: []string{"secrets"}},
+		{ID: "d-projB-1", Ts: now - 500, ProjectPath: "/proj/consult-service", Text: "GoogleAI key lives in consult-service/main bucket.", Tags: []string{"secrets"}},
 	}
 	for _, d := range rows {
 		if err := store.InsertDecision(context.Background(), db, d); err != nil {
@@ -84,13 +84,13 @@ func TestMemory_List_GroupsByProject(t *testing.T) {
 		t.Errorf("Global rows = %+v, want [d-global-1]", body.Global)
 	}
 
-	// Project order: consultation-service first (most-recent memory at
+	// Project order: consult-service first (most-recent memory at
 	// now-500ms), then auth-service (now-1000ms).
 	if len(body.ByProject) != 2 {
 		t.Fatalf("ByProject len = %d, want 2", len(body.ByProject))
 	}
-	if body.ByProject[0].Name != "consultation-service" {
-		t.Errorf("group[0].Name = %q, want consultation-service", body.ByProject[0].Name)
+	if body.ByProject[0].Name != "consult-service" {
+		t.Errorf("group[0].Name = %q, want consult-service", body.ByProject[0].Name)
 	}
 	if body.ByProject[1].Name != "auth-service" {
 		t.Errorf("group[1].Name = %q, want auth-service", body.ByProject[1].Name)
@@ -160,7 +160,7 @@ func TestMemory_List_FilterByQuery(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 	if body.Total != 2 {
-		t.Errorf("Total = %d, want 2 (d-projA-2 mentions 'Bucket layout'; d-projB-1 mentions 'consultation-service/main bucket')", body.Total)
+		t.Errorf("Total = %d, want 2 (d-projA-2 mentions 'Bucket layout'; d-projB-1 mentions 'consult-service/main bucket')", body.Total)
 	}
 }
 

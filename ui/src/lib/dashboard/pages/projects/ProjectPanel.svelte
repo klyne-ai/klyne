@@ -14,6 +14,7 @@
   import TabSessions from './TabSessions.svelte';
   import TabWorklog from './TabWorklog.svelte';
   import TabFiles from './TabFiles.svelte';
+  import { SHOW_REFLECTIONS } from '$lib/featureFlags';
 
   interface Props {
     project: ProjectAggregate;
@@ -27,7 +28,8 @@
   const tabs: TabDef[] = $derived.by(() => [
     { id: 'overview' as Tab, label: 'Overview' },
     { id: 'sessions' as Tab, label: 'Sessions', count: project.sessions },
-    { id: 'worklog' as Tab, label: 'Worklog' },
+    // Worklog tab is reflection-centric; hidden when reflections are off.
+    ...(SHOW_REFLECTIONS ? [{ id: 'worklog' as Tab, label: 'Worklog' }] : []),
     { id: 'files' as Tab, label: 'Files' },
   ]);
 
@@ -157,7 +159,7 @@
       <TabOverview {project} {insight} {sessions} />
     {:else if activeTab === 'sessions'}
       <TabSessions sessions={sessions} />
-    {:else if activeTab === 'worklog'}
+    {:else if activeTab === 'worklog' && SHOW_REFLECTIONS}
       <TabWorklog {project} />
     {:else if activeTab === 'files'}
       <TabFiles {insight} />

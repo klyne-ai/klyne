@@ -217,12 +217,20 @@ type sessionScanner interface {
 
 func scanSession(r sessionScanner) (*connectors.Session, error) {
 	var s connectors.Session
-	var cli, status string
+	var cli string
+	// encoded_cwd, model, and status are NULLable in the schema; scan via
+	// sql.NullString and coalesce to "" so a NULL row does not error the
+	// scan (mirrors scanMessage's handling of model/parent_uuid).
+	var (
+		encodedCWD sql.NullString
+		model      sql.NullString
+		status     sql.NullString
+	)
 	err := r.Scan(
 		&s.ID,
 		&cli,
 		&s.ProjectPath,
-		&s.EncodedCWD,
+		&encodedCWD,
 		&s.StartedAt,
 		&s.LastMsgAt,
 		&s.MsgCount,
@@ -231,7 +239,7 @@ func scanSession(r sessionScanner) (*connectors.Session, error) {
 		&s.CachedReadTokens,
 		&s.CachedWriteTokens,
 		&s.CostUSD,
-		&s.Model,
+		&model,
 		&status,
 		&s.RawPath,
 	)
@@ -239,7 +247,9 @@ func scanSession(r sessionScanner) (*connectors.Session, error) {
 		return nil, err
 	}
 	s.CLI = connectors.CLI(cli)
-	s.Status = connectors.SessionStatus(status)
+	s.EncodedCWD = encodedCWD.String
+	s.Model = model.String
+	s.Status = connectors.SessionStatus(status.String)
 	return &s, nil
 }
 

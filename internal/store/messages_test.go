@@ -347,6 +347,91 @@ func TestListMessagesBySession_EmptySession(t *testing.T) {
 	}
 }
 
+// TestListMessagesBySessionFiltered_ConversationalOnly reproduces the Live
+// card "no recent turns" bug: a codex-style session whose newest rows are a
+// wall of non-conversational messages (tool results, system advisories, and
+// empty-content assistant tool-call envelopes), with the real prose turns
+// buried below. A shallow tail fetch + client-side filter shows nothing;
+// the ConversationalOnly filter must reach past the noise and return the
+// most recent user/assistant-with-text turns.
+func TestListMessagesBySessionFiltered_ConversationalOnly(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+
+	sess := makeSession("conv-sess", "codex", "/proj/conv")
+	upsertSession(t, ctx, db, sess)
+
+	base := int64(1_700_000_000_000)
+	mk := func(i int, role connectors.Role, content string) *connectors.Message {
+		m := makeMessage(fmt.Sprintf("conv-%04d", i), "conv-sess", base+int64(i)*1000)
+		m.CLI = connectors.CLICodex
+		m.Role = role
+		m.Content = content
+		return m
+	}
+
+	// Oldest → newest. Three conversational turns first, then a wall of
+	// non-conversational rows on top (newest), mirroring the bug.
+	rows := []*connectors.Message{
+		mk(0, connectors.RoleUser, "find me some jobs"),
+		mk(1, connectors.RoleAssistant, "assistant turn one"),
+		mk(2, connectors.RoleAssistant, "assistant turn two"),
+	}
+	for i := 3; i < 15; i++ {
+		switch i % 3 {
+		case 0:
+			rows = append(rows, mk(i, connectors.RoleTool, "tool result blob"))
+		case 1:
+			rows = append(rows, mk(i, connectors.RoleAssistant, "")) // tool-call envelope, no prose
+		default:
+			rows = append(rows, mk(i, connectors.RoleSystem, "advisor line"))
+		}
+	}
+	for _, m := range rows {
+		if err := store.InsertMessage(ctx, db, m); err != nil {
+			t.Fatalf("InsertMessage %q: %v", m.ID, err)
+		}
+	}
+
+	// Sanity: the unfiltered tail (what the card used to fetch) is all noise.
+	rawTail, err := store.ListMessagesBySessionOrdered(ctx, db, "conv-sess", 10, 0, "desc")
+	if err != nil {
+		t.Fatalf("raw tail: %v", err)
+	}
+	rawConv := 0
+	for _, m := range rawTail {
+		if (m.Role == connectors.RoleUser || m.Role == connectors.RoleAssistant) && m.Content != "" {
+			rawConv++
+		}
+	}
+	if rawConv != 0 {
+		t.Fatalf("precondition: expected 0 conversational rows in raw 10-tail, got %d", rawConv)
+	}
+
+	// The fix: ConversationalOnly reaches past the noise.
+	got, err := store.ListMessagesBySessionFiltered(ctx, db, "conv-sess", 3, 0, "desc",
+		store.MessageFilter{ConversationalOnly: true})
+	if err != nil {
+		t.Fatalf("ConversationalOnly: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("got %d conversational messages; want 3", len(got))
+	}
+	// Newest-first (desc): turn two, turn one, the user prompt.
+	wantContent := []string{"assistant turn two", "assistant turn one", "find me some jobs"}
+	for i, want := range wantContent {
+		if got[i].Content != want {
+			t.Errorf("got[%d].Content = %q; want %q", i, got[i].Content, want)
+		}
+		if got[i].Role != connectors.RoleUser && got[i].Role != connectors.RoleAssistant {
+			t.Errorf("got[%d].Role = %q; want user/assistant", i, got[i].Role)
+		}
+		if got[i].Content == "" {
+			t.Errorf("got[%d] has empty content — should have been filtered out", i)
+		}
+	}
+}
+
 // TestInsertMessage_NilToolSlices verifies messages with nil tool slices
 // round-trip cleanly (no panic, no JSON errors).
 func TestInsertMessage_NilToolSlices(t *testing.T) {

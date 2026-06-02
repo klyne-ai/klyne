@@ -14,6 +14,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { deleteProjectData, type ProjectDeleteCounts } from '$lib/api';
   import { portal } from '$lib/dashboard/portal';
+  import { SHOW_REFLECTIONS } from '$lib/featureFlags';
 
   interface Props {
     projectName: string;
@@ -84,7 +85,10 @@
     preview
       ? [
           { label: 'worklog entries', count: preview.stop_summaries },
-          { label: 'daily reflections', count: preview.worklog_reflections },
+          // Daily reflections row hidden while reflections are dark-launched off.
+          ...(SHOW_REFLECTIONS
+            ? [{ label: 'daily reflections', count: preview.worklog_reflections }]
+            : []),
           { label: 'decisions', count: preview.decisions },
           { label: 'runbook dismissals', count: preview.runbook_dismissals },
           { label: 'work spans', count: preview.work_spans },

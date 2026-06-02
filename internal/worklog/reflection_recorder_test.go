@@ -164,7 +164,7 @@ func TestRecordReflectionWithSubstrate_AppendsGitSections(t *testing.T) {
 	day := time.Date(2026, 5, 19, 0, 0, 0, 0, time.UTC)
 	rep := fixtureReport()
 	refl, err := RecordReflectionWithSubstrate(
-		context.Background(), db, "/repos/consultation-service", day, insights, rep)
+		context.Background(), db, "/repos/consult-service", day, insights, rep)
 	if err != nil {
 		t.Fatalf("record: %v", err)
 	}
@@ -198,7 +198,7 @@ func TestRecordReflectionWithSubstrate_GuardUsesGitEvidence(t *testing.T) {
 	}
 	day := time.Date(2026, 5, 19, 0, 0, 0, 0, time.UTC)
 	refl, err := RecordReflectionWithSubstrate(
-		context.Background(), db, "/repos/consultation-service", day, insights, rep)
+		context.Background(), db, "/repos/consult-service", day, insights, rep)
 	if err != nil {
 		t.Fatalf("record: %v", err)
 	}
@@ -339,7 +339,7 @@ func TestRecordReflectionTyped_UpsertsByProjectDayService(t *testing.T) {
 	day := time.Date(2026, 5, 26, 0, 0, 0, 0, time.UTC)
 
 	first := WWDPayload{
-		Service: "operations-app",
+		Service: "ops-app",
 		Details: []WWDDetail{
 			{Kind: DetailKindMajor, When: "16:35", Text: "Stale first detail.", Evidence: []string{"PR #432", "sess-x"}, SessionID: "sess-x"},
 		},
@@ -349,7 +349,7 @@ func TestRecordReflectionTyped_UpsertsByProjectDayService(t *testing.T) {
 	}
 
 	second := WWDPayload{
-		Service: "operations-app",
+		Service: "ops-app",
 		Details: []WWDDetail{
 			{Kind: DetailKindShipped, When: "11:26", Text: "Shipped CLI-1473 PaymentStep canManage fix.", Evidence: []string{"CLI-1473", "sess-a"}, SessionID: "sess-a"},
 			{Kind: DetailKindShipped, When: "12:17", Text: "Opened PR #428 for CLI-1340 cancelled-bill modal.", Evidence: []string{"PR #428", "CLI-1340", "sess-b"}, SessionID: "sess-b"},
@@ -402,7 +402,7 @@ func TestRecordReflectionTyped_PreservesProseRowsOnUpsert(t *testing.T) {
 
 	// Then write the typed payload.
 	typed := WWDPayload{
-		Service: "operations-app",
+		Service: "ops-app",
 		Details: []WWDDetail{
 			{Kind: DetailKindShipped, When: "16:35", Text: "Shipped CLI-1452 rebase + PR #432.", Evidence: []string{"PR #432", "sess-rebase"}, SessionID: "sess-rebase"},
 		},

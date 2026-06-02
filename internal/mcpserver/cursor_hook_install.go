@@ -132,7 +132,7 @@ func InstallCursorHooks(binaryPath string) (*CursorHookInstallReport, error) {
 	if err := os.MkdirAll(filepath.Dir(hooksPath), 0o750); err != nil {
 		return nil, fmt.Errorf("mkdir %s: %w", filepath.Dir(hooksPath), err)
 	}
-	if err := os.WriteFile(hooksPath, append(out, '\n'), 0o600); err != nil {
+	if err := writeFileAtomic(hooksPath, append(out, '\n'), 0o600); err != nil {
 		return nil, fmt.Errorf("write %s: %w", hooksPath, err)
 	}
 	return rep, nil

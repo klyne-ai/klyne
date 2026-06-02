@@ -11,9 +11,17 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
+
+	"github.com/klyne-ai/klyne/internal/config"
 )
+
+// stashSHAPattern validates a git object name before it is passed to
+// `git stash apply`, as cheap insurance against argument injection if a
+// caller ever sources the SHA from untrusted input.
+var stashSHAPattern = regexp.MustCompile(`^[0-9a-fA-F]{7,64}$`)
 
 // SnapshotResult is returned by TakeSnapshot.
 type SnapshotResult struct {
@@ -74,7 +82,12 @@ func RestoreGitStash(ctx context.Context, cwd, stashSHA string) error {
 	if stashSHA == "" {
 		return fmt.Errorf("safety: restore: stash SHA is empty")
 	}
-	cmd := exec.CommandContext(ctx, "git", "stash", "apply", stashSHA) //nolint:gosec
+	if !stashSHAPattern.MatchString(stashSHA) {
+		return fmt.Errorf("safety: restore: invalid stash SHA %q", stashSHA)
+	}
+	// `--` guards against a SHA that begins with `-` being parsed as a flag
+	// (belt-and-suspenders with the hex validation above).
+	cmd := exec.CommandContext(ctx, "git", "stash", "apply", "--", stashSHA) //nolint:gosec
 	cmd.Dir = cwd
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -128,15 +141,65 @@ func gitChangedFileCount(ctx context.Context, cwd string) (int, error) {
 	return count, nil
 }
 
+// shouldSkipSnapshotEntry reports whether a path basename should be excluded
+// from the cp-r fallback copy. The fallback duplicates working-tree files
+// outside the repo, so we refuse to copy version-control internals, vendored
+// trees, and well-known secret material (env files, private keys, npm creds).
+// This is a basename denylist applied at every level of the walk.
+func shouldSkipSnapshotEntry(name string) bool {
+	switch name {
+	case ".git", "node_modules", ".env", ".npmrc", "id_rsa":
+		return true
+	}
+	// .env.* (e.g. .env.local, .env.production)
+	if strings.HasPrefix(name, ".env.") {
+		return true
+	}
+	// *.pem certificates / keys
+	if strings.HasSuffix(name, ".pem") {
+		return true
+	}
+	// id_* SSH private keys (id_ed25519, id_ecdsa, ...). The .pub siblings
+	// are public, but copying them adds no value and the prefix is cheap to
+	// drop wholesale.
+	if strings.HasPrefix(name, "id_") {
+		return true
+	}
+	return false
+}
+
 // copyFallback copies cwd recursively into a timestamped sub-directory
 // under snapshotRoot and returns the destination path + file count.
+//
+// When snapshotRoot is "", it defaults to a private directory under the
+// user's klyne dir (~/.klyne/snapshots) created 0700 — never the shared
+// os.TempDir(), which is world-listable. The per-snapshot directory and all
+// copied files are created with restrictive modes (0700 dirs, 0600 files).
+//
+// A basename denylist (see shouldSkipSnapshotEntry) skips .git, node_modules,
+// .env / .env.*, *.pem, id_* private keys, and .npmrc so secrets are not
+// duplicated outside the repo. The snapshotRoot itself is also skipped to
+// avoid copying snapshots into themselves when it lives under cwd.
+//
+// Remaining exposure: any *other* secret-bearing file the denylist does not
+// recognise (custom credential filenames, tokens embedded in tracked source,
+// etc.) is still copied into the snapshot. The snapshot dir is owner-only, so
+// the exposure is limited to the local user, but it is not zero. Callers that
+// handle highly sensitive trees should prefer the git-stash path (which keeps
+// everything inside the repo's object store).
 func copyFallback(_ context.Context, cwd, snapshotRoot string) (string, int, error) {
 	if snapshotRoot == "" {
-		snapshotRoot = filepath.Join(os.TempDir(), ".klyne-snapshots")
+		snapshotRoot = filepath.Join(config.ConfigDir(), "snapshots")
 	}
+	// Create the root 0700 so the parent is owner-only even if it lives in a
+	// shared location.
+	if err := os.MkdirAll(snapshotRoot, 0o700); err != nil {
+		return "", 0, fmt.Errorf("mkdir snapshot root: %w", err)
+	}
+	absRoot, _ := filepath.Abs(snapshotRoot)
 	ts := time.Now().UTC().Format("20060102T150405Z")
 	dest := filepath.Join(snapshotRoot, ts)
-	if err := os.MkdirAll(dest, 0o750); err != nil {
+	if err := os.MkdirAll(dest, 0o700); err != nil {
 		return "", 0, fmt.Errorf("mkdir fallback dest: %w", err)
 	}
 
@@ -145,13 +208,27 @@ func copyFallback(_ context.Context, cwd, snapshotRoot string) (string, int, err
 		if err != nil {
 			return nil // skip unreadable entries
 		}
+		// Never descend into / copy the snapshot root itself (avoids copying
+		// snapshots into themselves when snapshotRoot is under cwd).
+		if absPath, aerr := filepath.Abs(path); aerr == nil && absRoot != "" {
+			if absPath == absRoot {
+				return filepath.SkipDir
+			}
+		}
+		// Denylist: skip VCS internals, vendored trees, and secret material.
+		if path != cwd && shouldSkipSnapshotEntry(d.Name()) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
 		rel, relErr := filepath.Rel(cwd, path)
 		if relErr != nil {
 			return nil
 		}
 		target := filepath.Join(dest, rel)
 		if d.IsDir() {
-			return os.MkdirAll(target, 0o750)
+			return os.MkdirAll(target, 0o700)
 		}
 		fc++
 		return copyFile(path, target)
@@ -160,8 +237,10 @@ func copyFallback(_ context.Context, cwd, snapshotRoot string) (string, int, err
 }
 
 // copyFile copies src to dst, creating dst's parent directories as needed.
+// The destination file is created 0600 (owner read/write only) so snapshot
+// copies of working-tree files are never group/world readable.
 func copyFile(src, dst string) error {
-	if err := os.MkdirAll(filepath.Dir(dst), 0o750); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
 		return err
 	}
 	in, err := os.Open(src) //nolint:gosec
@@ -170,7 +249,7 @@ func copyFile(src, dst string) error {
 	}
 	defer in.Close() //nolint:errcheck
 
-	out, err := os.Create(dst) //nolint:gosec
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600) //nolint:gosec
 	if err != nil {
 		return err
 	}

@@ -247,12 +247,17 @@ func walkRoot(
 			rows[path] = row
 		}
 		for _, m := range msgs {
-			if m.Role != connectors.RoleAssistant {
-				continue
-			}
 			if m.Ts < tsCutoffMs {
 				continue
 			}
+			// Gate on token presence rather than role. Claude carries
+			// prompt tokens on its RoleAssistant turns, but Codex emits
+			// them on a separate RoleSystem `token_count` message — so a
+			// role filter would silently exclude every Codex session from
+			// the budget. TokensIn>0 captures both CLIs without
+			// double-counting: Claude's RoleSystem lines (system/summary/
+			// attachment) carry no TokensIn, and Codex's RoleAssistant
+			// turns carry none either.
 			if m.TokensIn <= 0 {
 				continue
 			}

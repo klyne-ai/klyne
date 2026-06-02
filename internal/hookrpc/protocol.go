@@ -114,6 +114,7 @@ var DaemonRoutedEvents = map[Event]bool{
 	EventPreCompact:   true,
 	EventSessionEnd:   true,
 	EventSessionStart: true,
+	EventCursor:       true,
 }
 
 // Request is the single JSON object the stub sends per connection.

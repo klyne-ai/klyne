@@ -510,7 +510,7 @@ func RecordReflectionTyped(ctx context.Context, db *store.DB, projectPath string
 	// day) so a future cross-day reflect sees the day as fully synthesized.
 	// Pre-fix this used MAX(ts) of cited session_ids — under-citation by
 	// the LLM left non-cited turns "covered" without ever being
-	// synthesized into a typed detail, which was the operations-app
+	// synthesized into a typed detail, which was the ops-app
 	// 2026-05-26 1-detail-card bug.
 	cursor := dayEndCursorMs(day)
 

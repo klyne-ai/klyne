@@ -610,7 +610,7 @@ rm ~/.local/bin/klyne
 If you only want to disable the MCP server temporarily without
 rolling back the install, edit `~/.claude.json`, find the
 `mcpServers.klyne` entry, and remove just that key (keep
-clinikk-codebase, excalidraw, linear-server intact).
+example-codebase, excalidraw, linear-server intact).
 
 ---
 

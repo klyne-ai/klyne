@@ -76,7 +76,7 @@ func TestBuildFloor_OperationsApp2026_05_26(t *testing.T) {
 		{"sess-1473", at(10, 47), 1, "Investigated medicine-order Payment dead-end and traced to commit 461fb231. Branched feature/CLI-1473-medicine-orders-opd-fully-covered-payment and edited PaymentStep.tsx.", ""},
 		{"sess-1473", at(11, 26), 1, "Committed CLI-1473 OPD-fully-covered fix and pushed to origin. PR not opened yet.", "git push"},
 		// SUPPRESSED CLI-1340 implementation — recap_visible=0 but substantial.
-		{"sess-1340", at(11, 44), 0, "Implemented CLI-1340 fix on operations-app in worktree. PR #428 opened on clinikk/operations-app.", ""},
+		{"sess-1340", at(11, 44), 0, "Implemented CLI-1340 fix on ops-app in worktree. PR #428 opened on example/ops-app.", ""},
 		// SUPPRESSED CLI-1340 follow-up commit + push.
 		{"sess-1340b", at(15, 31), 0, "Committed the poll interval change (ORDER_CANCELLATION_POLL_MS 15s→10s) as e88e57a0 and pushed to origin/feature/CLI-1340-prevent-pcc-edits-on-cancelled-bill", "git push"},
 		// Visible CLI-1452 rebase.
@@ -84,7 +84,7 @@ func TestBuildFloor_OperationsApp2026_05_26(t *testing.T) {
 		// Suppressed investigation with no ticket — should still surface via session bucket.
 		{"sess-investig", at(13, 18), 0, "Confirmed the dropdown's empty state stems from a data-shape mismatch: subscription has customer 4252296 only in top-level members[].", ""},
 		// Tool-only turn — MUST be excluded.
-		{"sess-meta", at(15, 32), 0, "Ran /klyne:reflect on operations-app — bucketed 13 pending worklog entries.", ""},
+		{"sess-meta", at(15, 32), 0, "Ran /klyne:reflect on ops-app — bucketed 13 pending worklog entries.", ""},
 	})
 
 	details, err := BuildFloorFromStopSummaries(context.Background(), db, "/p/ops", "2026-05-26")
@@ -135,11 +135,11 @@ func TestBuildFloor_OperationsApp2026_05_26(t *testing.T) {
 
 func TestIsToolOnlySummary(t *testing.T) {
 	toolOnly := []string{
-		"Ran /klyne:reflect — found 1 pending worklog entry for operations-app",
+		"Ran /klyne:reflect — found 1 pending worklog entry for ops-app",
 		"Ran productivity-sync for trackIt on 2026-05-26",
-		"Ran the productivity-sync second pass for operations-app",
-		"Compiled 1 productivity card for oms-service on 2026-05-26",
-		"Synthesized 1 typed reflection for operations-app on 2026-05-26",
+		"Ran the productivity-sync second pass for ops-app",
+		"Compiled 1 productivity card for orders-service on 2026-05-26",
+		"Synthesized 1 typed reflection for ops-app on 2026-05-26",
 		"Synthesized one typed reflection for 2026-05-26 klyne",
 		"Synthesized 9 afternoon worklog entries for 2026-05-26",
 		"Called propose_reflection for klyne project (39 pending entries)",
@@ -148,7 +148,7 @@ func TestIsToolOnlySummary(t *testing.T) {
 		"Audited stop_summaries vs productivity dashboard for 2026-05-26",
 	}
 	realWork := []string{
-		"Implemented CLI-1340 fix on operations-app in worktree",
+		"Implemented CLI-1340 fix on ops-app in worktree",
 		"Shipped CLI-1473 OPD payment fix and pushed PR #429",
 		"Investigated medicine-order Payment step dead-end and traced to commit 461fb231",
 		"Fixed dropdown empty-state in subscription-service members lookup",
@@ -187,7 +187,7 @@ func TestBuildFloor_KindClassification(t *testing.T) {
 
 func TestMergeFloorIntoCard_AddsMissingTickets(t *testing.T) {
 	llm := &WhatWasDoneCard{
-		Service:     "operations-app",
+		Service:     "ops-app",
 		LLMCompiled: true,
 		Tier1:       WWDTier1{TLDR: "1 major · latest: Rebased CLI-1452…"},
 		Tier2: struct {
@@ -204,7 +204,7 @@ func TestMergeFloorIntoCard_AddsMissingTickets(t *testing.T) {
 		// Duplicate ticket — should be skipped because llm card already covers CLI-1452.
 		{TicketID: "CLI-1452", Kind: "MAJOR", When: "16:35", Text: "Other CLI-1452 work.", Evidence: []string{"CLI-1452"}, SessionID: "sess-x"},
 	}
-	merged := MergeFloorIntoCard("operations-app", llm, floor)
+	merged := MergeFloorIntoCard("ops-app", llm, floor)
 	if merged == nil {
 		t.Fatal("merge returned nil")
 	}

@@ -17,9 +17,9 @@ func gitCmd(t *testing.T, dir string, args ...string) string {
 	// test window regardless of when the suite runs.
 	cmd.Env = append(cmd.Environ(),
 		"GIT_AUTHOR_NAME=Test User",
-		"GIT_AUTHOR_EMAIL=mohitpatel9753@gmail.com",
+		"GIT_AUTHOR_EMAIL=dev@example.com",
 		"GIT_COMMITTER_NAME=Test User",
-		"GIT_COMMITTER_EMAIL=mohitpatel9753@gmail.com",
+		"GIT_COMMITTER_EMAIL=dev@example.com",
 	)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -61,12 +61,12 @@ func TestScanRepo_LocalCommitsNoRemote(t *testing.T) {
 	gitCmd(t, dir, "init", "-q", "-b", "feat/CLI-1396-pipeline")
 
 	base := time.Now().Add(-2 * time.Hour)
-	commitFile(t, dir, "a.go", "package a\n", "extractReportIdFromLink", "mohitpatel9753@gmail.com", base)
+	commitFile(t, dir, "a.go", "package a\n", "extractReportIdFromLink", "dev@example.com", base)
 	commitFile(t, dir, "b.go", "package b\n", "processOneLabStackReport", "ravi@example.com", base.Add(10*time.Minute))
 
 	since := base.Add(-time.Hour)
 	until := time.Now()
-	userEmails := map[string]bool{"mohitpatel9753@gmail.com": true}
+	userEmails := map[string]bool{"dev@example.com": true}
 
 	sr, err := ScanRepo(dir, since, until, userEmails)
 	if err != nil {
@@ -125,16 +125,16 @@ func TestScanRepo_PushedWithoutLocalTracking(t *testing.T) {
 	dir := t.TempDir()
 	gitCmd(t, dir, "init", "-q", "-b", "main")
 	base := time.Now().Add(-2 * time.Hour)
-	commitFile(t, dir, "main.go", "package main\n", "init", "mohitpatel9753@gmail.com", base)
+	commitFile(t, dir, "main.go", "package main\n", "init", "dev@example.com", base)
 	gitCmd(t, dir, "remote", "add", "origin", origin)
 	gitCmd(t, dir, "push", "-q", "origin", "main")
 
 	gitCmd(t, dir, "checkout", "-q", "-b", "feat/x")
-	commitFile(t, dir, "f1.go", "package x\n", "feature commit one", "mohitpatel9753@gmail.com", base.Add(10*time.Minute))
+	commitFile(t, dir, "f1.go", "package x\n", "feature commit one", "dev@example.com", base.Add(10*time.Minute))
 	gitCmd(t, dir, "push", "-q", "origin", "feat/x") // no -u: origin/feat/x exists, no @{u}
-	commitFile(t, dir, "f2.go", "package x\n", "feature commit two (local)", "mohitpatel9753@gmail.com", base.Add(20*time.Minute))
+	commitFile(t, dir, "f2.go", "package x\n", "feature commit two (local)", "dev@example.com", base.Add(20*time.Minute))
 
-	sr, err := ScanRepo(dir, base.Add(-time.Hour), time.Now(), map[string]bool{"mohitpatel9753@gmail.com": true})
+	sr, err := ScanRepo(dir, base.Add(-time.Hour), time.Now(), map[string]bool{"dev@example.com": true})
 	if err != nil {
 		t.Fatalf("ScanRepo: %v", err)
 	}
@@ -152,11 +152,11 @@ func TestScanRepo_WindowExcludesOldCommits(t *testing.T) {
 
 	old := time.Now().Add(-72 * time.Hour)
 	recent := time.Now().Add(-30 * time.Minute)
-	commitFile(t, dir, "old.go", "x", "ancient work", "mohitpatel9753@gmail.com", old)
-	commitFile(t, dir, "new.go", "y", "today work", "mohitpatel9753@gmail.com", recent)
+	commitFile(t, dir, "old.go", "x", "ancient work", "dev@example.com", old)
+	commitFile(t, dir, "new.go", "y", "today work", "dev@example.com", recent)
 
 	since := time.Now().Add(-2 * time.Hour)
-	sr, err := ScanRepo(dir, since, time.Now(), map[string]bool{"mohitpatel9753@gmail.com": true})
+	sr, err := ScanRepo(dir, since, time.Now(), map[string]bool{"dev@example.com": true})
 	if err != nil {
 		t.Fatalf("ScanRepo: %v", err)
 	}

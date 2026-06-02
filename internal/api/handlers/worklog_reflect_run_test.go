@@ -184,7 +184,10 @@ func TestReflectRun_AllowsLoopbackOrigin(t *testing.T) {
 	body, _ := json.Marshal(map[string]string{"project_path": proj})
 	req, _ := http.NewRequest(http.MethodPost, srv.URL+api.RouteWorklogReflectRun, bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Origin", "http://127.0.0.1:7878")
+	// Same-origin: the Origin must match the request's own host:port (the
+	// test server's actual loopback addr). A hardcoded different port would
+	// now be (correctly) rejected by the cross-port CSRF guard.
+	req.Header.Set("Origin", "http://"+req.Host)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("POST: %v", err)

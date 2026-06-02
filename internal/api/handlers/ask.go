@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"sort"
@@ -46,7 +45,7 @@ func NewAskHandler(db *store.DB) *AskHandler {
 // Run handles POST /api/ask.
 func (h *AskHandler) Run(w http.ResponseWriter, r *http.Request) {
 	var req api.AskRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(w, r, &req); err != nil {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
 		return
 	}

@@ -15,7 +15,7 @@
 set -u
 
 KLYNE_BIN="${KLYNE_BIN:-$HOME/.local/bin/klyne}"
-PROJECT_DIR="${PROJECT_DIR:-$HOME/Desktop/Learning/consultation-service}"
+PROJECT_DIR="${PROJECT_DIR:-$HOME/Desktop/Learning/consult-service}"
 LOG_DIR="${LOG_DIR:-/tmp/klyne-smoke}"
 TIMEOUT_SECS=30
 

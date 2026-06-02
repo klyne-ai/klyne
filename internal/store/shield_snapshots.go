@@ -84,9 +84,10 @@ FROM shield_snapshots WHERE id = ?`
 	return scanShieldSnapshot(row)
 }
 
-// LatestShieldSnapshot returns the most recent shield_snapshot for sessionID,
-// or nil when none exists. Useful for the PreCompact handler to load the
-// arming snapshot without knowing its id.
+// LatestShieldSnapshot returns the most recent shield_snapshot for sessionID.
+// When no row matches it returns a wrapped sql.ErrNoRows (not a nil result);
+// callers should test with errors.Is(err, sql.ErrNoRows). Useful for the
+// PreCompact handler to load the arming snapshot without knowing its id.
 func LatestShieldSnapshot(ctx context.Context, db *DB, sessionID string) (*ShieldSnapshot, error) {
 	const q = `
 SELECT id, ts, session_id, decisions_json, open_files_json, turns_json, tool_chain_id, pre_tokens, fill_pct, blocked, block_reason

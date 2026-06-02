@@ -18,8 +18,8 @@ func fixtureReport() productivity.Report {
 		Day: "2026-05-19",
 		Services: []productivity.Service{
 			{
-				Repo:        "consultation-service",
-				ProjectPath: "/repos/consultation-service",
+				Repo:        "consult-service",
+				ProjectPath: "/repos/consult-service",
 				Branches: []productivity.Branch{
 					{
 						Name:     "feat/CLI-1396-pipeline",
@@ -40,8 +40,8 @@ func fixtureReport() productivity.Report {
 				},
 			},
 			{
-				Repo:        "oms-service",
-				ProjectPath: "/repos/oms-service",
+				Repo:        "orders-service",
+				ProjectPath: "/repos/orders-service",
 				Branches: []productivity.Branch{
 					{
 						Name:     "main",
@@ -61,7 +61,7 @@ func fixtureReport() productivity.Report {
 // Improvement 1: Open Loops / Unpushed block.
 func TestGitSubstrateSections_OpenLoopsBlock(t *testing.T) {
 	rep := fixtureReport()
-	secs := GitSubstrateSections(rep, "/repos/consultation-service")
+	secs := GitSubstrateSections(rep, "/repos/consult-service")
 	md := strings.Join(secs, "\n")
 	if !strings.Contains(md, "Open Loops") {
 		t.Errorf("expected an Open Loops block, got:\n%s", md)
@@ -82,17 +82,17 @@ func TestGitSubstrateSections_OpenLoopsBlock(t *testing.T) {
 // something to report).
 func TestGitSubstrateSections_NoOpenLoopsWhenClean(t *testing.T) {
 	rep := fixtureReport()
-	secs := GitSubstrateSections(rep, "/repos/oms-service")
+	secs := GitSubstrateSections(rep, "/repos/orders-service")
 	md := strings.Join(secs, "\n")
 	if strings.Contains(md, "Open Loops") {
-		t.Errorf("oms-service has no risks — Open Loops block must be omitted, got:\n%s", md)
+		t.Errorf("orders-service has no risks — Open Loops block must be omitted, got:\n%s", md)
 	}
 }
 
 // Improvement 5: terse per-repo "Shipped" ledger line from ship state.
 func TestGitSubstrateSections_ShippedLedger(t *testing.T) {
 	rep := fixtureReport()
-	secs := GitSubstrateSections(rep, "/repos/oms-service")
+	secs := GitSubstrateSections(rep, "/repos/orders-service")
 	md := strings.Join(secs, "\n")
 	if !strings.Contains(md, "Shipped") {
 		t.Errorf("expected a Shipped ledger line, got:\n%s", md)
@@ -109,7 +109,7 @@ func TestGitSubstrateSections_ShippedLedger(t *testing.T) {
 // session start. The substrate sections must surface the commit date.
 func TestGitSubstrateSections_CommitTimestampDating(t *testing.T) {
 	rep := fixtureReport()
-	secs := GitSubstrateSections(rep, "/repos/consultation-service")
+	secs := GitSubstrateSections(rep, "/repos/consult-service")
 	md := strings.Join(secs, "\n")
 	// 2026-05-19 is the day; the latest commit was at 10:00 UTC.
 	if !strings.Contains(md, "2026-05-19") {
@@ -136,8 +136,8 @@ func crossRepoFixture() productivity.Report {
 	return productivity.Report{
 		Day: "2026-05-19",
 		Services: []productivity.Service{
-			mk("consultation-service", "/repos/consultation-service", "feat/CLI-1396-pipeline", "CLI-1396"),
-			mk("oms-service", "/repos/oms-service", "feat/CLI-1396-refund", "CLI-1396"),
+			mk("consult-service", "/repos/consult-service", "feat/CLI-1396-pipeline", "CLI-1396"),
+			mk("orders-service", "/repos/orders-service", "feat/CLI-1396-refund", "CLI-1396"),
 			mk("klyne", "/repos/klyne", "feat/unrelated", ""),
 		},
 	}
@@ -155,7 +155,7 @@ func TestCrossProjectThread_UmbrellaWhenTicketSpansRepos(t *testing.T) {
 	if !strings.Contains(th, "CLI-1396") {
 		t.Errorf("umbrella entry must name the shared ticket token, got: %q", th)
 	}
-	if !strings.Contains(th, "consultation-service") || !strings.Contains(th, "oms-service") {
+	if !strings.Contains(th, "consult-service") || !strings.Contains(th, "orders-service") {
 		t.Errorf("umbrella entry must link both repos, got: %q", th)
 	}
 }
@@ -163,7 +163,7 @@ func TestCrossProjectThread_UmbrellaWhenTicketSpansRepos(t *testing.T) {
 // Improvement 7: a ticket that touches only ONE repo is not an
 // initiative thread — no umbrella entry.
 func TestCrossProjectThread_NoUmbrellaForSingleRepoTicket(t *testing.T) {
-	rep := fixtureReport() // CLI-1396 only in consultation-service
+	rep := fixtureReport() // CLI-1396 only in consult-service
 	threads := CrossProjectThread(rep)
 	for _, th := range threads {
 		if strings.Contains(th, "CLI-1396") {

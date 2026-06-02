@@ -11,6 +11,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net/url"
+	"os"
 
 	_ "modernc.org/sqlite" // register "sqlite" driver
 )
@@ -118,6 +119,20 @@ func Open(ctx context.Context, path string) (*DB, error) {
 		_ = wdb.Close()
 		_ = rdb.Close()
 		return nil, fmt.Errorf("store: apply migrations: %w", err)
+	}
+
+	// The database holds all session transcripts, paths, and worklog data —
+	// sensitive material that must not be world-readable. The parent dir is
+	// the primary guard (0700), but tighten the files too in case the home
+	// dir is traversable or the db is copied by a backup tool. We do this
+	// after the migration apply so the -wal/-shm sidecars already exist in
+	// WAL mode. Best-effort: a missing sidecar (synchronous=NORMAL may not
+	// have created it yet, or a checkpoint removed it) is harmless to skip,
+	// and re-chmod on a later Open is a no-op.
+	for _, p := range []string{path, path + "-wal", path + "-shm"} {
+		if _, statErr := os.Stat(p); statErr == nil {
+			_ = os.Chmod(p, 0o600)
+		}
 	}
 
 	return db, nil

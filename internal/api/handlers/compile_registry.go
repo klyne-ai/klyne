@@ -36,6 +36,18 @@ type CompileJob struct {
 // as spawnClaudeProductivitySync, injectable for tests.
 type compileRunFn func(ctx context.Context, projectPath, day, modelKey string) (claudeRunResult, error)
 
+// perServiceCompileTimeout is the per-subprocess budget for one service's
+// productivity-sync run.
+const perServiceCompileTimeout = 10 * time.Minute
+
+// compileJobSlack is extra wall-clock head-room on top of the sum of the
+// per-service budgets, covering scheduling, MCP startup, and the subprocess
+// WaitDelay grace on each kill. The job-level watchdog uses
+// len(services)*perServiceCompileTimeout + compileJobSlack as its overall
+// deadline so a misbehaving runCmd can never pin the day's slot as "running"
+// forever (combined with cmd.WaitDelay this fully closes the wedge).
+const compileJobSlack = 2 * time.Minute
+
 // CompileJobRegistry holds one *CompileJob per day behind a mutex and
 // drives each job's detached goroutine. In-memory only (Option A): a
 // daemon restart loses in-flight jobs and the user re-clicks Compile.
@@ -44,13 +56,26 @@ type CompileJobRegistry struct {
 	jobs   map[string]*CompileJob // keyed by day
 	db     *store.DB              // for persistKlyneUsage; nil in registry-only tests
 	runCmd compileRunFn
+
+	// perServiceTimeout / jobSlack are the per-subprocess budget and the
+	// overall-job head-room. They default to perServiceCompileTimeout /
+	// compileJobSlack; tests override them to tiny values to exercise the
+	// watchdog without waiting minutes.
+	perServiceTimeout time.Duration
+	jobSlack          time.Duration
 }
 
 // NewCompileJobRegistry constructs an empty registry. db may be nil in
 // unit tests that only exercise state transitions (persistKlyneUsage
 // tolerates a nil db by skipping the write — see Start's goroutine).
 func NewCompileJobRegistry(db *store.DB, runCmd compileRunFn) *CompileJobRegistry {
-	return &CompileJobRegistry{jobs: map[string]*CompileJob{}, db: db, runCmd: runCmd}
+	return &CompileJobRegistry{
+		jobs:              map[string]*CompileJob{},
+		db:                db,
+		runCmd:            runCmd,
+		perServiceTimeout: perServiceCompileTimeout,
+		jobSlack:          compileJobSlack,
+	}
 }
 
 // Start creates and launches a job for day, or returns the existing one
@@ -94,10 +119,65 @@ func (r *CompileJobRegistry) Status(day string) (CompileJob, bool) {
 }
 
 // execute runs each service sequentially on a detached context so a
-// client reload cannot cancel it. Each service gets the existing
-// 10-minute per-subprocess timeout. Per-service state and the overall
-// job status are mutated under the registry lock.
+// client reload cannot cancel it. Each service gets the per-subprocess
+// timeout. Per-service state and the overall job status are mutated under
+// the registry lock.
+//
+// A job-level watchdog guarantees the job ALWAYS reaches a terminal status
+// and frees the day's "running" slot, even if a runCmd ignores its context
+// and blocks forever: the per-service loop runs in a child goroutine driven
+// by jobCtx (an overall budget of len(services)*perService + slack); if that
+// deadline fires before the loop returns, execute records a terminal failed
+// status and returns without waiting on the wedged goroutine. (Combined with
+// cmd.WaitDelay on the real spawn, a genuine subprocess kill cannot wedge
+// either path.)
 func (r *CompileJobRegistry) execute(job *CompileJob) {
+	overall := time.Duration(len(job.Services))*r.perServiceTimeout + r.jobSlack
+	jobCtx, jobCancel := context.WithTimeout(context.Background(), overall)
+	defer jobCancel()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		r.runServices(jobCtx, job)
+	}()
+
+	select {
+	case <-done:
+		// Worker loop finished and already set the terminal status.
+		return
+	case <-jobCtx.Done():
+		// Watchdog fired: the worker loop is wedged (a runCmd ignored its
+		// context). Force the job to a terminal status so the day's slot is
+		// freed; mark any not-yet-terminal services as failed. The leaked
+		// worker goroutine (if any) will set its own per-service fields later
+		// under the lock, but the job is already terminal and re-Compile is
+		// unblocked.
+		r.mu.Lock()
+		if job.FinishedAt == 0 {
+			for i := range job.Services {
+				switch job.Services[i].Status {
+				case "queued", "running":
+					job.Services[i].Status = "failed"
+					job.Services[i].FinishedAt = time.Now().UnixMilli()
+					if job.Services[i].Error == "" {
+						job.Services[i].Error = "compile job exceeded overall budget"
+					}
+				}
+			}
+			job.Status = "failed"
+			job.FinishedAt = time.Now().UnixMilli()
+		}
+		r.mu.Unlock()
+	}
+}
+
+// runServices runs every service sequentially under jobCtx. It is the body
+// of the watchdog'd worker goroutine; on normal completion it sets the job's
+// terminal status. Per-service ctx is the smaller of the per-service budget
+// and jobCtx's remaining deadline so a slow early service can't starve later
+// ones past the overall budget.
+func (r *CompileJobRegistry) runServices(jobCtx context.Context, job *CompileJob) {
 	okCount, failCount := 0, 0
 	for i := range job.Services {
 		path := job.Services[i].ProjectPath
@@ -106,7 +186,7 @@ func (r *CompileJobRegistry) execute(job *CompileJob) {
 			s.StartedAt = time.Now().UnixMilli()
 		})
 
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		ctx, cancel := context.WithTimeout(jobCtx, r.perServiceTimeout)
 		start := time.Now()
 		res, runErr := r.runCmd(ctx, path, job.Day, job.Model)
 		dur := time.Since(start).Milliseconds()
@@ -160,8 +240,12 @@ func (r *CompileJobRegistry) execute(job *CompileJob) {
 		final = "partial"
 	}
 	r.mu.Lock()
-	job.Status = final
-	job.FinishedAt = time.Now().UnixMilli()
+	// The watchdog may have already forced a terminal status if it fired in a
+	// tight race; don't clobber it.
+	if job.FinishedAt == 0 {
+		job.Status = final
+		job.FinishedAt = time.Now().UnixMilli()
+	}
 	r.mu.Unlock()
 }
 

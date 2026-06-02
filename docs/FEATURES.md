@@ -74,9 +74,9 @@ Top projects by token usage:
 
 | Project | tokens_in (cached + uncached) | messages |
 |---|---:|---:|
-| `Learning/oms-service` | 3.10 B | 12,982 |
+| `Learning/orders-service` | 3.10 B | 12,982 |
 | `Learning/trackIt` | 2.66 B | 23,868 |
-| `Learning/operations-app` | 1.24 B | 11,457 |
+| `Learning/ops-app` | 1.24 B | 11,457 |
 | `Private/project-redacted` | 980 M | 5,893 |
 | `Learning/trackIt/.worktrees/build-ios-app-xeD9x` | 773 M | 3,605 |
 
@@ -223,7 +223,7 @@ actions we have a prepare…
 
 ### A5 · `get_pre_compact_context` — recover what `/compact` ate
 
-**Real call** (against `15009012-…` — an oms-service session that ran `/compact` on 2026-04-15):
+**Real call** (against `15009012-…` — an orders-service session that ran `/compact` on 2026-04-15):
 
 ```json
 $ mcp__klyne__get_pre_compact_context session_id="15009012-…" limit=8
@@ -233,7 +233,7 @@ $ mcp__klyne__get_pre_compact_context session_id="15009012-…" limit=8
   "trigger": "manual",
   "pre_tokens": 793401,
   "session_id": "15009012-8c13-4a5d-88d9-2f1f6894ecaa",
-  "path": "~/.claude/projects/-Users-user-Desktop-Learning-oms-service/15009012-8c13-4a5d-88d9-2f1f6894ecaa.jsonl"
+  "path": "~/.claude/projects/-Users-user-Desktop-Learning-orders-service/15009012-8c13-4a5d-88d9-2f1f6894ecaa.jsonl"
 }
 ```
 
@@ -247,7 +247,7 @@ $ mcp__klyne__get_pre_compact_context session_id="15009012-…" limit=8
 
 **Read that last row again.** `/compact` shrank a 793,401-token conversation to 9,002 tokens — **88× compression**. Everything in those 784,399 missing tokens — file paths, command stems, the test outputs, the tool-result lines — is lost from the AI's view. klyne reads it back from disk.
 
-**Real-world story.** Three weeks ago you debugged a benefit-engine bug in `oms-service`, compacted, debugged some more, compacted again, debugged some more, compacted a third time. **Today, if Claude says "let me re-read the file to remember"**, you type `/klyne:precompact` and get back the lost reasoning — including the manual decisions that drove the design.
+**Real-world story.** Three weeks ago you debugged a benefit-engine bug in `orders-service`, compacted, debugged some more, compacted again, debugged some more, compacted a third time. **Today, if Claude says "let me re-read the file to remember"**, you type `/klyne:precompact` and get back the lost reasoning — including the manual decisions that drove the design.
 
 **Useful for you?** Absolutely. Three `/compact` events in one session. The audit found two more in your Codex transcripts. Every one of these is recoverable content.
 
@@ -663,7 +663,7 @@ $ klyne subagents --since=168h
 | Parent session | Project                                | Subagents | Tokens in | Tokens out | Cache % | Last activity |
 |---|---|---:|---:|---:|---:|---|
 | ccf1c911       | …/Private/project-redacted             |     31 | 201.1M | 882k | 96% | 4d ago |
-| 081215ee       | …/Learning/consultation-service        |      3 |  33.5M | 149k | 97% | 14h ago |
+| 081215ee       | …/Learning/consult-service        |      3 |  33.5M | 149k | 97% | 14h ago |
 | 7eba9e85       | …/worktrees/agent-a08f0df6             |      4 |  30.8M |  97k | 95% | 16h ago |
 | 6a9b785d       | …/worktrees/musing-tereshkova-a2a74d   |      2 |  20.4M |  40k | 97% | 1d ago |
 | a198b00e       | …/Project/klyne                        |      3 |   9.4M |  15k | 88% | 2d ago |
@@ -671,7 +671,7 @@ $ klyne subagents --since=168h
 | aeba0a52       | …/.worktrees/feat-joint-ledger-splits  |      2 |   4.5M |  13k | 92% | 6d ago |
 | 9706c1fc       | …/worktrees/focused-carson-a4a485      |      2 |   3.9M | 8.8k | 53% | 2d ago |
 | fe266454       | …/ai-for-bharat-hackthon/judgmentflow  |      3 |   3.6M |  42k | 89% | 6d ago |
-| c099ff1b       | …/Learning/consultation-service        |      3 |   2.2M |  10k | 87% | 6d ago |
+| c099ff1b       | …/Learning/consult-service        |      3 |   2.2M |  10k | 87% | 6d ago |
 ```
 
 **Real-world story.** The number that should leap off the screen: **session `ccf1c911` in a redacted private project spawned 31 subagents that collectively burned 201 M input tokens (96 % cached) in 4 days.** Until klyne shipped this command, every one of those tokens was **invisible** in the parent session's `cost_usd` field — Claude Code's cost only counts the *result* of a Task tool call, not the subagent's full conversation. **Your real spend was higher than Claude Code told you.**
@@ -866,7 +866,7 @@ wrote 3047 spans to /tmp/klyne-demo/spans.jsonl
     "gen_ai.usage.output_tokens": 511,
     "gen_ai.cost.usd": 1.50895875,
     "klyne.cli": "claude",
-    "klyne.project_path": "~/Desktop/Learning/operations-app",
+    "klyne.project_path": "~/Desktop/Learning/ops-app",
     "klyne.session_id": "b888da42-9c9f-4add-950f-d5dca43f72ff"
   },
   "resource": {"service.name": "klyne", "service.namespace": "ai-coding-cli"},
@@ -1019,9 +1019,9 @@ $ curl http://127.0.0.1:7878/usage/stats?cli=claude&days=30
 ```json
 {
   "buckets": [
-    {"key": "Learning/oms-service",      "tokens_in": 3096644327, "tokens_out": 7542820, "count": 12982},
+    {"key": "Learning/orders-service",      "tokens_in": 3096644327, "tokens_out": 7542820, "count": 12982},
     {"key": "Learning/trackIt",          "tokens_in": 2655796673, "tokens_out": 12574600, "count": 23868},
-    {"key": "Learning/operations-app",   "tokens_in": 1238042520, "tokens_out": 3723044, "count": 11457},
+    {"key": "Learning/ops-app",   "tokens_in": 1238042520, "tokens_out": 3723044, "count": 11457},
     {"key": "Private/project-redacted",  "tokens_in":  980423567, "tokens_out": 3796311, "count": 5893},
     {"key": "trackIt/.worktrees/build-ios-app", "tokens_in": 772512368, "tokens_out": 2930489, "count": 3605}
   ]
@@ -1047,7 +1047,7 @@ $ curl http://127.0.0.1:7878/usage/stats?cli=claude&days=30
   {
     "id": "081215ee-…",
     "cli": "claude",
-    "project_path": "~/Desktop/Learning/consultation-service",
+    "project_path": "~/Desktop/Learning/consult-service",
     "msg_count": 465,
     "tokens_in": 45270782,
     "tokens_out": 372594,
@@ -1066,7 +1066,7 @@ $ curl http://127.0.0.1:7878/usage/stats?cli=claude&days=30
 | `/stats` (Models) | `/usage/stats` aggregated | Models-by-cost: `opus-4-7` dominates, `opus-4-6` and `sonnet-4-6` distant runners (per UI brief) |
 | `/stats` (Daily) | `/usage/stats.daily` | 30 rows; today 2,750 messages / $835 |
 | `/stats` (Stats) | `/usage/stats` extras | **GitHub-style 12-week heatmap, current streak 30, longest 30, active days 30, peak hour 18:00** |
-| `/projects` | `/cost/summary?group=project` | 28 projects; `oms-service` (3.1B), `trackIt` (2.7B), `operations-app` (1.2B) lead |
+| `/projects` | `/cost/summary?group=project` | 28 projects; `orders-service` (3.1B), `trackIt` (2.7B), `ops-app` (1.2B) lead |
 | `/projects/[name]` | drill-down on one project | All sessions, files, decisions for one repo |
 | `/sessions/[id]` | `/sessions/:id` + `/sessions/:id/messages` | Full transcript, every tool call, token timeline, resume command |
 | `/search` | `/search?q=…` (FTS5) | Searched `jointLedgerController` above — 3 hits in 4 ms |
@@ -1158,11 +1158,11 @@ If any precondition fails, **stop and tell the human** — the rest of the playb
 
 **Goal.** Capture klyne recovering messages from before a `/compact` event — the killer demo.
 
-**Preconditions.** G1-G3 satisfied. **For this shot, you don't need a fresh Claude Code session — you need access to a Claude Code session that already has a `/compact` event in its history.** The maintainer's `oms-service` repo has one: session `15009012-8c13-4a5d-88d9-2f1f6894ecaa`.
+**Preconditions.** G1-G3 satisfied. **For this shot, you don't need a fresh Claude Code session — you need access to a Claude Code session that already has a `/compact` event in its history.** The maintainer's `orders-service` repo has one: session `15009012-8c13-4a5d-88d9-2f1f6894ecaa`.
 
-**Canonical path — invoke from Claude Code chat in the oms-service repo:**
+**Canonical path — invoke from Claude Code chat in the orders-service repo:**
 
-1. In a fresh terminal: `cd ~/Desktop/Learning/oms-service && claude`
+1. In a fresh terminal: `cd ~/Desktop/Learning/orders-service && claude`
 2. Wait for Claude Code prompt.
 3. Click into chat input.
 4. Type: `/klyne:precompact`
@@ -1380,7 +1380,7 @@ Five minutes ≈ 750 words spoken at a calm pace. Aim for **one feature per minu
 **On screen:** terminal showing `klyne audit-sessions --limit 20` mid-run, then the output line: `/compact events detected: 0` and `Codex /compact events: 2`.
 
 **Voiceover:**
-> "You know that moment in Claude Code when you run `/compact`, save your context, and 20 minutes later the AI says 'let me re-read the file to remember'? That's *800,000 tokens* of conversation gone — and you have no idea what was in there. **In my own transcripts, klyne found three compact events in one oms-service session — one of them shrank a 793K-token conversation to 9K. That's 88× compression, and everything in those 784K missing tokens is recoverable.** This is klyne."
+> "You know that moment in Claude Code when you run `/compact`, save your context, and 20 minutes later the AI says 'let me re-read the file to remember'? That's *800,000 tokens* of conversation gone — and you have no idea what was in there. **In my own transcripts, klyne found three compact events in one orders-service session — one of them shrank a 793K-token conversation to 9K. That's 88× compression, and everything in those 784K missing tokens is recoverable.** This is klyne."
 
 ### 0:30–1:00 — What klyne is
 
@@ -1436,7 +1436,7 @@ Pre-fix items (resolved 2026-05-12 — these are no longer blockers):
 Active recording prep:
 
 - [ ] Daemon running (`./bin/klyne`) at least 5 minutes before any audit shot
-- [ ] Have `~/Desktop/Learning/oms-service` Claude Code session open with the `15009012` rollout available for the pre-compact demo (Shot 4)
+- [ ] Have `~/Desktop/Learning/orders-service` Claude Code session open with the `15009012` rollout available for the pre-compact demo (Shot 4)
 - [ ] If recording Shot 5 (advisor), have the **temporary plan-cap switch** ready: `./bin/klyne config set plan custom --cap=1000000` (and `set plan max-5x` to restore afterwards)
 - [ ] Browser pre-loaded with three tabs: `/cockpit`, `/stats` (on Stats tab so heatmap is visible), and `/sessions/7eba9e85-…`
 - [ ] Terminal font ≥ 16 pt, high-contrast colour scheme

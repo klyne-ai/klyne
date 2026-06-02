@@ -115,7 +115,7 @@ function SearchPalette({ onClose, onPick }) {
 
   // Mock recent hits for demo
   const hits = q.length > 0 ? [
-    { kind: "msg", project: "operations-app", session: "ef03ea3", text: `…fix the ${q} race in the payment-followup webhook before re-running…`, ago: "16h" },
+    { kind: "msg", project: "ops-app", session: "ef03ea3", text: `…fix the ${q} race in the payment-followup webhook before re-running…`, ago: "16h" },
     { kind: "session", project: "klyne", session: "191eef49", text: `KLYNE_SUMMARY: ${q} flow refactored, importance 8`, ago: "1d" },
     { kind: "runbook", project: null, session: null, text: `runbook · "${q}" handling — rollback playbook`, ago: "3d" },
   ] : [];

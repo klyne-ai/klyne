@@ -95,7 +95,11 @@ func mergeIntervals(in []interval) []interval {
 }
 
 // totalMinutes sums the lengths of a set of (assumed already merged)
-// intervals, in whole minutes.
+// intervals, in whole minutes, ROUNDED to the nearest minute. This MUST
+// match aggregate.go's UnionMinutes rounding so the per-session and
+// per-repo figures (GlobalActiveMinutes / SessionActiveMinutes) line up
+// with the snapshot headline (UnionMinutes) instead of drifting by up to
+// ~1 min/group — a 5m40s span yields 6 from both, not 5 here and 6 there.
 func totalMinutes(ivs []interval) int {
 	var total time.Duration
 	for _, iv := range ivs {
@@ -103,7 +107,7 @@ func totalMinutes(ivs []interval) int {
 			total += d
 		}
 	}
-	return int(total.Minutes())
+	return int((total + 30*time.Second) / time.Minute)
 }
 
 // AttributeMinutes implements D1/§6.4 deterministically (NO LLM):

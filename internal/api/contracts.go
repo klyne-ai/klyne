@@ -771,7 +771,7 @@ type CodeReviewContextResponse struct {
 // for the dashboard's per-service view.
 type MemoryProjectGroup struct {
 	// ProjectPath is the absolute project root (e.g.
-	// "/Users/mohitpatel/Desktop/Learning/consultation-service").
+	// "/Users/you/code/example-service").
 	ProjectPath string `json:"project_path"`
 	// Name is the last path segment of ProjectPath — the human-
 	// readable "service" label used as the group heading.

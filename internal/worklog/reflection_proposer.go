@@ -90,7 +90,7 @@ func LoadPendingEntries(ctx context.Context, db *store.DB, projectPath string, t
 		// recorder upserts on (project_path, day) so each run rewrites
 		// the day's typed payload from scratch; threading the cursor in
 		// would create a permanent "covered but not synthesized" gap
-		// whenever an earlier reflect under-cited (the operations-app
+		// whenever an earlier reflect under-cited (the ops-app
 		// 2026-05-26 1-detail card bug).
 		loc = day.Location()
 		dayBound = true

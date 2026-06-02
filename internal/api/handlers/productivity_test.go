@@ -45,7 +45,7 @@ func userEmailForTest(t *testing.T) string {
 		}
 	}
 	// Substrate seed alias (see internal/productivity discover.go).
-	return "mohitpatel9753@gmail.com"
+	return "dev@example.com"
 }
 
 func TestProductivity_Dates(t *testing.T) {

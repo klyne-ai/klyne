@@ -8,7 +8,9 @@ export interface NavItem {
   section: 'workspace' | 'capture';
 }
 
-export const NAV: readonly NavItem[] = [
+import { SHOW_REFLECTIONS } from '$lib/featureFlags';
+
+const ALL_NAV: readonly NavItem[] = [
   { id: 'live',         label: 'Live',         href: '/',             icon: 'live',         section: 'workspace' },
   { id: 'productivity', label: 'Productivity', href: '/productivity', icon: 'productivity', section: 'workspace' },
   { id: 'projects',     label: 'Projects',     href: '/projects',     icon: 'projects',     section: 'workspace' },
@@ -16,6 +18,11 @@ export const NAV: readonly NavItem[] = [
   { id: 'runbooks',     label: 'Runbooks',     href: '/runbooks',     icon: 'runbooks',     section: 'workspace' },
   { id: 'worklog',      label: 'Worklog',      href: '/worklog',      icon: 'branch',       section: 'capture'   },
 ] as const;
+
+// The Worklog tab is reflection-centric; hide it when reflections are off.
+export const NAV: readonly NavItem[] = ALL_NAV.filter(
+  (n) => SHOW_REFLECTIONS || n.id !== 'worklog',
+);
 
 export function navIdForPath(pathname: string): NavId {
   if (pathname.startsWith('/productivity')) return 'productivity';

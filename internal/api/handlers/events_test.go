@@ -292,6 +292,105 @@ func TestEventsHandler_LastEventID_Replay(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// TestEventsHandler_LastEventID_RoundTrip
+// ---------------------------------------------------------------------------
+
+// TestEventsHandler_LastEventID_RoundTrip is the finding #4 regression: it
+// reads the ACTUALLY-EMITTED `id:` value from a live frame, then reconnects
+// with that exact value as Last-Event-ID and asserts the replay resumes from
+// the next sequence with no gap and no dupe. Previously the handler emitted a
+// per-frame counter that diverged from the ring's seq key, so a round-tripped
+// id never lined up with the ring.
+func TestEventsHandler_LastEventID_RoundTrip(t *testing.T) {
+	t.Parallel()
+	// Short heartbeat so a `: ping` is very likely to interleave — it must NOT
+	// advance the id: cursor.
+	hub := api.NewHub(api.WithHeartbeatInterval(20 * time.Millisecond))
+	defer hub.Close()
+
+	server := httptest.NewServer(newTestRouter(hub))
+	defer server.Close()
+
+	// First connection: publish 3 events, read them, capture the id of the
+	// 2nd frame.
+	ctx1, cancel1 := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel1()
+	req1, _ := http.NewRequestWithContext(ctx1, http.MethodGet, server.URL+"/events", nil)
+	resp1, err := http.DefaultClient.Do(req1)
+	if err != nil {
+		t.Fatalf("GET /events: %v", err)
+	}
+	defer resp1.Body.Close()
+
+	for i := 1; i <= 3; i++ {
+		hub.Publish(api.MsgNewEvent(api.MsgNew{SessionID: fmt.Sprintf("a-%d", i)}))
+	}
+	frames := collectFrames(t, resp1, 3, 3*time.Second)
+	if len(frames) < 3 {
+		t.Fatalf("got %d frames, want 3", len(frames))
+	}
+	// Heartbeats are recorded as event "ping" by collectFrames; real frames
+	// carry a non-empty id. Find the real (non-ping) frames in order.
+	var real []sseFrame
+	for _, f := range frames {
+		if f.event == api.EventMsgNew {
+			real = append(real, f)
+		}
+	}
+	if len(real) < 2 {
+		t.Fatalf("got %d real frames, want >=2", len(real))
+	}
+	for _, f := range real {
+		if f.id == "" {
+			t.Fatalf("real frame missing id: %+v", f)
+		}
+	}
+	lastSeen := real[1].id // resume after the 2nd real event
+	cancel1()
+	resp1.Body.Close()
+
+	// Publish 2 more while disconnected; these must be replayed.
+	hub.Publish(api.MsgNewEvent(api.MsgNew{SessionID: "b-1"}))
+	hub.Publish(api.MsgNewEvent(api.MsgNew{SessionID: "b-2"}))
+
+	// Reconnect with the ACTUALLY-EMITTED id as Last-Event-ID.
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel2()
+	req2, _ := http.NewRequestWithContext(ctx2, http.MethodGet, server.URL+"/events", nil)
+	req2.Header.Set("Last-Event-ID", lastSeen)
+	resp2, err := http.DefaultClient.Do(req2)
+	if err != nil {
+		t.Fatalf("GET /events replay: %v", err)
+	}
+	defer resp2.Body.Close()
+
+	replay := collectFrames(t, resp2, 3, 3*time.Second)
+	var replayReal []sseFrame
+	for _, f := range replay {
+		if f.event == api.EventMsgNew {
+			replayReal = append(replayReal, f)
+		}
+	}
+	// Resuming after real[1] (the 2nd of a-1..a-3) must yield exactly: a-3,
+	// b-1, b-2 — no gap, no dupe of a-1/a-2.
+	if len(replayReal) < 3 {
+		t.Fatalf("got %d replayed real frames, want >=3 (a-3,b-1,b-2)", len(replayReal))
+	}
+	wantOrder := []string{"a-3", "b-1", "b-2"}
+	for i, want := range wantOrder {
+		if !strings.Contains(replayReal[i].data, want) {
+			t.Errorf("replay frame %d data %q does not contain %q", i, replayReal[i].data, want)
+		}
+	}
+	// No dupe of already-seen a-1/a-2.
+	for _, f := range replayReal {
+		if strings.Contains(f.data, "a-1") || strings.Contains(f.data, "a-2") {
+			t.Errorf("replay duplicated an already-acked event: %q", f.data)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
 // TestEventsHandler_Mount_Route
 // ---------------------------------------------------------------------------
 

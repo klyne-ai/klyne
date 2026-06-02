@@ -9,7 +9,7 @@ import (
 func TestCaptureSnapshot_CleanRepo(t *testing.T) {
 	dir := t.TempDir()
 	gitCmd(t, dir, "init", "-q", "-b", "feat/CLI-1396-pipeline")
-	commitFile(t, dir, "a.go", "package a\n", "first commit", "mohitpatel9753@gmail.com", time.Now().Add(-time.Hour))
+	commitFile(t, dir, "a.go", "package a\n", "first commit", "dev@example.com", time.Now().Add(-time.Hour))
 
 	snap, err := CaptureSnapshot(dir)
 	if err != nil {
@@ -48,7 +48,7 @@ func TestCaptureSnapshot_CleanRepo(t *testing.T) {
 func TestCaptureSnapshot_DirtyTree(t *testing.T) {
 	dir := t.TempDir()
 	gitCmd(t, dir, "init", "-q", "-b", "main")
-	commitFile(t, dir, "tracked.go", "package a\n", "first", "mohitpatel9753@gmail.com", time.Now().Add(-time.Hour))
+	commitFile(t, dir, "tracked.go", "package a\n", "first", "dev@example.com", time.Now().Add(-time.Hour))
 
 	// Modify a tracked file and add an untracked one — both must count.
 	if err := writeFile(filepath.Join(dir, "tracked.go"), "package a\n// changed\n"); err != nil {
@@ -80,7 +80,7 @@ func TestCaptureSnapshot_DirtyTree(t *testing.T) {
 func TestCaptureSnapshot_CapsDirtyFilesAt50(t *testing.T) {
 	dir := t.TempDir()
 	gitCmd(t, dir, "init", "-q", "-b", "main")
-	commitFile(t, dir, "seed.go", "package a\n", "seed", "mohitpatel9753@gmail.com", time.Now().Add(-time.Hour))
+	commitFile(t, dir, "seed.go", "package a\n", "seed", "dev@example.com", time.Now().Add(-time.Hour))
 
 	for i := 0; i < 70; i++ {
 		name := "f" + string(rune('a'+i%26)) + string(rune('0'+i/26)) + ".txt"
@@ -105,7 +105,7 @@ func TestCaptureSnapshot_CapsDirtyFilesAt50(t *testing.T) {
 func TestCaptureSnapshot_Worktree(t *testing.T) {
 	main := t.TempDir()
 	gitCmd(t, main, "init", "-q", "-b", "main")
-	commitFile(t, main, "a.go", "package a\n", "first", "mohitpatel9753@gmail.com", time.Now().Add(-time.Hour))
+	commitFile(t, main, "a.go", "package a\n", "first", "dev@example.com", time.Now().Add(-time.Hour))
 
 	wt := filepath.Join(t.TempDir(), "wt-CLI-9999")
 	gitCmd(t, main, "worktree", "add", "-q", "-b", "feat/CLI-9999-x", wt)
@@ -135,7 +135,7 @@ func TestCaptureSnapshot_NotAGitRepo(t *testing.T) {
 func TestCaptureSessionSnapshots_CoversMainAndWorktrees(t *testing.T) {
 	main := t.TempDir()
 	gitCmd(t, main, "init", "-q", "-b", "main")
-	commitFile(t, main, "a.go", "package a\n", "first", "mohitpatel9753@gmail.com", time.Now().Add(-time.Hour))
+	commitFile(t, main, "a.go", "package a\n", "first", "dev@example.com", time.Now().Add(-time.Hour))
 
 	wt := filepath.Join(t.TempDir(), "wt-CLI-1396")
 	gitCmd(t, main, "worktree", "add", "-q", "-b", "feat/CLI-1396", wt)

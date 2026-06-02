@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/klyne-ai/klyne/internal/productivity"
 )
 
 // gitRun runs a git command in dir with a deterministic identity/date so
@@ -38,7 +40,11 @@ func newSubstrateRepo(t *testing.T, when time.Time) string {
 			t.Fatal(err)
 		}
 	}
-	userEmail := "mohitpatel9753@gmail.com"
+	userEmail := "dev@example.com"
+	// Pin the §6.3 identity to the fixture author so the test is hermetic
+	// and does not depend on the machine's global `git config user.email`.
+	productivity.SetUserEmailAliases([]string{userEmail})
+	t.Cleanup(func() { productivity.SetUserEmailAliases(nil) })
 	write("a.go", "package a\n")
 	gitRun(t, dir, when, userEmail, "add", "a.go")
 	gitRun(t, dir, when, userEmail, "commit", "-m", "wire pipeline entrypoint")

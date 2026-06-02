@@ -3,6 +3,7 @@ package codex
 import (
 	"bufio"
 	"context"
+	"errors"
 	"io"
 	"log"
 	"os"
@@ -22,6 +23,13 @@ const (
 
 	// rolloutGlob matches Codex session files inside a date directory.
 	rolloutGlob = "rollout-*.jsonl"
+
+	// maxFileAge bounds how stale a rollout file may be and still be watched.
+	// Codex never re-opens a session file once it has gone quiet, so files
+	// untouched for longer are inert: watching them only burns file descriptors
+	// and kqueue wakeups (battery). Older files are skipped during discovery and
+	// the backstop scan.
+	maxFileAge = 7 * 24 * time.Hour
 )
 
 // tailState tracks read position for a single JSONL file.
@@ -79,7 +87,20 @@ func discoverFiles(root string) ([]string, error) {
 				if err != nil {
 					continue
 				}
-				files = append(files, matches...)
+				for _, m := range matches {
+					// Skip files untouched for longer than maxFileAge: they are
+					// inert (Codex never re-opens a quiet session) and watching
+					// them only wastes file descriptors and kqueue wakeups.
+					info, err := os.Stat(m)
+					if err != nil {
+						log.Printf("codex discover: stat %s: %v", m, err)
+						continue
+					}
+					if time.Since(info.ModTime()) > maxFileAge {
+						continue
+					}
+					files = append(files, m)
+				}
 			}
 		}
 	}
@@ -116,41 +137,104 @@ func (w *watcher) emitNew(ctx context.Context, path string) {
 		}
 	}
 
-	scanner := bufio.NewScanner(f)
 	// Codex turn_context payloads include full instructions blocks that can
-	// run into hundreds of KB. The default 64KB scanner buffer silently
-	// returns ErrTooLong on the first oversized line — see W4/W5 bug fix.
-	scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
-	for scanner.Scan() {
-		lineBytes := scanner.Bytes()
-		if len(lineBytes) == 0 {
+	// run into hundreds of KB. We use a bufio.Reader (not bufio.Scanner) so we
+	// can distinguish a complete, newline-terminated line from a partial line
+	// still being flushed: ReadBytes('\n') returns the bytes read so far plus
+	// io.EOF when no newline has arrived yet. We must NOT emit or advance the
+	// offset for such a partial fragment — otherwise a mid-flush fsnotify Write
+	// splits one line into two corrupt halves and drifts the offset by a phantom
+	// +1 (W4/W5/CRLF bug). Leaving the partial bytes unconsumed means the line
+	// is re-read in full on the next event, once its trailing '\n' lands.
+	reader := bufio.NewReaderSize(f, 64*1024)
+	for {
+		lineBytes, err := readLineLimited(reader, maxLineSize)
+		if len(lineBytes) > 0 && lineBytes[len(lineBytes)-1] == '\n' {
+			// Complete line. Advance offset by the exact bytes consumed
+			// (including the trailing newline, and any preceding '\r' for CRLF),
+			// then emit the trimmed content.
+			ts.offset += int64(len(lineBytes))
+
+			trimmed := trimLineEnding(lineBytes)
+			if len(trimmed) > 0 {
+				lineCopy := make([]byte, len(trimmed))
+				copy(lineCopy, trimmed)
+				select {
+				case w.events <- connectors.RawEvent{
+					Path: path,
+					Line: lineCopy,
+					Ts:   time.Now().UnixMilli(),
+				}:
+				case <-ctx.Done():
+					return
+				}
+			}
+			if ctx.Err() != nil {
+				return
+			}
 			continue
 		}
-		// Advance offset: line bytes + newline
-		ts.offset += int64(len(lineBytes)) + 1
 
-		// Copy bytes — scanner reuses its buffer.
-		lineCopy := make([]byte, len(lineBytes))
-		copy(lineCopy, lineBytes)
-
-		select {
-		case w.events <- connectors.RawEvent{
-			Path: path,
-			Line: lineCopy,
-			Ts:   time.Now().UnixMilli(),
-		}:
-		case <-ctx.Done():
+		// No trailing newline: either a partial line still being written, EOF,
+		// or an over-long line. In all cases we stop without emitting and
+		// without advancing the offset, so the bytes are re-read next time.
+		if err == errLineTooLong {
+			// Pathological line exceeding maxLineSize. Skip it by advancing to
+			// end-of-file so we don't spin forever re-reading it; a complete
+			// line this large is not something we can buffer.
+			log.Printf("codex: line larger than %d bytes in %s — skipping", maxLineSize, path)
+			if info, statErr := f.Stat(); statErr == nil {
+				ts.offset = info.Size()
+			}
 			return
 		}
+		if err != nil && err != io.EOF {
+			log.Printf("codex: read error in %s: %v", path, err)
+		}
+		return
 	}
-	if err := scanner.Err(); err != nil {
-		log.Printf("codex: scan error in %s: %v (line larger than 16MB will be skipped)", path, err)
-		// Recover: trust the on-disk size so we don't permanently re-read
-		// a partial buffered position.
-		if info, statErr := f.Stat(); statErr == nil {
-			ts.offset = info.Size()
+}
+
+// maxLineSize is the largest single JSONL line we will buffer. Codex
+// turn_context payloads can run into hundreds of KB; the historical bufio
+// scanner ceiling was 16MB, preserved here.
+const maxLineSize = 16 * 1024 * 1024
+
+// errLineTooLong signals that a single line exceeded maxLineSize before a
+// newline was seen.
+var errLineTooLong = errors.New("codex: line exceeds max size")
+
+// readLineLimited reads a single line (up to and including '\n') from r,
+// bounded by limit bytes. It returns the bytes read. If a newline is found the
+// returned slice ends in '\n'. If EOF is hit first, the partial bytes are
+// returned with io.EOF. If limit is exceeded before a newline, it returns
+// errLineTooLong.
+func readLineLimited(r *bufio.Reader, limit int) ([]byte, error) {
+	var buf []byte
+	for {
+		b, err := r.ReadByte()
+		if err != nil {
+			return buf, err
+		}
+		buf = append(buf, b)
+		if b == '\n' {
+			return buf, nil
+		}
+		if len(buf) > limit {
+			return buf, errLineTooLong
 		}
 	}
+}
+
+// trimLineEnding strips a trailing '\n' and an optional preceding '\r' (CRLF).
+func trimLineEnding(b []byte) []byte {
+	if len(b) > 0 && b[len(b)-1] == '\n' {
+		b = b[:len(b)-1]
+	}
+	if len(b) > 0 && b[len(b)-1] == '\r' {
+		b = b[:len(b)-1]
+	}
+	return b
 }
 
 // warmupOffsets back-fills any existing JSONL content on Watch start.

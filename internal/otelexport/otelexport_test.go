@@ -85,6 +85,62 @@ func TestEmit_OneSpanPerAssistantMessage(t *testing.T) {
 	}
 }
 
+func TestEmit_RedactPaths(t *testing.T) {
+	ctx := context.Background()
+	db := openDB(t)
+	engine, _ := cost.New(config.Defaults())
+
+	const full = "/Users/alice/work/secret-internal-project"
+	s := &connectors.Session{
+		ID: "s-redact", CLI: connectors.CLIClaude, ProjectPath: full,
+		StartedAt: 1, LastMsgAt: 1, Status: connectors.SessionStatusActive,
+		Model: "claude-sonnet-4-5", RawPath: "/tmp/r",
+	}
+	if err := store.UpsertSession(ctx, db, s); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	if err := store.InsertMessage(ctx, db, &connectors.Message{
+		ID: "a", SessionID: s.ID, CLI: connectors.CLIClaude,
+		Role: connectors.RoleAssistant, TokensIn: 100, Model: "claude-sonnet-4-5", Ts: 100,
+	}); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	// Redacted (default callers should use): basename only, no full path,
+	// plus a stable project_hash.
+	var buf bytes.Buffer
+	if _, err := Emit(ctx, db, engine, &buf, Filter{RedactPaths: true}); err != nil {
+		t.Fatalf("Emit: %v", err)
+	}
+	if strings.Contains(buf.String(), full) {
+		t.Errorf("redacted output leaked full path:\n%s", buf.String())
+	}
+	var span Span
+	if err := json.Unmarshal([]byte(strings.TrimSpace(buf.String())), &span); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got, _ := span.Attributes["klyne.project_path"].(string); got != "secret-internal-project" {
+		t.Errorf("project_path = %q; want basename only", got)
+	}
+	if got, _ := span.Attributes["klyne.project_hash"].(string); got != shortHashPath(full) {
+		t.Errorf("project_hash = %q; want %q", got, shortHashPath(full))
+	}
+
+	// Not redacted: full path retained, no hash.
+	var buf2 bytes.Buffer
+	if _, err := Emit(ctx, db, engine, &buf2, Filter{RedactPaths: false}); err != nil {
+		t.Fatalf("Emit raw: %v", err)
+	}
+	if !strings.Contains(buf2.String(), full) {
+		t.Errorf("raw output should contain full path:\n%s", buf2.String())
+	}
+	var span2 Span
+	_ = json.Unmarshal([]byte(strings.TrimSpace(buf2.String())), &span2)
+	if _, ok := span2.Attributes["klyne.project_hash"]; ok {
+		t.Error("raw output should not carry klyne.project_hash")
+	}
+}
+
 func TestDeriveIDs_Deterministic(t *testing.T) {
 	a := deriveTraceID("sess-A")
 	b := deriveTraceID("sess-A")

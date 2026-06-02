@@ -57,6 +57,11 @@ klyne daemon does NOT need to be running.`,
 func runAudit(cmd *cobra.Command, _ []string) error {
 	limit, _ := cmd.Flags().GetInt("limit")
 	outPath, _ := cmd.Flags().GetString("out")
+	// Clamp negatives so the `rows[:limit]` truncations in discovery cannot
+	// panic with a negative slice bound (e.g. `--limit -1`).
+	if limit < 0 {
+		limit = 0
+	}
 
 	paths, err := discoverClaudeTranscripts(limit)
 	if err != nil {

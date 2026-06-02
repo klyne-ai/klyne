@@ -192,7 +192,7 @@ func TestUpsertStopSummaryWithEntry_RoundTrip(t *testing.T) {
 		Categories: map[string][]store.WorklogItem{
 			"features_worked_on": {{
 				Summary: "phone/lab props",
-				Repo:    "operations-app",
+				Repo:    "ops-app",
 				Refs:    []string{"c5c97a86"},
 			}},
 		},

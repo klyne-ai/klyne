@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"time"
 )
 
 // askSpawnModel is the model used for Ask Klyne. Sonnet 4.6 is the
@@ -26,6 +27,10 @@ func spawnAskClaude(ctx context.Context, prompt string) (claudeRunResult, error)
 		"--",
 		prompt,
 	)
+	// WaitDelay bounds Wait() after a ctx cancel/kill so an orphaned
+	// `klyne mcp` grandchild holding the captured pipe open cannot block
+	// Wait() forever (turns the hang into a clean timeout error).
+	cmd.WaitDelay = 5 * time.Second
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

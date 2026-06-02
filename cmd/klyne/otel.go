@@ -51,12 +51,13 @@ func newOtelEmitCmd() *cobra.Command {
 		sinceStr    string
 		outPath     string
 		limit       int
+		rawPaths    bool
 	)
 	c := &cobra.Command{
 		Use:   "emit",
 		Short: "Write one OTel-shaped span per assistant message to a file or stdout",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runOtelEmit(cmd, projectPath, sinceStr, outPath, limit)
+			return runOtelEmit(cmd, projectPath, sinceStr, outPath, limit, rawPaths)
 		},
 		SilenceUsage: true,
 	}
@@ -64,10 +65,12 @@ func newOtelEmitCmd() *cobra.Command {
 	c.Flags().StringVar(&sinceStr, "since", "", "Go duration; only messages newer than this")
 	c.Flags().StringVar(&outPath, "out", "", "write spans here (default: stdout)")
 	c.Flags().IntVar(&limit, "limit", 1000, "max sessions to walk")
+	c.Flags().BoolVar(&rawPaths, "raw-paths", false,
+		"emit the full absolute project path instead of the redacted basename+hash (leaks local paths to the collector)")
 	return c
 }
 
-func runOtelEmit(cmd *cobra.Command, projectPath, sinceStr, outPath string, limit int) error {
+func runOtelEmit(cmd *cobra.Command, projectPath, sinceStr, outPath string, limit int, rawPaths bool) error {
 	cfg, err := config.Load()
 	if err != nil {
 		cfg = config.Defaults()
@@ -97,7 +100,9 @@ func runOtelEmit(cmd *cobra.Command, projectPath, sinceStr, outPath string, limi
 
 	var w io.Writer = cmd.OutOrStdout()
 	if outPath != "" {
-		f, err := os.Create(outPath)
+		// 0600: the spans may carry project paths / model usage the user does
+		// not want other local accounts to read before they upload it.
+		f, err := os.OpenFile(outPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 		if err != nil {
 			return fmt.Errorf("create %s: %w", outPath, err)
 		}
@@ -115,6 +120,8 @@ func runOtelEmit(cmd *cobra.Command, projectPath, sinceStr, outPath string, limi
 		ProjectPath: projectPath,
 		SinceMs:     since,
 		MaxSessions: limit,
+		// Redact paths by default; --raw-paths opts back into the full path.
+		RedactPaths: !rawPaths,
 	})
 	if err != nil {
 		return err

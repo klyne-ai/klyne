@@ -16,23 +16,39 @@
 
   // Lazy-load tail messages per visible thread; cached by session_id.
   let recents = $state<Record<string, Message[]>>({});
+  // The thread's msg_count at the time we cached recents[id]. We refetch
+  // when the live msg_count advances past this, so the preview tracks the
+  // stream instead of freezing on the first tail we ever fetched.
+  const recentsKey: Record<string, number> = {};
   const inFlight = new Set<string>();
 
   $effect(() => {
-    const currentIds = new Set(cockpitStore.threads.map((t) => t.session_id));
+    const threads = cockpitStore.threads;
+    const currentIds = new Set(threads.map((t) => t.session_id));
 
     // Prune entries for sessions that have aged out of the cockpit window.
     const pruned: Record<string, Message[]> = {};
     for (const id of currentIds) if (recents[id]) pruned[id] = recents[id];
     if (Object.keys(pruned).length !== Object.keys(recents).length) recents = pruned;
+    for (const id of Object.keys(recentsKey)) if (!currentIds.has(id)) delete recentsKey[id];
 
-    // Lazily fetch tail messages for sessions we haven't fetched yet.
-    for (const id of currentIds) {
-      if (recents[id] || inFlight.has(id)) continue;
+    // Fetch tail messages for sessions we haven't fetched yet, or whose
+    // thread has advanced (msg_count grew) since our last fetch.
+    for (const t of threads) {
+      const id = t.session_id;
+      const fresh = recents[id] && recentsKey[id] >= t.msg_count;
+      if (fresh || inFlight.has(id)) continue;
       inFlight.add(id);
-      void fetchMessages(id, { limit: 10, order: 'desc' })
+      const seenCount = t.msg_count;
+      // Fetch conversational turns only (server-side filter): codex/Claude
+      // sessions interleave many tool/system/empty-assistant rows between
+      // prose, so a raw 10-row tail can be all noise → "no recent turns".
+      // 20 newest turns is enough for the 3-message preview + an accurate
+      // "expand · +N" hidden count.
+      void fetchMessages(id, { limit: 20, order: 'desc', conversational: true })
         .then((r) => {
-          if (!cockpitStore.threads.some((t) => t.session_id === id)) return;
+          if (!cockpitStore.threads.some((th) => th.session_id === id)) return;
+          recentsKey[id] = seenCount;
           recents = { ...recents, [id]: r.messages };
         })
         .finally(() => { inFlight.delete(id); });

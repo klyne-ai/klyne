@@ -33,11 +33,11 @@ func TestBuildReport_RisksNarrativeAndReflectionStatus(t *testing.T) {
 	now := time.Date(2026, 5, 19, 16, 0, 0, 0, time.UTC)
 	day := "2026-05-19"
 
-	// consultation-service: 3 commits, committed-local-only, unpushed
+	// consult-service: 3 commits, committed-local-only, unpushed
 	// (the exact CLI-1396 blind spot the old worklog missed).
 	scan := []ScanResult{{
-		Repo:     "consultation-service",
-		Dir:      "/repos/consultation-service",
+		Repo:     "consult-service",
+		Dir:      "/repos/consult-service",
 		Branch:   "feat/CLI-1396-pipeline",
 		TicketID: "CLI-1396",
 		Ship:     ShipLocal,
@@ -53,7 +53,7 @@ func TestBuildReport_RisksNarrativeAndReflectionStatus(t *testing.T) {
 	}}
 
 	attrib := map[string]RepoTime{
-		"/repos/consultation-service": {AIMinutes: 130},
+		"/repos/consult-service": {AIMinutes: 130},
 	}
 
 	in := ReportInput{
@@ -62,12 +62,12 @@ func TestBuildReport_RisksNarrativeAndReflectionStatus(t *testing.T) {
 		Scans:       scan,
 		Attribution: attrib,
 		ProjectPaths: map[string]string{
-			"/repos/consultation-service": "/repos/consultation-service",
+			"/repos/consult-service": "/repos/consult-service",
 		},
 		// repo had a recent session ending 20m ago with a dirty tree and
 		// no commit after → done-uncommitted (D4).
 		DirtyRepos: map[string]DirtyState{
-			"/repos/consultation-service": {DirtyFileCount: 2, SessionEnd: now.Add(-20 * time.Minute)},
+			"/repos/consult-service": {DirtyFileCount: 2, SessionEnd: now.Add(-20 * time.Minute)},
 		},
 	}
 
@@ -147,7 +147,7 @@ func TestBuildReport_ReflectionPresentIsCurrent(t *testing.T) {
 		Day: "2026-05-19",
 		Now: now,
 		Scans: []ScanResult{{
-			Repo: "oms-service", Dir: "/r/oms", Branch: "main", Ship: ShipMerged,
+			Repo: "orders-service", Dir: "/r/oms", Branch: "main", Ship: ShipMerged,
 			Commits: []Commit{{SHA: "12345678", Subject: "merge work", CommittedAt: now, IsUser: true}},
 		}},
 		Attribution:  map[string]RepoTime{"/r/oms": {AIMinutes: 30}},
@@ -557,7 +557,7 @@ func TestBuildReport_ReflectionMarkdownSurfaced(t *testing.T) {
 		Day: "2026-05-19",
 		Now: now,
 		Scans: []ScanResult{{
-			Repo: "oms-service", Dir: "/r/oms", Branch: "main", Ship: ShipMerged,
+			Repo: "orders-service", Dir: "/r/oms", Branch: "main", Ship: ShipMerged,
 			Commits: []Commit{{SHA: "12345678", Subject: "merge work", CommittedAt: now, IsUser: true}},
 		}},
 		Attribution:  map[string]RepoTime{"/r/oms": {AIMinutes: 30}},
@@ -586,7 +586,7 @@ func TestBuildReport_NoReflectionEmptyMarkdown(t *testing.T) {
 		Day: "2026-05-19",
 		Now: now,
 		Scans: []ScanResult{{
-			Repo: "oms-service", Dir: "/r/oms", Branch: "main", Ship: ShipMerged,
+			Repo: "orders-service", Dir: "/r/oms", Branch: "main", Ship: ShipMerged,
 			Commits: []Commit{{SHA: "12345678", Subject: "merge work", CommittedAt: now, IsUser: true}},
 		}},
 		Attribution:  map[string]RepoTime{"/r/oms": {AIMinutes: 30}},

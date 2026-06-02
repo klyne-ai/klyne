@@ -30,6 +30,7 @@
   import WhatWasDoneCard from '$lib/dashboard/pages/productivity/WhatWasDoneCard.svelte';
   import { SHOW_REFLECTIONS } from '$lib/featureFlags';
   import AskKlyneDrawer from '$lib/components/AskKlyneDrawer.svelte';
+  import UncommittedFilesModal from '$lib/dashboard/pages/UncommittedFilesModal.svelte';
   import { sessionUrl } from '$lib/dashboard/url-state.js';
 
   const STORAGE_KEY = 'klyne.productivity.range';
@@ -60,7 +61,7 @@
   // Reflect-run state: drives the inline "Run /klyne:reflect now" button
   // surfaced when reflection_status != "current". We track per-project
   // progress so a multi-project window (e.g. "today" spanning klyne +
-  // operations-app + trackIt) shows a running counter instead of a
+  // ops-app + trackIt) shows a running counter instead of a
   // single opaque spinner. Sequential dispatch — each /klyne:reflect
   // spawns a full claude subprocess; parallel fan-out would burn
   // resources and could trip rate limits.
@@ -136,6 +137,10 @@
       }
     }, 2000);
   }
+
+  // Uncommitted-work expand modal: the card selected for the full
+  // file-list overlay, or null when the modal is closed.
+  let uncommittedModal = $state<UncommittedCard | null>(null);
 
   // Ask Klyne drawer: ephemeral chat with stop_summaries context scoped
   // to the page's current (services → projects, since, until) view.
@@ -222,6 +227,10 @@
   // pill still shows for any range.
   const isSingleDay = $derived(rangeKey !== 'this_week' && rangeKey !== 'last_week');
   let calendarOpen = $state(false);
+  // Masthead "N flags" badge → click opens a popover listing each flag
+  // (the top session-end risks from topAlerts) so the count is explained
+  // and traceable to its repo/branch source.
+  let flagsOpen = $state(false);
   let availableDays = $state<string[]>([]);
   let calendarMonth = $state<Date>(new Date());
   let datesError = $state<string | null>(null);
@@ -275,10 +284,17 @@
     const lastWeekStart = thisWeekStart - 7*day;
 
     const sameMidnight = (a: number, b: number) => Math.abs(a - b) < 1000;
-    if (sameMidnight(s, todayMid)) return 'today';
-    if (sameMidnight(s, todayMid - day)) return 'yesterday';
+    // A "today"/"yesterday" window spans at most one local day. On Mondays
+    // todayMid === thisWeekStart, so a multi-day "this week" range starting
+    // at midnight would otherwise be mislabeled "today" — gate the single-day
+    // presets on the span and let the multi-day week checks win.
+    const singleDay = u - s <= day;
+    if (singleDay && sameMidnight(s, todayMid)) return 'today';
+    if (singleDay && sameMidnight(s, todayMid - day)) return 'yesterday';
     if (sameMidnight(s, thisWeekStart)) return 'this_week';
     if (sameMidnight(s, lastWeekStart)) return 'last_week';
+    if (sameMidnight(s, todayMid)) return 'today';
+    if (sameMidnight(s, todayMid - day)) return 'yesterday';
     return 'custom';
   }
   function syncUrl(s: number, u: number) {
@@ -647,7 +663,7 @@
     // Short SHAs `(abc1234)` or `abc1234`.
     const shaMatch = body.match(/\(([0-9a-f]{7,12})\)/i);
     if (shaMatch) { ev.push(shaMatch[1].slice(0, 7)); body = body.replace(shaMatch[0], '').trim(); }
-    // Ticket refs `[CLI-1415]` — keep inline in the body, also surface.
+    // Ticket refs `[TICKET-1415]` — keep inline in the body, also surface.
     const ticketMatches = body.match(/\[([A-Z]{2,}-\d+)\]/g);
     if (ticketMatches) for (const t of ticketMatches.slice(0, 2)) ev.push(t.replace(/[\[\]]/g, ''));
     // Trim trailing punctuation left dangling.
@@ -688,7 +704,7 @@
       if (!/^[-*]\s+/.test(ln)) continue;
       // Strip markdown formatting FIRST so the chip-classifier, title-
       // splitter, and evidence-extractor all see clean prose. Without
-      // this, `**operations-app**` leaks into the rendered title as
+      // this, `**ops-app**` leaks into the rendered title as
       // literal asterisks.
       const raw = ln.replace(/^[-*]\s+/, '').trim();
       // Capture a leading `**repo-name**` bold prefix as the repo tag
@@ -986,6 +1002,9 @@
     branch: string;
     title: string;
     files: string[];
+    /** Full uncommitted file list — the modal shows every path; `files`
+     *  above is just the first-5 preview rendered on the collapsed card. */
+    allFiles: string[];
     ageMinutes: number;
     extraFiles: number;
   }
@@ -1022,6 +1041,7 @@
         branch: r.branch || 'main',
         title: r.detail || `${filesAll.length} uncommitted file(s) since last session ended`,
         files,
+        allFiles: filesAll,
         ageMinutes: r.age_minutes ?? 0,
         extraFiles: Math.max(0, filesAll.length - files.length),
       });
@@ -1064,6 +1084,8 @@
 </script>
 
 <svelte:head><title>klyne — Productivity</title></svelte:head>
+
+<svelte:window onkeydown={(e) => { if (e.key === 'Escape' && flagsOpen) flagsOpen = false; }} />
 
 <div class="page-cockpit">
   <!-- ── compact header ─────────────────────────────────────── -->
@@ -1180,7 +1202,44 @@
           </button>
         {/if}
         {#if alerts.length > 0}
-          <span class="pill pill-alert pill-sm"><span class="dot dot-alert"></span>{plural(alerts.length, 'flag')}</span>
+          <span class="flags-wrap">
+            <button
+              class="pill pill-alert pill-sm flags-trigger"
+              class:on={flagsOpen}
+              onclick={() => (flagsOpen = !flagsOpen)}
+              aria-haspopup="dialog"
+              aria-expanded={flagsOpen}
+              title="Open flags — session-end risks (uncommitted edits / unpushed commits) detected from this window's git snapshots. Click for details."
+            >
+              <span class="dot dot-alert"></span>{plural(alerts.length, 'flag')}
+              <span class="flags-chev" class:open={flagsOpen} aria-hidden="true">▾</span>
+            </button>
+            {#if flagsOpen}
+              <div class="flags-backdrop" role="presentation" onclick={() => (flagsOpen = false)}></div>
+              <div class="flags-pop" role="dialog" aria-label="Open flags">
+                <div class="flags-pop-head">
+                  <span class="kick">Open flags</span>
+                  <span class="mono dim">session-end risks · {rangeLabel(rangeKey)}</span>
+                </div>
+                <ul class="flags-list">
+                  {#each alerts as a (a.rank)}
+                    <li
+                      class="flags-item"
+                      class:flags-item-alert={a.level === 'alert'}
+                      class:flags-item-warn={a.level === 'warn'}
+                    >
+                      <span class="kick flags-item-kick">{a.kicker}</span>
+                      <span class="flags-item-title">{a.title}</span>
+                      <span class="mono dim flags-item-meta">{a.meta}</span>
+                    </li>
+                  {/each}
+                </ul>
+                <div class="flags-pop-foot mono dim">
+                  Derived from each session's git snapshot at stop time — uncommitted edits and commits not yet pushed to origin.
+                </div>
+              </div>
+            {/if}
+          </span>
         {/if}
       {/if}
     </div>
@@ -1548,11 +1607,16 @@
                         {#each u.files as f, fi (f + fi)}
                           <li class="mono dim alert-file">{f}</li>
                         {/each}
-                        {#if u.extraFiles > 0}
-                          <li class="mono dim alert-file">… and {u.extraFiles} more</li>
-                        {/if}
                       </ul>
                     {/if}
+                    <button
+                      type="button"
+                      class="mono alert-card-expand"
+                      aria-label={`View all ${u.allFiles.length} uncommitted files for ${u.repo} · ${u.branch}`}
+                      onclick={() => (uncommittedModal = u)}
+                    >
+                      {u.extraFiles > 0 ? `View all ${u.allFiles.length} files` : 'View details'} →
+                    </button>
                   </div>
                 </article>
               {/each}
@@ -1921,6 +1985,17 @@
   toMs={until}
 />
 
+{#if uncommittedModal}
+  <UncommittedFilesModal
+    repo={uncommittedModal.repo}
+    branch={uncommittedModal.branch}
+    title={uncommittedModal.title}
+    files={uncommittedModal.allFiles}
+    ageMinutes={uncommittedModal.ageMinutes}
+    onClose={() => (uncommittedModal = null)}
+  />
+{/if}
+
 <style>
   /* ── design tokens (V4 Synthesis · D-hybrid) ─────────────── */
   .page-cockpit {
@@ -2117,6 +2192,38 @@
   .cal-day:disabled { opacity: 0.22; }
   .cal-foot { margin-top: 9px; padding-top: 8px; border-top: 1px solid var(--border-hair); color: var(--fg-dim); font-family: var(--font-mono); font-size: 10px; text-align: center; }
 
+  /* ── "N flags" masthead badge → click-to-explain popover ──── */
+  .flags-wrap { position: relative; display: inline-flex; }
+  .flags-trigger { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+  .flags-chev { font-size: 8px; opacity: 0.7; transition: transform 120ms ease; }
+  .flags-chev.open { transform: rotate(180deg); }
+  /* Transparent click-away layer beneath the popover. */
+  .flags-backdrop { position: fixed; inset: 0; z-index: 19; }
+  .flags-pop {
+    position: absolute; top: calc(100% + 8px); left: 50%; transform: translateX(-50%);
+    z-index: 20; width: 300px; padding: 10px;
+    background: var(--bg-card); border: 1px solid var(--border-soft); border-radius: 8px;
+    box-shadow: 0 18px 50px color-mix(in oklch, black 42%, transparent);
+  }
+  .flags-pop-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+  .flags-pop-head .kick { font-size: 10px; }
+  .flags-pop-head .dim { font-size: 10px; }
+  .flags-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+  .flags-item {
+    display: flex; flex-direction: column; gap: 3px;
+    padding: 8px 10px; border-radius: 6px;
+    background: var(--bg-inset); border: 1px solid var(--border-hair);
+    border-left-width: 2px;
+  }
+  .flags-item-alert { border-left-color: var(--alert); }
+  .flags-item-warn { border-left-color: var(--warn); }
+  .flags-item-kick { font-size: 9.5px; letter-spacing: 0.1em; }
+  .flags-item-alert .flags-item-kick { color: var(--alert); }
+  .flags-item-warn .flags-item-kick { color: var(--warn); }
+  .flags-item-title { font-size: 12px; color: var(--fg); line-height: 1.4; }
+  .flags-item-meta { font-size: 10.5px; }
+  .flags-pop-foot { margin-top: 9px; padding-top: 8px; border-top: 1px solid var(--border-hair); font-size: 10px; line-height: 1.5; }
+
   /* ── cockpit body shell ──────────────────────────────────── */
   /* Natural page flow (not flex:1 + min-height:0) so the outer
      scroll container (Shell.svelte's .page) drives scrolling and
@@ -2166,6 +2273,25 @@
   }
   .alert-card-warn  { border-left-color: var(--warn); }
   .alert-card-alert { border-left-color: var(--alert); }
+  /* "View all files" affordance on an uncommitted card → opens the
+     full-file-list modal. Bare button styled as an inline accent link. */
+  .alert-card-expand {
+    align-self: flex-start;
+    margin-top: 2px;
+    padding: 0;
+    border: 0;
+    background: none;
+    font-size: 10.5px;
+    color: var(--accent);
+    letter-spacing: 0.04em;
+    cursor: pointer;
+  }
+  .alert-card-expand:hover { text-decoration: underline; }
+  .alert-card-expand:focus-visible {
+    outline: 2px solid color-mix(in oklch, var(--accent) 60%, transparent);
+    outline-offset: 2px;
+    border-radius: 3px;
+  }
   .alert-card-rank { font-size: 10.5px; padding-top: 2px; letter-spacing: 0.04em; }
   .alert-card-body { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
   .alert-card-h { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }

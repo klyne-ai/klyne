@@ -31,6 +31,21 @@ func TestExtractPaths_Read(t *testing.T) {
 	}
 }
 
+// TestExtractPaths_BothKeysCountedOnce is the regression guard for the
+// double-count bug: the wanted-key list {"file_path","path"} are alternate
+// spellings of ONE path, so a tool input carrying both must yield a single
+// touch (first-present-key wins), not two.
+func TestExtractPaths_BothKeysCountedOnce(t *testing.T) {
+	tc := connectors.ToolCall{
+		Name:  "Read",
+		Input: `{"file_path":"/x/y.go","path":"/x/y.go"}`,
+	}
+	got := extractPaths(tc)
+	if len(got) != 1 || got[0] != "/x/y.go" {
+		t.Errorf("got %v; want a single /x/y.go (both keys are one path)", got)
+	}
+}
+
 func TestExtractPaths_UnknownTool(t *testing.T) {
 	tc := connectors.ToolCall{
 		Name:  "mcp__weird__do_thing",

@@ -266,6 +266,47 @@ func TestSessionActiveMinutes(t *testing.T) {
 	}
 }
 
+// TestMinutesRounding_TimeattribMatchesUnion is the regression guard for the
+// live/snapshot drift bug: totalMinutes (behind GlobalActiveMinutes /
+// SessionActiveMinutes) once TRUNCATED while aggregate.UnionMinutes ROUNDED,
+// so the same 5m40s span yielded 5 from the live path and 6 from the
+// snapshot. Both must now ROUND to 6, and per-session minutes must sum to the
+// headline.
+func TestMinutesRounding_TimeattribMatchesUnion(t *testing.T) {
+	base := time.Date(2026, 5, 19, 9, 0, 0, 0, time.UTC)
+	// A single 5m40s active span (two timestamps within the idle cap).
+	times := []time.Time{base, base.Add(5*time.Minute + 40*time.Second)}
+
+	// Live per-session path (totalMinutes via SessionActiveMinutes).
+	gotSession := SessionActiveMinutes(times, 30)
+	if gotSession != 6 {
+		t.Fatalf("SessionActiveMinutes(5m40s) = %d; want 6 (rounded)", gotSession)
+	}
+
+	// Snapshot path (UnionMinutes over the same span) must agree.
+	ivs := SessionActiveIntervals(times, 30)
+	asUnion := make([]ActiveInterval, len(ivs))
+	copy(asUnion, ivs)
+	gotUnion := UnionMinutes(asUnion)
+	if gotUnion != 6 {
+		t.Fatalf("UnionMinutes(5m40s) = %d; want 6 (rounded)", gotUnion)
+	}
+	if gotSession != gotUnion {
+		t.Fatalf("live (%d) != snapshot (%d) for the same span — rounding drift", gotSession, gotUnion)
+	}
+
+	// Headline (GlobalActiveMinutes) over a single session equals that
+	// session's own minutes — per-session sums to the headline.
+	total, _ := GlobalActiveMinutes([]SessionActivity{{
+		SessionID:    "s1",
+		ProjectPath:  "/repo/a",
+		MessageTimes: times,
+	}}, 30)
+	if total != gotSession {
+		t.Fatalf("GlobalActiveMinutes headline = %d; want %d (== per-session sum)", total, gotSession)
+	}
+}
+
 // TestSessionActiveIntervals checks the exported per-session active
 // sub-interval list: a session with a >cap gap yields two intervals, and
 // the intervals' lengths sum to the same scalar SessionActiveMinutes

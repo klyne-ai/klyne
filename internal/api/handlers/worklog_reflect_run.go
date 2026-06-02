@@ -113,7 +113,7 @@ func (h *WorklogReflectRunHandler) Run(w http.ResponseWriter, r *http.Request) {
 	// called here — the global middleware runs before any route handler.
 
 	var req reflectRunRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(w, r, &req); err != nil {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
 		return
 	}
@@ -310,6 +310,10 @@ func spawnClaudeReflect(ctx context.Context, projectPath string) (claudeRunResul
 		"/klyne:reflect",
 	)
 	cmd.Dir = projectPath
+	// WaitDelay bounds Wait() after a ctx cancel/kill so an orphaned
+	// `klyne mcp` grandchild holding the captured pipe open cannot block
+	// Wait() forever (turns the hang into a clean timeout error).
+	cmd.WaitDelay = 5 * time.Second
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

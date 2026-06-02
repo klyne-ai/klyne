@@ -23,17 +23,11 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"sync/atomic"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/klyne-ai/klyne/internal/api"
 )
-
-// frameEventID is a process-wide monotonic counter for SSE `id:` frame fields.
-// Each frame sent to any client gets a unique id regardless of which subscriber
-// it originates from.
-var frameEventID atomic.Uint64
 
 // EventsMounter registers GET /events on a chi.Router.
 // It satisfies api.RouterMounter:
@@ -114,14 +108,24 @@ func (m *EventsMounter) handle(w http.ResponseWriter, r *http.Request) {
 
 			// Heartbeat: emit SSE comment to keep the TCP connection alive
 			// through proxies without dispatching a real event to the client.
+			// Heartbeats carry NO id: line so they never advance the client's
+			// Last-Event-ID cursor past a real event.
 			if ev == api.HeartbeatSentinel {
 				_, _ = fmt.Fprint(w, ": ping\n\n")
 				flusher.Flush()
 				continue
 			}
 
-			// Process-wide monotonic frame id.
-			id := frameEventID.Add(1)
+			// Emit the hub's ring/sequence id as the SSE id: — the SAME value
+			// a later Last-Event-ID replay keys the ring on. The hub delivers
+			// every live and replayed event wrapped in api.SeqEvent carrying
+			// that id. (A bare Event without a seq — should not happen — falls
+			// back to skipping the id: line rather than emitting a wrong one.)
+			seqEv, hasSeq := ev.(api.SeqEvent)
+			var id uint64
+			if hasSeq {
+				id = seqEv.Seq
+			}
 
 			// Marshal payload to JSON for the data line.
 			data, err := json.Marshal(ev.Payload())
@@ -134,12 +138,15 @@ func (m *EventsMounter) handle(w http.ResponseWriter, r *http.Request) {
 			}
 
 			// Write the SSE frame:
-			//   id: <n>\n
+			//   id: <seq>\n   (omitted when the event carries no seq)
 			//   event: <name>\n
 			//   data: <json>\n
 			//   \n         ← blank line terminates the frame
-			_, _ = fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n",
-				id, ev.EventName(), data)
+			if hasSeq {
+				_, _ = fmt.Fprintf(w, "id: %d\n", id)
+			}
+			_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n",
+				ev.EventName(), data)
 			flusher.Flush()
 		}
 	}

@@ -66,6 +66,10 @@ func (a *App) startHookServer(ctx context.Context) error {
 			res := hooks.SessionStart(ctx, bytes.NewReader(req.Payload))
 			return res.Stdout, res.Stderr, res.ExitCode, nil
 		},
+		hookrpc.EventCursor: func(ctx context.Context, req hookrpc.Request) ([]byte, []byte, int, error) {
+			res := hooks.CursorHook(ctx, bytes.NewReader(req.Payload), a.db)
+			return res.Stdout, res.Stderr, res.ExitCode, nil
+		},
 	}
 
 	// Inject the daemon's open DB so hook handlers reuse the

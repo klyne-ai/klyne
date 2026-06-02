@@ -3,6 +3,8 @@ package claude
 import (
 	"bufio"
 	"context"
+	"errors"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -17,6 +19,12 @@ import (
 const (
 	// backstopInterval is how often we scan for new files not caught by fsnotify.
 	backstopInterval = 30 * time.Second
+	// maxFileAge bounds how stale a session file may be and still be watched.
+	// Claude never re-opens a session file once it has gone quiet for more than
+	// a day or two, so files untouched for longer are inert: watching them only
+	// burns file descriptors and kqueue wakeups (battery). Anything older than
+	// this cutoff is skipped during discovery and the backstop scan.
+	maxFileAge = 7 * 24 * time.Hour
 	// maxLineSize is the largest single JSONL line we will tolerate. Claude
 	// tool results (file reads, command outputs) routinely exceed 1MB; the
 	// bufio.Scanner default of 64KB silently drops anything larger and the
@@ -124,7 +132,11 @@ func (w *Watcher) backstopLoop(ctx context.Context, fw *fsnotify.Watcher, events
 	}
 }
 
-// backstopScan discovers any files not yet in w.files and starts watching them.
+// backstopScan is the 30-second safety net for fsnotify gaps. Brand-new files
+// are started from byte 0 via replay; ALREADY-KNOWN files are re-tailed so that
+// a dropped or coalesced fsnotify Write on an active session is still recovered
+// (tail is idempotent — it only emits bytes past fs.offset). This mirrors the
+// codex backstop, which re-scans every file and self-heals.
 func (w *Watcher) backstopScan(ctx context.Context, fw *fsnotify.Watcher, events chan<- connectors.RawEvent) {
 	paths, err := discover(w.root)
 	if err != nil {
@@ -135,7 +147,10 @@ func (w *Watcher) backstopScan(ctx context.Context, fw *fsnotify.Watcher, events
 		w.mu.Lock()
 		_, known := w.files[p]
 		w.mu.Unlock()
-		if !known {
+		if known {
+			// Recover any appended bytes a missed fsnotify Write left behind.
+			w.tail(ctx, p, events)
+		} else {
 			w.ensureWatched(fw, p)
 			w.replay(ctx, p, events)
 		}
@@ -177,36 +192,16 @@ func (w *Watcher) replay(ctx context.Context, path string, events chan<- connect
 	}
 	defer f.Close()
 
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 64*1024), maxLineSize)
-	for scanner.Scan() {
-		if ctx.Err() != nil {
-			break
-		}
-		raw := scanner.Bytes()
-		if len(raw) == 0 {
-			continue
-		}
-		line := make([]byte, len(raw))
-		copy(line, raw)
-		select {
-		case events <- connectors.RawEvent{Path: path, Line: line, Ts: time.Now().UnixMilli()}:
-		case <-ctx.Done():
+	// Seek to the recorded offset (0 on warm-up). Using the offset rather than
+	// hard-coding byte 0 keeps replay idempotent if it is ever re-invoked.
+	if fs.offset > 0 {
+		if _, err := f.Seek(fs.offset, 0); err != nil {
+			log.Printf("claude watch: replay seek %s: %v", path, err)
 			return
 		}
 	}
-	if err := scanner.Err(); err != nil {
-		log.Printf("claude watch: replay scan %s: %v (line larger than %d bytes will be skipped)", path, err, maxLineSize)
-	}
 
-	// Advance offset to actual end of file (Stat) — relying on Seek(0,1)
-	// after a scanner error returns the buffered position, not the on-disk
-	// size, which would cause us to re-read truncated bytes on next tail.
-	if info, err := f.Stat(); err == nil {
-		fs.offset = info.Size()
-	} else if pos, err2 := f.Seek(0, 1); err2 == nil {
-		fs.offset = pos
-	}
+	w.emitCompleteLines(ctx, f, fs, path, events)
 }
 
 // tail reads lines appended to a file since the last known offset and emits
@@ -234,35 +229,91 @@ func (w *Watcher) tail(ctx context.Context, path string, events chan<- connector
 		return
 	}
 
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 64*1024), maxLineSize)
-	for scanner.Scan() {
-		if ctx.Err() != nil {
-			break
-		}
-		raw := scanner.Bytes()
-		if len(raw) == 0 {
+	w.emitCompleteLines(ctx, f, fs, path, events)
+}
+
+// emitCompleteLines reads from f (already positioned at fs.offset) and emits a
+// RawEvent for every COMPLETE, newline-terminated line, advancing fs.offset by
+// the exact bytes consumed. A trailing partial line (one flushed without its
+// '\n' yet) is left unconsumed: fs.offset stays pointing at its start so it is
+// re-read in full once the newline arrives. This avoids splitting a mid-flush
+// JSONL line into two corrupt fragments (the partial-flush bug). f.mu (fs.mu)
+// must be held by the caller.
+func (w *Watcher) emitCompleteLines(ctx context.Context, f *os.File, fs *fileState, path string, events chan<- connectors.RawEvent) {
+	reader := bufio.NewReaderSize(f, 64*1024)
+	for {
+		lineBytes, err := readLineLimited(reader, maxLineSize)
+		if len(lineBytes) > 0 && lineBytes[len(lineBytes)-1] == '\n' {
+			// Complete line: advance by exact bytes consumed (incl. newline and
+			// any CRLF '\r'), then emit the trimmed content.
+			fs.offset += int64(len(lineBytes))
+
+			trimmed := trimLineEnding(lineBytes)
+			if len(trimmed) > 0 {
+				line := make([]byte, len(trimmed))
+				copy(line, trimmed)
+				select {
+				case events <- connectors.RawEvent{Path: path, Line: line, Ts: time.Now().UnixMilli()}:
+				case <-ctx.Done():
+					return
+				}
+			}
+			if ctx.Err() != nil {
+				return
+			}
 			continue
 		}
-		line := make([]byte, len(raw))
-		copy(line, raw)
-		select {
-		case events <- connectors.RawEvent{Path: path, Line: line, Ts: time.Now().UnixMilli()}:
-		case <-ctx.Done():
+
+		// No trailing newline: partial line, EOF, or over-long line. Stop
+		// without emitting or advancing so the bytes are re-read next time.
+		if err == errLineTooLong {
+			log.Printf("claude watch: line larger than %d bytes in %s — skipping", maxLineSize, path)
+			if info, statErr := f.Stat(); statErr == nil {
+				fs.offset = info.Size()
+			}
 			return
 		}
+		if err != nil && err != io.EOF {
+			log.Printf("claude watch: read error in %s: %v", path, err)
+		}
+		return
 	}
-	if err := scanner.Err(); err != nil {
-		log.Printf("claude watch: tail scan %s: %v (line larger than %d bytes will be skipped)", path, err, maxLineSize)
-	}
+}
 
-	// Use Stat() rather than Seek(0,1) so a scanner error doesn't leave the
-	// offset short of the real on-disk size and cause permanent re-tailing.
-	if info, err := f.Stat(); err == nil {
-		fs.offset = info.Size()
-	} else if pos, err2 := f.Seek(0, 1); err2 == nil {
-		fs.offset = pos
+// errLineTooLong signals that a single line exceeded maxLineSize before a
+// newline was seen.
+var errLineTooLong = errors.New("claude: line exceeds max size")
+
+// readLineLimited reads a single line (up to and including '\n') from r,
+// bounded by limit bytes. If a newline is found the returned slice ends in
+// '\n'. If EOF is hit first, the partial bytes are returned with io.EOF. If
+// limit is exceeded before a newline, it returns errLineTooLong.
+func readLineLimited(r *bufio.Reader, limit int) ([]byte, error) {
+	var buf []byte
+	for {
+		b, err := r.ReadByte()
+		if err != nil {
+			return buf, err
+		}
+		buf = append(buf, b)
+		if b == '\n' {
+			return buf, nil
+		}
+		if len(buf) > limit {
+			return buf, errLineTooLong
+		}
 	}
+}
+
+// trimLineEnding strips a trailing '\n' and an optional preceding '\r' (CRLF).
+func trimLineEnding(b []byte) []byte {
+	if len(b) > 0 && b[len(b)-1] == '\n' {
+		b = b[:len(b)-1]
+	}
+	if len(b) > 0 && b[len(b)-1] == '\r' {
+		b = b[:len(b)-1]
+	}
+	return b
 }
 
 // ── directory watching helpers ────────────────────────────────────────────────
@@ -275,12 +326,44 @@ func watchDirs(fw *fsnotify.Watcher, root string) error {
 		return err
 	}
 	for _, e := range entries {
-		if e.IsDir() {
-			subdir := filepath.Join(root, e.Name())
+		if !e.IsDir() {
+			continue
+		}
+		subdir := filepath.Join(root, e.Name())
+		// On macOS fsnotify uses kqueue, which opens a file descriptor for
+		// EVERY file inside a watched directory. Watching project directories
+		// that hold only stale sessions therefore burns thousands of fds and
+		// kqueue wakeups for no benefit (those files never change again). Skip
+		// any directory without a recent file; the always-watched root plus the
+		// backstop scan still pick up brand-new project directories.
+		if dirHasRecentJSONL(subdir) {
 			_ = fw.Add(subdir)
 		}
 	}
 	return nil
+}
+
+// dirHasRecentJSONL reports whether dir contains at least one *.jsonl file
+// modified within maxFileAge. Used to decide whether a directory is worth
+// watching at all (see watchDirs).
+func dirHasRecentJSONL(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		if time.Since(info.ModTime()) <= maxFileAge {
+			return true
+		}
+	}
+	return false
 }
 
 // discover returns all *.jsonl files under root.
@@ -304,9 +387,21 @@ func discover(root string) ([]string, error) {
 			continue
 		}
 		for _, se := range subEntries {
-			if !se.IsDir() && strings.HasSuffix(se.Name(), ".jsonl") {
-				paths = append(paths, filepath.Join(subdir, se.Name()))
+			if se.IsDir() || !strings.HasSuffix(se.Name(), ".jsonl") {
+				continue
 			}
+			// Skip files untouched for longer than maxFileAge: they are inert
+			// (Claude never re-opens a quiet session) and watching them only
+			// wastes file descriptors and kqueue wakeups.
+			info, err := se.Info()
+			if err != nil {
+				log.Printf("claude discover: stat %s: %v", se.Name(), err)
+				continue
+			}
+			if time.Since(info.ModTime()) > maxFileAge {
+				continue
+			}
+			paths = append(paths, filepath.Join(subdir, se.Name()))
 		}
 	}
 	return paths, nil

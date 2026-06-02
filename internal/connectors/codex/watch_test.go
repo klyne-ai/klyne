@@ -102,6 +102,30 @@ func TestDiscover_FindsFiles_AcrossDates(t *testing.T) {
 	}
 }
 
+// TestDiscover_SkipsStaleFiles verifies that rollout files untouched for longer
+// than maxFileAge are excluded: they are inert and watching them only wastes
+// file descriptors and kqueue wakeups.
+func TestDiscover_SkipsStaleFiles(t *testing.T) {
+	root := t.TempDir()
+	dir := mkDateDir(t, root, "2026", "05", "20")
+	fresh := filepath.Join(dir, "rollout-fresh.jsonl")
+	stale := filepath.Join(dir, "rollout-stale.jsonl")
+	writeFile(t, fresh, validLine1)
+	writeFile(t, stale, validLine1)
+	old := time.Now().Add(-(maxFileAge + 24*time.Hour))
+	if err := os.Chtimes(stale, old, old); err != nil {
+		t.Fatalf("chtimes: %v", err)
+	}
+
+	files, err := discoverFiles(root)
+	if err != nil {
+		t.Fatalf("discoverFiles: %v", err)
+	}
+	if len(files) != 1 || filepath.Base(files[0]) != "rollout-fresh.jsonl" {
+		t.Errorf("expected only rollout-fresh.jsonl within %s window, got %v", maxFileAge, files)
+	}
+}
+
 // TestDiscover_EmptyRoot verifies that Discover returns nil (not an error) when
 // the root directory does not exist.
 func TestDiscover_EmptyRoot(t *testing.T) {
@@ -535,6 +559,143 @@ func TestWatch_EmitNew_SeekBeyondEnd(t *testing.T) {
 		t.Errorf("expected no events for over-seek, got: %s", ev.Line)
 	case <-time.After(50 * time.Millisecond):
 		// Good.
+	}
+}
+
+// drainEvents collects all events available within d.
+func drainEvents(events <-chan connectors.RawEvent, d time.Duration) []connectors.RawEvent {
+	var received []connectors.RawEvent
+	timeout := time.After(d)
+	for {
+		select {
+		case ev := <-events:
+			received = append(received, ev)
+		case <-timeout:
+			return received
+		}
+	}
+}
+
+// TestEmitNew_PartialFlush_NoEmitUntilNewline reproduces the partial-flush bug:
+// when only the first N bytes of a JSONL line are on disk (no trailing newline,
+// e.g. a large turn_context line caught mid-flush by fsnotify), emitNew must NOT
+// emit a fragment and must NOT advance the offset. Once the remainder + newline
+// lands, the FULL intact line must be emitted exactly once and parse.
+func TestEmitNew_PartialFlush_NoEmitUntilNewline(t *testing.T) {
+	root := t.TempDir()
+	dir := mkDateDir(t, root, "2026", "05", "06")
+	p := filepath.Join(dir, "rollout-partial.jsonl")
+
+	full := `{"type":"input","session_id":"cx-test","content":"hello","timestamp":"2026-05-06T10:00:05.000Z"}`
+	split := len(full) / 2
+	// Write first half, no newline.
+	writeFile(t, p, full[:split])
+
+	events := make(chan connectors.RawEvent, 8)
+	w := &watcher{
+		root:    root,
+		events:  events,
+		tails:   make(map[string]*tailState),
+		watched: make(map[string]struct{}),
+	}
+
+	w.emitNew(context.Background(), p)
+	if got := drainEvents(events, 60*time.Millisecond); len(got) != 0 {
+		t.Fatalf("partial line emitted %d events, want 0: %q", len(got), got)
+	}
+	// Offset must NOT have advanced past the (incomplete) line start.
+	w.mu.Lock()
+	ts := w.tails[p]
+	w.mu.Unlock()
+	ts.mu.Lock()
+	off := ts.offset
+	ts.mu.Unlock()
+	if off != 0 {
+		t.Fatalf("offset advanced to %d on partial line, want 0", off)
+	}
+
+	// Append the remainder + newline.
+	appendFile(t, p, full[split:]+"\n")
+	w.emitNew(context.Background(), p)
+
+	got := drainEvents(events, 100*time.Millisecond)
+	if len(got) != 1 {
+		t.Fatalf("after completion got %d events, want exactly 1: %q", len(got), got)
+	}
+	if string(got[0].Line) != full {
+		t.Fatalf("emitted line corrupt:\n got: %q\nwant: %q", got[0].Line, full)
+	}
+}
+
+// TestEmitNew_CRLF_ByteExactOffset verifies that a CRLF-terminated line is
+// emitted with the '\r' trimmed and the offset advances byte-exactly (incl. the
+// '\r'), so subsequent lines are read at the correct position (CRLF off-by-one).
+func TestEmitNew_CRLF_ByteExactOffset(t *testing.T) {
+	root := t.TempDir()
+	dir := mkDateDir(t, root, "2026", "05", "06")
+	p := filepath.Join(dir, "rollout-crlf.jsonl")
+
+	l1 := `{"type":"input","session_id":"cx","content":"a"}`
+	l2 := `{"type":"output","session_id":"cx","content":"b"}`
+	content := l1 + "\r\n" + l2 + "\r\n"
+	writeFile(t, p, content)
+
+	events := make(chan connectors.RawEvent, 8)
+	w := &watcher{
+		root:    root,
+		events:  events,
+		tails:   make(map[string]*tailState),
+		watched: make(map[string]struct{}),
+	}
+
+	w.emitNew(context.Background(), p)
+	got := drainEvents(events, 100*time.Millisecond)
+	if len(got) != 2 {
+		t.Fatalf("CRLF: got %d events, want 2: %q", len(got), got)
+	}
+	if string(got[0].Line) != l1 {
+		t.Fatalf("CRLF line 1 not trimmed: got %q want %q", got[0].Line, l1)
+	}
+	if string(got[1].Line) != l2 {
+		t.Fatalf("CRLF line 2 corrupt (off-by-one?): got %q want %q", got[1].Line, l2)
+	}
+	w.mu.Lock()
+	ts := w.tails[p]
+	w.mu.Unlock()
+	ts.mu.Lock()
+	off := ts.offset
+	ts.mu.Unlock()
+	if off != int64(len(content)) {
+		t.Fatalf("offset = %d, want %d (byte-exact incl CRLF)", off, len(content))
+	}
+}
+
+// TestEmitNew_PartialThenCRLF covers a partial line whose completion arrives as
+// CRLF — must still emit exactly one intact, trimmed line.
+func TestEmitNew_PartialThenCRLF(t *testing.T) {
+	root := t.TempDir()
+	dir := mkDateDir(t, root, "2026", "05", "06")
+	p := filepath.Join(dir, "rollout-partial-crlf.jsonl")
+
+	full := `{"type":"input","session_id":"cx","content":"split-crlf"}`
+	writeFile(t, p, full[:10])
+
+	events := make(chan connectors.RawEvent, 8)
+	w := &watcher{
+		root:    root,
+		events:  events,
+		tails:   make(map[string]*tailState),
+		watched: make(map[string]struct{}),
+	}
+	w.emitNew(context.Background(), p)
+	if got := drainEvents(events, 50*time.Millisecond); len(got) != 0 {
+		t.Fatalf("partial emitted %d, want 0", len(got))
+	}
+	appendFile(t, p, full[10:]+"\r\n")
+	w.emitNew(context.Background(), p)
+	got := drainEvents(events, 100*time.Millisecond)
+	if len(got) != 1 || string(got[0].Line) != full {
+		t.Fatalf("partial+CRLF: got %q, want exactly [%q]", got, full)
 	}
 }
 

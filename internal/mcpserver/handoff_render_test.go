@@ -12,15 +12,15 @@ func TestRenderHandoffSkeleton_StructuralShape(t *testing.T) {
 		SessionID: "abcdef1234567890",
 		Path:      "/tmp/session.jsonl",
 		Messages: []*connectors.Message{
-			{Role: connectors.RoleUser, Content: "let's pick up CLI-1362", Cwd: "/repo", GitBranch: "feat/x"},
-			{Role: connectors.RoleUser, Content: "still on CLI-1362 and see https://linear.app/clinikk/issue/CLI-1362"},
+			{Role: connectors.RoleUser, Content: "let's pick up TICKET-1362", Cwd: "/repo", GitBranch: "feat/x"},
+			{Role: connectors.RoleUser, Content: "still on TICKET-1362 and see https://linear.app/example/issue/TICKET-1362"},
 		},
 	}
 	md := RenderHandoff(snap)
 	mustContain(t, md, "# Handoff from session `abcdef12`")
 	mustContain(t, md, "Working in `/repo` on branch `feat/x`.")
 	mustContain(t, md, "## Likely ticket")
-	mustContain(t, md, "CLI-1362")
+	mustContain(t, md, "TICKET-1362")
 	mustNotContain(t, md, "## Commands run")
 	mustNotContain(t, md, "## Last few exchanges")
 }

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/klyne-ai/klyne/internal/connectors"
 )
 
 // writeClaudeLine appends one valid Claude Code assistant JSONL line
@@ -38,6 +40,100 @@ func claudeProjectFile(t *testing.T, root, project, sessionID string) (*os.File,
 		t.Fatalf("open: %v", err)
 	}
 	return f, path
+}
+
+// codexSessionFile creates a sessions subdir under root and returns an
+// open writeable handle plus the file's absolute path. Codex rollouts
+// live under ~/.codex/sessions; the layout under root doesn't matter to
+// the walker (it recurses), so a flat file is fine.
+func codexSessionFile(t *testing.T, root, sessionID string) (*os.File, string) {
+	t.Helper()
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	path := filepath.Join(root, sessionID+".jsonl")
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	return f, path
+}
+
+// writeCodexMeta writes the session_meta line that establishes sessionID
+// and cwd for the rollout. Required before any token_count line.
+func writeCodexMeta(t *testing.T, f *os.File, sessionID string, ts time.Time) {
+	t.Helper()
+	line := fmt.Sprintf(
+		`{"timestamp":%q,"type":"session_meta","payload":{"id":%q,"cwd":"/tmp/proj"}}`+"\n",
+		ts.UTC().Format(time.RFC3339Nano), sessionID,
+	)
+	if _, err := f.WriteString(line); err != nil {
+		t.Fatalf("writeCodexMeta: %v", err)
+	}
+}
+
+// writeCodexTokenCount appends one Codex event_msg/token_count line. Codex
+// carries token usage on this RoleSystem message (NOT on assistant turns).
+// cumIn/cumCachedRead are session-cumulative totals; the parser emits the
+// per-line delta against the previous token_count, so a single line emits
+// the full cumIn/cumCachedRead.
+func writeCodexTokenCount(t *testing.T, f *os.File, ts time.Time, cumIn, cumCachedRead, cumOut int64) {
+	t.Helper()
+	line := fmt.Sprintf(
+		`{"timestamp":%q,"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":%d,"cached_input_tokens":%d,"output_tokens":%d},"last_token_usage":{"input_tokens":%d,"cached_input_tokens":%d,"output_tokens":%d}}}}`+"\n",
+		ts.UTC().Format(time.RFC3339Nano), cumIn, cumCachedRead, cumOut, cumIn, cumCachedRead, cumOut,
+	)
+	if _, err := f.WriteString(line); err != nil {
+		t.Fatalf("writeCodexTokenCount: %v", err)
+	}
+}
+
+// TestAggregateFiveHour_CodexContributes is the regression test for the
+// HIGH finding that Codex usage was silently excluded from the 5-hour
+// budget: the walker gated on Role==RoleAssistant, but Codex emits its
+// tokens on a RoleSystem token_count message, so Codex sessions
+// contributed 0. With the role gate removed (TokensIn>0 only), a Codex
+// transcript must yield non-zero EffectiveInput and roll into the total.
+func TestAggregateFiveHour_CodexContributes(t *testing.T) {
+	dir := t.TempDir()
+	claudeRoot := filepath.Join(dir, "claude", "projects")
+	codexRoot := filepath.Join(dir, "codex", "sessions")
+
+	now := time.Now()
+	withinWindow := now.Add(-1 * time.Hour)
+
+	// A Codex session with two token_count snapshots (cumulative).
+	// EffectiveInput per emitted delta = TokensIn - CachedReadTokens.
+	//   tc1: cumIn=10K cumCachedRead=0   → delta in=10K, cached=0  → eff 10K
+	//   tc2: cumIn=25K cumCachedRead=4K  → delta in=15K, cached=4K → eff 11K
+	// Total effective = 10K + 11K = 21K.
+	fc, _ := codexSessionFile(t, codexRoot, "codexA")
+	writeCodexMeta(t, fc, "codexA", withinWindow)
+	writeCodexTokenCount(t, fc, withinWindow, 10_000, 0, 2_000)
+	writeCodexTokenCount(t, fc, withinWindow, 25_000, 4_000, 5_000)
+	fc.Close()
+
+	roots := FiveHourRoots{Claude: claudeRoot, Codex: codexRoot}
+	summary := AggregateFiveHour(roots, now.UnixMilli(), 100_000)
+
+	const wantCodexEffective int64 = 21_000
+	if summary.TotalEffective != wantCodexEffective {
+		t.Fatalf("TotalEffective=%d, want %d (codex must contribute; sessions: %+v)",
+			summary.TotalEffective, wantCodexEffective, summary.Sessions)
+	}
+	d := summary.DominantSession()
+	if d == nil {
+		t.Fatalf("DominantSession=nil, want the codex session")
+	}
+	if d.SessionID != "codexA" {
+		t.Fatalf("DominantSession.SessionID=%q, want codexA", d.SessionID)
+	}
+	if d.CLI != connectors.CLICodex {
+		t.Fatalf("DominantSession.CLI=%q, want codex", d.CLI)
+	}
+	if d.EffectiveInput != wantCodexEffective {
+		t.Fatalf("DominantSession.EffectiveInput=%d, want %d", d.EffectiveInput, wantCodexEffective)
+	}
 }
 
 func TestAggregateFiveHour_SumsRecentSessions(t *testing.T) {

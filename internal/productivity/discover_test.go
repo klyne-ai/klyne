@@ -20,7 +20,7 @@ func TestDiscoverRepos_CanonicalizesAndIncludesWorktrees(t *testing.T) {
 	// Main repo with one commit so worktrees can be added.
 	main := t.TempDir()
 	gitCmd(t, main, "init", "-q", "-b", "main")
-	commitFile(t, main, "f.go", "package f\n", "init", "mohitpatel9753@gmail.com", time.Now().Add(-time.Hour))
+	commitFile(t, main, "f.go", "package f\n", "init", "dev@example.com", time.Now().Add(-time.Hour))
 
 	// Sibling worktree on a feature branch (D5: cover parallel worktrees).
 	wt := filepath.Join(t.TempDir(), "CLI-1396")
@@ -64,7 +64,7 @@ func TestDiscoverRepos_ExcludesNonGitPaths(t *testing.T) {
 	// A real repo so we can prove the git one survives the filter.
 	repo := t.TempDir()
 	gitCmd(t, repo, "init", "-q", "-b", "main")
-	commitFile(t, repo, "f.go", "package f\n", "init", "mohitpatel9753@gmail.com", time.Now().Add(-time.Hour))
+	commitFile(t, repo, "f.go", "package f\n", "init", "dev@example.com", time.Now().Add(-time.Hour))
 
 	lister := fakeLister{paths: []string{nonGit, repo}}
 	repos, err := DiscoverRepos(context.Background(), lister, time.Now().Add(-2*time.Hour), time.Now())
@@ -96,7 +96,7 @@ func TestDiscoverRepos_WorktreesShareOneCanonicalProjectPath(t *testing.T) {
 	// repo root), so report assembly can collapse them into ONE Service.
 	main := t.TempDir()
 	gitCmd(t, main, "init", "-q", "-b", "main")
-	commitFile(t, main, "f.go", "package f\n", "init", "mohitpatel9753@gmail.com", time.Now().Add(-time.Hour))
+	commitFile(t, main, "f.go", "package f\n", "init", "dev@example.com", time.Now().Add(-time.Hour))
 
 	wt := filepath.Join(t.TempDir(), "feat-CLI-1396")
 	gitCmd(t, main, "worktree", "add", "-q", "-b", "feat/CLI-1396", wt)

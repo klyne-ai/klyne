@@ -1,5 +1,5 @@
 {
-  "_comment": "LiteLLM-style pricing table. Rates are USD per million tokens (per_mtok). Sources: Anthropic pricing page (https://www.anthropic.com/pricing), OpenAI pricing page (https://openai.com/pricing), Google AI pricing page (https://ai.google.dev/pricing). Rates are approximate as of 2025-05 and should be refreshed in W17 before launch. Local/self-hosted models (llama3.1:8b) are zero-cost.",
+  "_comment": "LiteLLM-style pricing table. Rates are USD per million tokens (per_mtok). Sources: Anthropic pricing page (https://www.anthropic.com/pricing), OpenAI pricing page (https://openai.com/pricing), Google AI pricing page (https://ai.google.dev/pricing). Rates are APPROXIMATE as of 2025-05 and SHOULD BE REFRESHED against current vendor pricing before relying on absolute dollar figures. Keys are undated family IDs; the engine strips trailing -YYYYMMDD date suffixes from transcript model IDs before lookup. Local/self-hosted models (llama3.1:8b) are zero-cost.",
   "version": 1,
   "models": {
     "claude-sonnet-4-5": {

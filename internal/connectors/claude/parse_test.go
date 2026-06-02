@@ -184,7 +184,7 @@ func TestParse_ToolResult(t *testing.T) {
 func TestParse_AttachmentHookAdditionalContext(t *testing.T) {
 	// Real-world shape from klyne's own UserPromptSubmit hook
 	// injecting into a trackIt session on 2026-05-10.
-	line := `{"parentUuid":"469e5b13-17e9-414a-b858-690298be06ed","isSidechain":false,"attachment":{"type":"hook_additional_context","content":["klyne: ~66% of loaded file context is stale relative to your current direction. Files still relevant: TransactionNotificationListenerService.java."],"hookName":"UserPromptSubmit","hookEvent":"UserPromptSubmit"},"type":"attachment","uuid":"89dead6f-7d0d-4fe4-8010-58ac4623fe22","timestamp":"2026-05-10T07:24:55.773Z","sessionId":"f876eadd","cwd":"/Users/mohitpatel/Desktop/Learning/trackIt"}`
+	line := `{"parentUuid":"469e5b13-17e9-414a-b858-690298be06ed","isSidechain":false,"attachment":{"type":"hook_additional_context","content":["klyne: ~66% of loaded file context is stale relative to your current direction. Files still relevant: ExampleListenerService.java."],"hookName":"UserPromptSubmit","hookEvent":"UserPromptSubmit"},"type":"attachment","uuid":"89dead6f-7d0d-4fe4-8010-58ac4623fe22","timestamp":"2026-05-10T07:24:55.773Z","sessionId":"f876eadd","cwd":"/Users/you/Desktop/Learning/trackIt"}`
 
 	msg := mustParse(t, line)
 	if msg.Role != connectors.RoleSystem {

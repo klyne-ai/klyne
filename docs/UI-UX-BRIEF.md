@@ -45,9 +45,9 @@ Top 10 projects by recency:
 | trackIt | 39 | 4,361 | 2.3M | $0 (opus-4-7) | yesterday |
 | user | 6 | 960 | 459K | $0.28 | yesterday |
 | partner-service | 6 | 359 | 82K | $0.34 | yesterday |
-| consultation-service | 10 | 879 | 350K | $0.09 | yesterday |
-| operations-app | 35 | 2,344 | 687K | $5.45 | yesterday |
-| oms-service | 21 | 1,368 | 507K | $28.90 | 9 days ago |
+| consult-service | 10 | 879 | 350K | $0.09 | yesterday |
+| ops-app | 35 | 2,344 | 687K | $5.45 | yesterday |
+| orders-service | 21 | 1,368 | 507K | $28.90 | 9 days ago |
 | subscription-service | 8 | 526 | 155K | $0 | 3 days ago |
 
 Models in use:
@@ -214,7 +214,7 @@ Currently: empty state placeholder + cost tile. **Proposed:**
 │                                                                          │
 │  Recent projects (28)                              [view all projects ›]│
 │  ┌────────────────┐  ┌────────────────┐  ┌────────────────┐             │
-│  │  trackIt       │  │ operations-app │  │   oms-service  │             │
+│  │  trackIt       │  │ ops-app        │  │ orders-service │             │
 │  │  39 sessions   │  │  35 sessions   │  │  21 sessions   │             │
 │  │  4,361 msgs    │  │  2,344 msgs    │  │  1,368 msgs    │             │
 │  │  $0 (unpriced) │  │  $5.45         │  │  $28.90        │             │
@@ -247,9 +247,9 @@ Currently: empty state placeholder + cost tile. **Proposed:**
 │  Projects (28)                          [filter: all ▾] [sort: recent ▾]│
 ├────────────────────────────────────────────────────────────────────┤
 │ ▢ trackIt                  39 sess  4,361 msg  yesterday  claude  │
-│ ▢ operations-app           35 sess  2,344 msg  yesterday  claude  │
-│ ▢ oms-service              21 sess  1,368 msg  9d ago     claude  │
-│ ▢ consultation-service     10 sess    879 msg  yesterday  claude  │
+│ ▢ ops-app                  35 sess  2,344 msg  yesterday  claude  │
+│ ▢ orders-service           21 sess  1,368 msg  9d ago     claude  │
+│ ▢ consult-service          10 sess    879 msg  yesterday  claude  │
 │ ▢ ai-for-bharat-hackathon   7 sess  1,149 msg  yesterday  claude  │
 │ ▢ partner-service           6 sess    359 msg  yesterday  claude  │
 │ ▢ subscription-service      8 sess    526 msg  3d ago     claude  │

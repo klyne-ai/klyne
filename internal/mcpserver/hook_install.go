@@ -111,7 +111,7 @@ func InstallAdvisorHook(binaryPath string) (*HookInstallReport, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return nil, fmt.Errorf("mkdir %s: %w", filepath.Dir(path), err)
 	}
-	if err := os.WriteFile(path, append(out, '\n'), 0o600); err != nil {
+	if err := writeFileAtomic(path, append(out, '\n'), 0o600); err != nil {
 		return nil, fmt.Errorf("write %s: %w", path, err)
 	}
 	return &HookInstallReport{Path: path, Action: action}, nil
@@ -490,7 +490,7 @@ func InstallStopHook(binaryPath string) (*HookInstallReport, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return nil, fmt.Errorf("mkdir %s: %w", filepath.Dir(path), err)
 	}
-	if err := os.WriteFile(path, append(out, '\n'), 0o600); err != nil {
+	if err := writeFileAtomic(path, append(out, '\n'), 0o600); err != nil {
 		return nil, fmt.Errorf("write %s: %w", path, err)
 	}
 	return &HookInstallReport{Path: path, Action: action}, nil
