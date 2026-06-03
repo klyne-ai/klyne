@@ -172,4 +172,7 @@ func (m *Mounter) Mount(r chi.Router) {
 	// and shells out to `claude -p` (60s timeout). No DB writes.
 	hAsk := NewAskHandler(m.deps.DB)
 	r.Post(api.RouteAsk, hAsk.Run)
+
+	hEngines := NewEnginesHandler()
+	r.Get(api.RouteEngines, hEngines.Get)
 }

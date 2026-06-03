@@ -451,7 +451,27 @@ export async function runReflect(
  * for a day (idempotent per day); `getCompileStatus` polls its progress.
  * The job survives a page reload — the daemon owns the goroutine.
  */
-export type CompileModel = 'sonnet' | 'opus';
+// CompileModel is a picker key, not a raw model id. 'sonnet'/'opus' run the
+// Claude engine; 'codex' runs the Codex/GPT engine (using the codex config
+// default model). The backend validates the key against its allowlist.
+export type CompileModel = 'sonnet' | 'opus' | 'codex';
+
+// EngineModelOption / EngineOption / EnginesResponse mirror
+// api.EnginesResponse (GET /api/engines): the AI engines available on this
+// machine so the picker only offers engines the user has installed.
+export interface EngineModelOption {
+  key: CompileModel;
+  label: string;
+}
+export interface EngineOption {
+  id: 'claude' | 'codex';
+  label: string;
+  available: boolean;
+  models: EngineModelOption[];
+}
+export interface EnginesResponse {
+  engines: EngineOption[];
+}
 
 export interface CompileServiceState {
   service: string;
@@ -477,6 +497,21 @@ export type CompileStatus = CompileJob | { status: 'none' };
 
 export function isCompileJob(s: CompileStatus): s is CompileJob {
   return (s as CompileJob).id !== undefined;
+}
+
+/**
+ * GET /api/engines — the AI engines available on this machine (claude
+ * and/or codex, auto-detected) with their picker model keys. The
+ * productivity page uses this to offer a Claude/Codex choice and only
+ * show engines the user actually has installed.
+ */
+export async function fetchEngines(signal?: AbortSignal): Promise<EnginesResponse> {
+  const res = await fetch(`${API_BASE}/api/engines`, { signal });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new ApiError(res.status, text, `fetchEngines failed (${res.status})`);
+  }
+  return (await res.json()) as EnginesResponse;
 }
 
 export async function startCompile(

@@ -24,7 +24,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
-  import { fetchProductivityDates, runReflect, startCompile, getCompileStatus, isCompileJob, fetchKlyneUsage, type ProductivityReport, type ProductivityService, type ProductivitySessionStat, type KlyneUsageResponse, type CompileModel, type CompileJob } from '$lib/api.js';
+  import { fetchProductivityDates, runReflect, startCompile, getCompileStatus, isCompileJob, fetchKlyneUsage, fetchEngines, type ProductivityReport, type ProductivityService, type ProductivitySessionStat, type KlyneUsageResponse, type CompileModel, type CompileJob, type EngineModelOption } from '$lib/api.js';
   import { applyHiddenFilter, hiddenSessionIds, hideMany, clearHidden } from '$lib/hidden-sessions.svelte';
   import ConcurrencyTimeline from '$lib/components/productivity/ConcurrencyTimeline.svelte';
   import WhatWasDoneCard from '$lib/dashboard/pages/productivity/WhatWasDoneCard.svelte';
@@ -75,6 +75,22 @@
   // Compile-model picker: Sonnet default, opt-in Opus. Hydrated from
   // localStorage in onMount; corrupt/missing values fall back to Sonnet.
   let compileModel = $state<CompileModel>('sonnet');
+  // Available compile model options, flattened from GET /api/engines over
+  // the engines actually installed on this machine (Claude → sonnet/opus;
+  // Codex → codex). Empty until the fetch resolves; falls back to the
+  // built-in Claude options so the picker still renders offline.
+  let modelOptions = $state<EngineModelOption[]>([
+    { key: 'sonnet', label: 'Sonnet' },
+    { key: 'opus', label: 'Opus' },
+  ]);
+  function modelTitle(key: CompileModel): string {
+    switch (key) {
+      case 'sonnet': return 'Sonnet 4.6 — recommended Claude default, ~1/7 the cost of Opus';
+      case 'opus':   return 'Opus 4.7 — opt in for high-stakes days. ~7× cost.';
+      case 'codex':  return 'Codex (GPT) — uses your codex config default model';
+      default:       return String(key);
+    }
+  }
   function persistCompileModel(next: CompileModel): void {
     compileModel = next;
     try { localStorage.setItem(COMPILE_MODEL_KEY, next); } catch { /* private mode: in-memory only */ }
@@ -484,12 +500,29 @@
     if (c && c.since === since && c.until === until) { rep = c.rep; loadedAt = c.loadedAt; loading = false; }
     else initialLoad = load();
     void loadAvailableDays();
-    // Hydrate the compile-model picker from localStorage. Anything other
-    // than the two known keys is dropped and we fall back to Sonnet.
-    try {
-      const saved = localStorage.getItem(COMPILE_MODEL_KEY);
-      if (saved === 'sonnet' || saved === 'opus') compileModel = saved;
-    } catch { /* private mode: stay on default */ }
+    // Discover which AI engines are installed and build the compile-model
+    // picker from them (Claude → sonnet/opus, Codex → codex). Then hydrate
+    // the saved selection, dropping it if its engine is no longer present.
+    void (async () => {
+      try {
+        const eng = await fetchEngines();
+        const opts: EngineModelOption[] = [];
+        for (const e of eng.engines) {
+          if (e.available) opts.push(...e.models);
+        }
+        if (opts.length > 0) modelOptions = opts;
+      } catch { /* keep the built-in Claude defaults */ }
+      // Hydrate from localStorage, but only honor a key still offered by an
+      // installed engine; otherwise fall back to the first available option.
+      try {
+        const saved = localStorage.getItem(COMPILE_MODEL_KEY) as CompileModel | null;
+        if (saved && modelOptions.some((o) => o.key === saved)) {
+          compileModel = saved;
+        } else if (!modelOptions.some((o) => o.key === compileModel)) {
+          compileModel = modelOptions[0]?.key ?? 'sonnet';
+        }
+      } catch { /* private mode: stay on default */ }
+    })();
     // Reload survival: if a compile is already running for the day being
     // viewed, reattach the pill + resume polling. Await the initial report
     // load first so rep.day is populated — otherwise on a cache miss we'd
@@ -1245,27 +1278,21 @@
     </div>
 
     <div class="hdr-r">
-      <!-- Compile-model picker (Sonnet default, opt-in Opus). Persisted
-           to localStorage; backend validates against an allowlist and
-           falls back to Sonnet when unknown. -->
-      <div class="model-picker" role="radiogroup" aria-label="Productivity compile model">
+      <!-- Compile engine/model picker, built from GET /api/engines so only
+           installed engines (Claude → Sonnet/Opus, Codex → Codex/GPT) are
+           offered. Persisted to localStorage; backend validates the key. -->
+      <div class="model-picker" role="radiogroup" aria-label="Productivity compile engine and model">
         <span class="model-picker-label mono">Compile</span>
-        <button
-          type="button"
-          role="radio"
-          aria-checked={compileModel === 'sonnet'}
-          class="pill pill-sm model-pill"
-          class:model-pill-active={compileModel === 'sonnet'}
-          onclick={() => persistCompileModel('sonnet')}
-          title="Sonnet 4.6 — recommended default, ~1/7 the cost of Opus">Sonnet</button>
-        <button
-          type="button"
-          role="radio"
-          aria-checked={compileModel === 'opus'}
-          class="pill pill-sm model-pill"
-          class:model-pill-active={compileModel === 'opus'}
-          onclick={() => persistCompileModel('opus')}
-          title="Opus 4.7 — opt in for high-stakes days. ~7× cost.">Opus</button>
+        {#each modelOptions as opt (opt.key)}
+          <button
+            type="button"
+            role="radio"
+            aria-checked={compileModel === opt.key}
+            class="pill pill-sm model-pill"
+            class:model-pill-active={compileModel === opt.key}
+            onclick={() => persistCompileModel(opt.key)}
+            title={modelTitle(opt.key)}>{opt.label}</button>
+        {/each}
       </div>
       <span class="mono dim hdr-ago">{ago(loadedAt)}</span>
       <button class="btn-ghost" onclick={() => (askOpen = true)} title="Ask Klyne about this range">Ask ▸</button>
@@ -1925,7 +1952,7 @@
             class="ku-row"
             onclick={() => klyneUsageExpanded = !klyneUsageExpanded}
             aria-expanded={klyneUsageExpanded}
-            title="How much of today's Claude usage was spent by klyne itself"
+            title="How much of today's AI usage (Claude + Codex) was spent by klyne itself"
           >
             <span class="ku-icon" aria-hidden="true">◆</span>
             <span class="ku-text">
@@ -1935,7 +1962,7 @@
               {#if klyneUsage.user_total.total_tokens > 0}
                 <span class="ku-sep">·</span>
                 <span class="mono">{klyneUsage.share_pct.toFixed(1)}%</span>
-                <span class="mono dim">of today's Claude usage</span>
+                <span class="mono dim">of today's AI usage</span>
               {/if}
               <span class="ku-sep">·</span>
               <span class="mono dim">{klyneUsage.klyne.runs} run{klyneUsage.klyne.runs === 1 ? '' : 's'}</span>
@@ -1963,7 +1990,7 @@
               {/if}
               <p class="ku-note mono dim">
                 Tokens only · klyne never tracks USD ·
-                denominator is every Claude message landed today
+                denominator is every Claude + Codex message landed today
                 ({fmtTokens(klyneUsage.user_total.total_tokens)} total).
               </p>
             </div>

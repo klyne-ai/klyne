@@ -41,13 +41,26 @@ type ProductivityCompileHandler struct {
 	registry *CompileJobRegistry
 }
 
-// compileModelAllowlist constrains which models the productivity page's
-// picker may select. The map value is the exact model id passed to the
-// `claude` CLI's --model flag. Adding a new option requires extending
-// this map AND updating the frontend picker — keep them in lockstep.
-var compileModelAllowlist = map[string]string{
-	"sonnet": "claude-sonnet-4-6",
-	"opus":   "claude-opus-4-7",
+// engineModel binds a picker key to the AI engine that serves it and the
+// CLI --model value to pass. engine is "claude" or "codex". model is the
+// exact id for the CLI's --model flag; an empty model means "use the
+// CLI's own default" (Codex on a ChatGPT-account login rejects an explicit
+// gpt-5-codex, so codex runs with no -m and inherits ~/.codex/config.toml).
+type engineModel struct {
+	engine string
+	model  string
+}
+
+// compileModelAllowlist constrains which engine+model the productivity
+// page's picker may select. Adding a new option requires extending this
+// map AND updating the frontend picker / GET /api/engines — keep them in
+// lockstep. The Codex option is only *offered* when the codex CLI is
+// detected (see /api/engines), but it stays in the allowlist so a direct
+// request validates.
+var compileModelAllowlist = map[string]engineModel{
+	"sonnet": {engine: "claude", model: "claude-sonnet-4-6"},
+	"opus":   {engine: "claude", model: "claude-opus-4-7"},
+	"codex":  {engine: "codex", model: ""},
 }
 
 // defaultCompileModel is what the handler picks when the request omits
@@ -62,8 +75,23 @@ const defaultCompileModel = "sonnet"
 func NewProductivityCompileHandler(db *store.DB) *ProductivityCompileHandler {
 	return &ProductivityCompileHandler{
 		db:       db,
-		registry: NewCompileJobRegistry(db, spawnClaudeProductivitySync),
+		registry: NewCompileJobRegistry(db, spawnProductivitySync),
 	}
+}
+
+// spawnProductivitySync is the engine-dispatching runCmd: it routes a
+// compile to the claude or codex engine based on the picker key's engine
+// binding, so the registry stays engine-agnostic. Unknown keys error out
+// (Start validates first, so this is defensive).
+func spawnProductivitySync(ctx context.Context, projectPath, day, modelKey string) (claudeRunResult, error) {
+	em, ok := compileModelAllowlist[modelKey]
+	if !ok {
+		return claudeRunResult{}, fmt.Errorf("productivity-compile: unknown model key %q", modelKey)
+	}
+	if em.engine == "codex" {
+		return runCodexSlashCommand(ctx, projectPath, day, "productivity-sync", em.model)
+	}
+	return spawnClaudeProductivitySync(ctx, projectPath, day, modelKey)
 }
 
 // compileStartRequest is the POST /compile/start body. Day is required
@@ -191,11 +219,13 @@ func spawnClaudeProductivitySync(ctx context.Context, projectPath, day, modelKey
 	// flipped from Opus after an A/B on the same fixture showed Sonnet
 	// is structurally equivalent at ~1/7 the cost; users can opt into
 	// Opus from the productivity page header picker).
-	syncModel, ok := compileModelAllowlist[modelKey]
-	if !ok {
-		// Defensive — Run should have rejected unknown keys already.
-		return claudeRunResult{}, fmt.Errorf("productivity-compile: unknown model key %q", modelKey)
+	em, ok := compileModelAllowlist[modelKey]
+	if !ok || em.engine != "claude" {
+		// Defensive — Run should have rejected unknown keys already, and
+		// the dispatcher routes codex keys elsewhere.
+		return claudeRunResult{}, fmt.Errorf("productivity-compile: unknown claude model key %q", modelKey)
 	}
+	syncModel := em.model
 
 	// projectPath is transcript-derived and is interpolated into the
 	// free-text prompt below while running --permission-mode

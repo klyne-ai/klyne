@@ -123,6 +123,11 @@ const (
 	// the productivity page. Stateless — each request carries the full
 	// context (projects, range, history) so the drawer can be ephemeral.
 	RouteAsk = "/api/ask"
+	// RouteEngines: GET /api/engines. Returns the AI engines available on
+	// this machine (claude and/or codex, auto-detected) with their picker
+	// model keys, so the productivity page can offer a Claude/Codex choice
+	// and only show engines the user actually has installed.
+	RouteEngines = "/api/engines"
 )
 
 // AllRoutes returns the canonical, ordered list of every HTTP path
@@ -160,7 +165,39 @@ func AllRoutes() []string {
 		RouteKlyneUsage,
 		RouteProjectDelete,
 		RouteAsk,
+		RouteEngines,
 	}
+}
+
+// ---------------------------------------------------------------------------
+// /api/engines
+// ---------------------------------------------------------------------------
+
+// EngineModelOption is one selectable model within an engine.
+type EngineModelOption struct {
+	// Key is the picker key sent back as the compile/reflect/ask `model`
+	// field (e.g. "sonnet", "opus", "codex").
+	Key string `json:"key"`
+	// Label is the human-facing name (e.g. "Sonnet", "Opus", "Codex").
+	Label string `json:"label"`
+}
+
+// EngineOption is one AI engine available on this machine.
+type EngineOption struct {
+	// ID is "claude" or "codex".
+	ID string `json:"id"`
+	// Label is the human-facing engine name ("Claude", "Codex").
+	Label string `json:"label"`
+	// Available is true when the engine's CLI was located on this machine.
+	Available bool `json:"available"`
+	// Models are the picker options this engine offers.
+	Models []EngineModelOption `json:"models"`
+}
+
+// EnginesResponse is GET /api/engines. Engines is always emitted as a
+// non-nil slice; UI shows only entries with Available=true.
+type EnginesResponse struct {
+	Engines []EngineOption `json:"engines"`
 }
 
 // ---------------------------------------------------------------------------

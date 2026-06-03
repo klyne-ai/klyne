@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Slash-command install
@@ -29,6 +30,47 @@ import (
 
 //go:embed slashcommands/*.md
 var slashCommandsFS embed.FS
+
+// SlashCommandBody returns the embedded markdown body for the named
+// slash command (e.g. "productivity-sync", "reflect"), with the YAML
+// front-matter block stripped. This is what the Codex engine inlines as
+// a prompt: Codex has no `/klyne:` slash-command surface, so the
+// instructions that Claude Code would resolve from the command file are
+// passed inline instead. The MCP tools the body calls
+// (mcp__klyne__list_stop_summaries_for_day, record_productivity_card,
+// …) come from the klyne server already wired into ~/.codex/config.toml.
+//
+// name is the bare command name without extension. Returns an error when
+// the command is not bundled.
+func SlashCommandBody(name string) (string, error) {
+	raw, err := fs.ReadFile(slashCommandsFS, "slashcommands/"+name+".md")
+	if err != nil {
+		return "", fmt.Errorf("mcpserver: slash command %q not found: %w", name, err)
+	}
+	return stripFrontMatter(string(raw)), nil
+}
+
+// stripFrontMatter removes a leading YAML front-matter block delimited by
+// `---` lines (the `description:` header the markdown commands carry), so
+// only the instruction body is inlined into a prompt. Content without a
+// front-matter block is returned unchanged (trimmed).
+func stripFrontMatter(s string) string {
+	t := strings.TrimLeft(s, "\ufeff \t\r\n")
+	if !strings.HasPrefix(t, "---") {
+		return strings.TrimSpace(s)
+	}
+	// Drop the opening delimiter line, then everything up to and
+	// including the closing `---` line.
+	rest := t[len("---"):]
+	if i := strings.Index(rest, "\n---"); i >= 0 {
+		after := rest[i+len("\n---"):]
+		if nl := strings.IndexByte(after, '\n'); nl >= 0 {
+			return strings.TrimSpace(after[nl+1:])
+		}
+		return ""
+	}
+	return strings.TrimSpace(s)
+}
 
 // SlashCommandsReport carries the outcome of InstallSlashCommands.
 type SlashCommandsReport struct {

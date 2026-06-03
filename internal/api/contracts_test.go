@@ -60,6 +60,7 @@ func TestAllRoutesContainsExpected(t *testing.T) {
 		RouteKlyneUsage,
 		RouteProjectDelete,
 		RouteAsk,
+		RouteEngines,
 	}
 	got := AllRoutes()
 	if len(got) != len(expected) {
