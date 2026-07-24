@@ -122,6 +122,7 @@ func hasFinalAssistantText(snap *mcpserver.SessionSnapshot) bool {
 	return strings.TrimSpace(last.Content) != ""
 }
 
+
 // extractKlyneSummary scans msgs (in reverse) for the assistant's
 // trailing `KLYNE_SUMMARY: ...` payload and returns it.
 //
@@ -340,7 +341,8 @@ func ComputeAndPersistSessionEnd(ctx context.Context, stdin io.Reader, db *store
 		if m.Role == connectors.RoleAssistant {
 			toolCount += len(m.ToolCalls)
 			for _, tc := range m.ToolCalls {
-				if isEditWriteTool(tc.Name) {
+				switch strings.ToLower(tc.Name) {
+				case "edit", "write", "multiedit":
 					editWriteCount++
 				}
 			}
@@ -596,16 +598,16 @@ func buildSessionEndSummary(snap *mcpserver.SessionSnapshot, projectPath string)
 		}
 		if m.Role == connectors.RoleAssistant {
 			for _, tc := range m.ToolCalls {
-				switch {
-				case isShellTool(tc.Name):
+				switch strings.ToLower(tc.Name) {
+				case "bash", "shell":
 					if !bashFound {
 						if cmd := extractBashCmdFromInput(tc.Input); cmd != "" {
 							last.LastBash = sessionEndTruncate(cmd, 200)
 							bashFound = true
 						}
 					}
-				case isFileTool(tc.Name):
-					for _, path := range extractToolFilePaths(tc.Name, tc.Input) {
+				case "read", "edit", "write", "multiedit":
+					if path := extractFilePath(tc.Input); path != "" {
 						if _, dup := seen[path]; !dup {
 							seen[path] = struct{}{}
 							files = append(files, path)
@@ -625,77 +627,6 @@ func buildSessionEndSummary(snap *mcpserver.SessionSnapshot, projectPath string)
 	last.Files = files
 	last.Summary = renderSessionEndBody(snap.SessionID, projectPath, last)
 	return last
-}
-
-// Tool names differ between clients even when the operation is the same.
-// Keep the normalization here so Codex apply_patch/exec_command turns feed
-// the same worklog evidence and productivity scoring as Claude Edit/Bash.
-func isShellTool(name string) bool {
-	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "bash", "shell", "exec_command":
-		return true
-	default:
-		return false
-	}
-}
-
-func isEditWriteTool(name string) bool {
-	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "edit", "write", "multiedit", "apply_patch":
-		return true
-	default:
-		return false
-	}
-}
-
-func isFileTool(name string) bool {
-	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "read", "edit", "write", "multiedit", "apply_patch":
-		return true
-	default:
-		return false
-	}
-}
-
-func extractToolFilePaths(name, input string) []string {
-	if strings.EqualFold(strings.TrimSpace(name), "apply_patch") {
-		return extractPatchFilePaths(input)
-	}
-	if path := extractFilePath(input); path != "" {
-		return []string{path}
-	}
-	return nil
-}
-
-var patchFileHeaderRe = regexp.MustCompile(`(?m)^\*\*\* (?:Add|Update|Delete) File:\s*(.+?)\s*$`)
-
-// extractPatchFilePaths reads the native apply_patch format used by Codex.
-// Some clients wrap the patch in {"patch":"..."}; accept that shape too.
-func extractPatchFilePaths(input string) []string {
-	patch := strings.TrimSpace(input)
-	if patch == "" {
-		return nil
-	}
-	var obj map[string]any
-	if json.Unmarshal([]byte(patch), &obj) == nil {
-		if wrapped, ok := obj["patch"].(string); ok {
-			patch = wrapped
-		}
-	}
-	seen := map[string]bool{}
-	var paths []string
-	for _, match := range patchFileHeaderRe.FindAllStringSubmatch(patch, -1) {
-		if len(match) < 2 {
-			continue
-		}
-		path := strings.TrimSpace(match[1])
-		if path == "" || seen[path] {
-			continue
-		}
-		seen[path] = true
-		paths = append(paths, path)
-	}
-	return paths
 }
 
 func renderSessionEndBody(sessionID, projectPath string, s sessionEndSummary) string {

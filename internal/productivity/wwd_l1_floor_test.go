@@ -133,27 +133,6 @@ func TestBuildFloor_OperationsApp2026_05_26(t *testing.T) {
 	}
 }
 
-func TestBuildFloor_IncludesShortSuppressedClientSummary(t *testing.T) {
-	db := openFloorTestDB(t)
-	at := time.Date(2026, 5, 26, 10, 30, 0, 0, time.Local)
-	const summary = "Fixed login validation in auth.go."
-
-	seedFloorRows(t, db, "/p/codex", []floorRowFixture{
-		{"codex-short", at, 0, summary, ""},
-	})
-
-	details, err := BuildFloorFromStopSummaries(context.Background(), db, "/p/codex", "2026-05-26")
-	if err != nil {
-		t.Fatalf("build floor: %v", err)
-	}
-	if len(details) != 1 {
-		t.Fatalf("details = %d, want 1 for a non-empty KLYNE_SUMMARY even when recap_visible=0", len(details))
-	}
-	if details[0].Text != summary {
-		t.Errorf("detail text = %q, want %q", details[0].Text, summary)
-	}
-}
-
 func TestIsToolOnlySummary(t *testing.T) {
 	toolOnly := []string{
 		"Ran /klyne:reflect — found 1 pending worklog entry for ops-app",

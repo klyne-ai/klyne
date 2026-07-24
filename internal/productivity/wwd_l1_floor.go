@@ -24,6 +24,13 @@ import (
 	"time"
 )
 
+// SubstantialSummaryFloor toggles the include-low-recap-visible-with-substantial-summary
+// behavior for the floor extractor. Set in tests to deterministically
+// scope queries; in production we want every stop_summary with a
+// substantial AI summary regardless of recap_visible so suppression
+// upstream cannot hide the floor's coverage.
+const includeSuppressedWithSubstantialSummary = true
+
 // L1FloorDetail is one extracted detail from L1 stop_summaries. Mirrors
 // WWDDetail exactly so it can be merged into a WhatWasDoneCard without
 // conversion gymnastics, but lives behind its own type so callers can
@@ -69,11 +76,11 @@ var (
 // ASC by When so the dashboard's newest-first composer interleaves it
 // correctly with any LLM-authored details.
 //
-// Rows with recap_visible=0 are INCLUDED whenever ai_drafted_summary is
-// non-empty. The client-side contract already requires trivial turns to emit
-// KLYNE_SUMMARY: skip, which is stored as an empty summary. Applying a second
-// length/token gate here dropped valid short Codex summaries from the
-// dashboard even though capture had succeeded.
+// Rows with recap_visible=0 are INCLUDED when the ai_drafted_summary
+// carries a substantial signal (ticket / SHA / PR ref / feature branch
+// / ≥80 chars of concrete prose) — the floor's whole job is to defeat
+// over-aggressive upstream suppression. Rows with no ai_drafted_summary
+// are skipped (nothing to extract).
 //
 // dayStr is the local-zone YYYY-MM-DD the dashboard already uses for
 // per-day bucketing. The SQL query mirrors ListReflectionsForProjectDay's
@@ -82,9 +89,10 @@ var (
 // floorTurnAdmitted reports whether a stop_summaries turn contributes to
 // the L1 floor. A turn is admitted only when its summary is non-empty, is
 // not a klyne tool-run turn (a session whose prompt invoked a /klyne:…
-// slash command — productivity-sync, reflect, bootstrap, etc.), and is not
-// a purely tool-only summary. Centralised so the floor and the freshness
-// check (LatestFloorTurnTs) admit the exact same turns.
+// slash command — productivity-sync, reflect, bootstrap, etc.), is not a
+// purely tool-only summary, and — for recap_visible=0 rows — carries a
+// substantial signal. Centralised so the floor and the freshness check
+// (LatestFloorTurnTs) admit the exact same turns.
 //
 // The lastUser check is the load-bearing exclusion for freshness: the
 // headless /klyne:productivity-sync compile run ends its own session,
@@ -93,7 +101,7 @@ var (
 // the just-compiled day look perpetually stale (recompile loop). Keying
 // off the invoking prompt is structural and robust where prose-matching
 // (isToolOnlySummary) is not.
-func floorTurnAdmitted(summary, lastUser string) bool {
+func floorTurnAdmitted(summary, lastUser string, visible int) bool {
 	summary = strings.TrimSpace(summary)
 	if summary == "" {
 		return false
@@ -102,6 +110,9 @@ func floorTurnAdmitted(summary, lastUser string) bool {
 		return false
 	}
 	if isToolOnlySummary(summary) {
+		return false
+	}
+	if visible == 0 && !floorIsSubstantial(summary) {
 		return false
 	}
 	return true
@@ -126,7 +137,7 @@ func isKlyneToolPrompt(lastUser string) bool {
 // date relative to new user work.
 func LatestFloorTurnTs(ctx context.Context, db dbReader, projectPath, dayStr string) (int64, error) {
 	const q = `
-SELECT ts, COALESCE(ai_drafted_summary,''), COALESCE(last_user,'')
+SELECT ts, COALESCE(ai_drafted_summary,''), COALESCE(last_user,''), recap_visible
   FROM stop_summaries
  WHERE project_path = ?
    AND date(ts / 1000, 'unixepoch', 'localtime') = ?`
@@ -139,10 +150,11 @@ SELECT ts, COALESCE(ai_drafted_summary,''), COALESCE(last_user,'')
 	for rows.Next() {
 		var ts int64
 		var summary, lastUser string
-		if err := rows.Scan(&ts, &summary, &lastUser); err != nil {
+		var visible int
+		if err := rows.Scan(&ts, &summary, &lastUser, &visible); err != nil {
 			return 0, err
 		}
-		if !floorTurnAdmitted(summary, lastUser) {
+		if !floorTurnAdmitted(summary, lastUser, visible) {
 			continue
 		}
 		if ts > latest {
@@ -160,7 +172,7 @@ func BuildFloorFromStopSummaries(
 ) ([]L1FloorDetail, error) {
 	const q = `
 SELECT session_id, ts, COALESCE(ai_drafted_summary,''), COALESCE(last_bash,''),
-       COALESCE(last_user,'')
+       COALESCE(last_user,''), recap_visible
   FROM stop_summaries
  WHERE project_path = ?
    AND date(ts / 1000, 'unixepoch', 'localtime') = ?
@@ -177,15 +189,16 @@ SELECT session_id, ts, COALESCE(ai_drafted_summary,''), COALESCE(last_bash,''),
 		summary   string
 		bash      string
 		lastUser  string
+		visible   int
 	}
 	var turns []pendingTurn
 	for rows.Next() {
 		var t pendingTurn
-		if err := rows.Scan(&t.sessionID, &t.ts, &t.summary, &t.bash, &t.lastUser); err != nil {
+		if err := rows.Scan(&t.sessionID, &t.ts, &t.summary, &t.bash, &t.lastUser, &t.visible); err != nil {
 			return nil, err
 		}
 		t.summary = strings.TrimSpace(t.summary)
-		if !floorTurnAdmitted(t.summary, t.lastUser) {
+		if !floorTurnAdmitted(t.summary, t.lastUser, t.visible) {
 			continue
 		}
 		turns = append(turns, t)
@@ -535,6 +548,25 @@ func isToolOnlySummary(summary string) bool {
 	return false
 }
 
+// floorIsSubstantial mirrors worklog.hasSubstantialSummary's signal set
+// (CLI-NNNN / commit SHA shape / PR # / feature branch / ≥80 chars).
+// Duplicated here to avoid an internal/worklog → internal/productivity
+// dependency edge — the floor is consumer-side; the worklog package is
+// producer-side and must not import dashboard code.
+func floorIsSubstantial(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return false
+	}
+	if floorTicketRe.MatchString(s) ||
+		floorCommitShaRe.MatchString(s) ||
+		floorPRRefRe.MatchString(s) ||
+		floorFeatureBranchRe.MatchString(s) {
+		return true
+	}
+	return len(s) >= 80
+}
+
 // kindStrengthOrder ranks WWD kinds by "strongest evidence of completed
 // work" — the bucket-level kind picks the lowest rank seen across its
 // turns. SHIPPED outranks every other kind; IN_PROGRESS is the weakest
@@ -738,3 +770,4 @@ func MergeFloorIntoCard(service string, llmCard *WhatWasDoneCard, floor []L1Floo
 	}
 	return &out
 }
+

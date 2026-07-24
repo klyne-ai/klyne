@@ -538,14 +538,8 @@ func isSnapshotBarebones(rep productivity.Report) bool {
 	if len(rep.Sessions) > 0 {
 		return false
 	}
-	if rep.ReflectionStatus == "current" || strings.TrimSpace(rep.ReflectionMarkdown) != "" {
-		return false
-	}
 	for _, s := range rep.Services {
 		if len(s.Branches) > 0 || len(s.MergedPRs) > 0 {
-			return false
-		}
-		if len(s.ReflectionGroups) > 0 || strings.TrimSpace(s.ReflectionMarkdown) != "" {
 			return false
 		}
 		for _, m := range s.MinutesByCLI {
