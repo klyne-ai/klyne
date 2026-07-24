@@ -3,24 +3,21 @@
 Klyne releases are built by GitHub Actions from a signed version tag. The
 release contains macOS, Linux, and Windows archives, SHA-256 checksums, a
 keyless Sigstore signature for the checksum manifest, GitHub build-provenance
-attestations, and a generated Homebrew cask.
+attestations, and generated release notes.
 
 ## One-time repository setup
 
-1. Create the public `klyne-ai/homebrew-tap` repository.
-2. Create a fine-grained GitHub token with `Contents: read and write` for that
-   repository.
-3. Add the token to `klyne-ai/klyne` as the Actions secret
-   `HOMEBREW_TAP_GITHUB_TOKEN`.
-4. Protect release tags matching `v*`.
+Protect release tags matching `v*`.
 
 The workflow uses GitHub OIDC for Sigstore and provenance, so no signing key is
-stored in repository secrets.
+stored in repository secrets. GitHub provides the short-lived `GITHUB_TOKEN`
+used to publish release assets back to this repository; no additional release
+secret is required.
 
 ## Preflight
 
 1. Run the `release` workflow manually. A manual run creates and uploads a
-   snapshot artifact but does not publish a GitHub release or update Homebrew.
+   snapshot artifact but does not publish a GitHub release.
 2. Download the snapshot and confirm that every archive contains `klyne`,
    `klyne-hook`, `README.md`, and `LICENSE`.
 3. Test the darwin/arm64 and darwin/amd64 archives on macOS, and the linux/amd64
@@ -38,8 +35,8 @@ git push origin v0.1.0
 ```
 
 The tag starts `.github/workflows/release.yml`. Do not announce the release
-until the workflow, GitHub release assets, attestations, and Homebrew cask all
-finish successfully.
+until the workflow, GitHub release assets, and attestations all finish
+successfully.
 
 ## Verify a release
 

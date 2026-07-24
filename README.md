@@ -75,17 +75,75 @@ The prose comes from the assistant's own `KLYNE_SUMMARY:` line. klyne does not c
 
 ## Install in 60 seconds
 
+### One-line installer
+
 Install the latest macOS or Linux release:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/klyne-ai/klyne/HEAD/scripts/install.sh | sh
 ```
 
-Or install with Homebrew after the v0.1 tap is published:
+The installer detects macOS/Linux and amd64/arm64, downloads both `klyne` and
+`klyne-hook` from the latest GitHub Release, verifies the archive against
+`checksums.txt`, and installs them into `/usr/local/bin`. If that directory
+needs elevated access, it asks for `sudo` only for the final file copy.
+
+To install without `sudo`, choose a user-owned directory:
 
 ```bash
-brew install --cask klyne-ai/tap/klyne
+curl -fsSL https://raw.githubusercontent.com/klyne-ai/klyne/HEAD/scripts/install.sh \
+  | PREFIX="$HOME/.local/bin" sh
 ```
+
+Make sure `$HOME/.local/bin` is on your `PATH`.
+
+### Manual installation
+
+If you prefer to inspect and install the release yourself:
+
+1. Open [GitHub Releases](https://github.com/klyne-ai/klyne/releases) and
+   download the archive for your machine. The first release uses `0.1.0`;
+   substitute the version shown on GitHub for later releases.
+
+   | Machine | Archive |
+   |---|---|
+   | Apple Silicon Mac | `klyne_0.1.0_darwin_arm64.tar.gz` |
+   | Intel Mac | `klyne_0.1.0_darwin_amd64.tar.gz` |
+   | Linux x86-64 | `klyne_0.1.0_linux_amd64.tar.gz` |
+   | Linux ARM64 | `klyne_0.1.0_linux_arm64.tar.gz` |
+
+2. Download `checksums.txt` from the same release and verify the archive
+   (replace `ARCHIVE` with the filename you downloaded):
+
+   ```bash
+   ARCHIVE=klyne_0.1.0_darwin_arm64.tar.gz
+   grep " ${ARCHIVE}$" checksums.txt > "${ARCHIVE}.sha256"
+
+   # macOS
+   shasum -a 256 -c "${ARCHIVE}.sha256"
+
+   # Linux
+   sha256sum -c "${ARCHIVE}.sha256"
+   ```
+
+3. Extract and install both binaries:
+
+   ```bash
+   tar -xzf "$ARCHIVE"
+   mkdir -p "$HOME/.local/bin"
+   install -m 0755 klyne klyne-hook "$HOME/.local/bin/"
+   export PATH="$HOME/.local/bin:$PATH"
+   ```
+
+   Add that `export PATH=...` line to `~/.zshrc` (macOS) or `~/.bashrc`
+   (Linux) to keep it available in new terminal sessions.
+
+4. Confirm the installation:
+
+   ```bash
+   klyne --version
+   klyne-hook --version
+   ```
 
 Then connect your AI coding tools and start the local dashboard:
 
@@ -148,7 +206,7 @@ If you installed klyne before this version, the installer also migrates the lega
 
 - The packaged release needs no Go or Node installation.
 - Source builds require Go 1.25+ and Node 20+. The Makefile uses `GOTOOLCHAIN=auto`, so older Go installations can fetch the required toolchain.
-- Release archives and the Homebrew cask install both `klyne` and `klyne-hook`.
+- The one-line and manual install paths both install `klyne` and `klyne-hook`.
 - Codex hook support requires codex-cli 0.133 or newer (older codex builds use the deprecated `codex_hooks` feature flag; the installer migrates it automatically).
 - Release archives include SHA-256 checksums, a keyless Sigstore signature, and GitHub build-provenance attestations. See [docs/RELEASING.md](docs/RELEASING.md) for verification.
 
@@ -286,7 +344,7 @@ The end-to-end scenarios assert that the **per-turn capture flow** spawns no dae
 
 **Planned**
 
-- **v0.1** - Homebrew tap, one-line installer, signed binaries.
+- **v0.1** - GitHub release binaries, one-line installer, and signed checksums.
 - **v0.3** - VSCode / JetBrains extension for worklog and advisor signals in the editor.
 - **v0.4** - Team-mode opt-in, aggregated locally on each user's machine.
 

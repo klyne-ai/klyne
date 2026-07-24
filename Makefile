@@ -97,7 +97,7 @@ clean:
 
 # Release: orchestrated by .github/workflows/release.yml on a `v*.*.*`
 # tag push. The CI workflow runs `goreleaser release --clean` with the
-# GITHUB_TOKEN + HOMEBREW_TAP_GITHUB_TOKEN secrets in scope.
+# repository-scoped GITHUB_TOKEN in scope.
 #
 # For local testing without publishing, use `release-snapshot` below.
 release:
@@ -105,7 +105,7 @@ release:
 	@echo "For a local dry-run that does not publish, run: make release-snapshot"
 
 # Local dry-run of the release pipeline. Produces artifacts under dist/
-# without pushing anything to GitHub or the Homebrew tap.
+# without publishing anything to GitHub.
 # Requires goreleaser on PATH (https://goreleaser.com/install/).
 release-snapshot:
 	GOTOOLCHAIN=auto goreleaser release --snapshot --clean --skip=sign

@@ -1,7 +1,7 @@
 # GoReleaser configuration for klyne.
 #
 # Produces cross-platform binaries (darwin/linux/windows × amd64/arm64),
-# archives, sha256 checksums, a GitHub release, and a Homebrew tap cask.
+# archives, sha256 checksums, and a GitHub release.
 #
 # Local testing (no publish): `make release-snapshot` (wraps
 # `goreleaser release --snapshot --clean`). Real releases run from
@@ -10,13 +10,6 @@
 # CGO is disabled to match the Makefile: modernc.org/sqlite is pure Go,
 # and CGO with the macOS 26 + Go 1.21 internal linker produces binaries
 # dyld rejects (see Makefile build target for full rationale).
-#
-# Manual prerequisites BEFORE a real release tag is pushed:
-#   1. Create the empty repo `klyne-ai/homebrew-tap` on GitHub.
-#   2. Create a fine-scoped PAT with `contents:write` on that tap repo
-#      and add it to this repo's secrets as `HOMEBREW_TAP_GITHUB_TOKEN`.
-#      Without that secret, the homebrew step will fail and the rest of
-#      the release will still publish.
 
 version: 2
 
@@ -133,25 +126,3 @@ release:
   draft: false
   prerelease: auto
   name_template: "klyne {{ .Tag }}"
-
-# Homebrew tap publishing. GoReleaser deprecated the old `brews` pipe in
-# v2.16; casks are now the supported way to distribute pre-built binaries.
-# Skipped automatically for `--snapshot` runs.
-homebrew_casks:
-  - name: klyne
-    ids:
-      - klyne
-    binaries:
-      - klyne
-      - klyne-hook
-    repository:
-      owner: klyne-ai
-      name: homebrew-tap
-      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
-    commit_author:
-      name: klyne-release-bot
-      email: release@klyne.ai
-    commit_msg_template: "chore(brew): klyne {{ .Tag }}"
-    homepage: "https://github.com/klyne-ai/klyne"
-    description: "Local-first worklog for developers using AI."
-    skip_upload: auto
