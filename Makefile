@@ -1,4 +1,4 @@
-.PHONY: build build-ui build-hook install dev test vet lint tidy ci clean release release-snapshot proof eval-contexthealth
+.PHONY: build build-ui build-hook install install-test dev test vet lint tidy ci clean release release-snapshot proof eval-contexthealth
 
 # Default target.
 #
@@ -40,6 +40,12 @@ install: build
 	install -m 0755 bin/klyne-hook $(PREFIX)/bin/klyne-hook
 	@echo "installed klyne + klyne-hook to $(PREFIX)/bin"
 	@echo "next: run \`klyne mcp install\` to wire MCP server + hooks, then restart Claude Code."
+
+# Exercise the public installer against a local fake release. This checks
+# platform resolution, archive naming, checksum enforcement, and that both
+# klyne binaries are installed together.
+install-test:
+	sh scripts/install-test.sh
 
 # Build the SvelteKit UI if ui/package.json exists.
 # The UI build output is embedded via embed.FS (ui/build/).
@@ -102,7 +108,7 @@ release:
 # without pushing anything to GitHub or the Homebrew tap.
 # Requires goreleaser on PATH (https://goreleaser.com/install/).
 release-snapshot:
-	goreleaser release --snapshot --clean
+	GOTOOLCHAIN=auto goreleaser release --snapshot --clean --skip=sign
 
 # Run every reproducible-proof test under docs/proof/. Each subdirectory
 # is a self-contained scenario with a fixture + a Go test asserting the

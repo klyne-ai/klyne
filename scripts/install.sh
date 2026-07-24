@@ -2,11 +2,12 @@
 # install.sh — one-command installer for klyne.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/klyne-ai/klyne/main/scripts/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/klyne-ai/klyne/HEAD/scripts/install.sh | sh
 #
 # Environment overrides:
 #   KLYNE_VERSION   pin a release tag (e.g. v0.5.0). Default: latest release.
-#   PREFIX          install root. Binary lands at $PREFIX/klyne.
+#   PREFIX          install directory. Binaries land at $PREFIX/klyne and
+#                   $PREFIX/klyne-hook.
 #                   Default: /usr/local/bin
 #
 # This script is intentionally POSIX-sh so it runs under both bash and the
@@ -19,7 +20,7 @@ set -eu
 (set -o pipefail 2>/dev/null) && set -o pipefail || true
 
 REPO="klyne-ai/klyne"
-BINARY="klyne"
+BINARIES="klyne klyne-hook"
 PREFIX="${PREFIX:-/usr/local/bin}"
 KLYNE_VERSION="${KLYNE_VERSION:-}"
 
@@ -119,12 +120,12 @@ main() {
   # GoReleaser strips the leading `v` from {{ .Version }} when expanding,
   # so the asset name uses the bare semver.
   version_bare="${version#v}"
-  archive="${BINARY}_${version_bare}_${os}_${arch}.tar.gz"
+  archive="klyne_${version_bare}_${os}_${arch}.tar.gz"
   base_url="https://github.com/${REPO}/releases/download/${version}"
   archive_url="${base_url}/${archive}"
   checksums_url="${base_url}/checksums.txt"
 
-  log "installing ${BINARY} ${version} for ${os}/${arch}"
+  log "installing klyne ${version} for ${os}/${arch}"
   log "  archive:   ${archive_url}"
   log "  checksums: ${checksums_url}"
 
@@ -150,25 +151,48 @@ main() {
   log "extracting"
   tar -xzf "$archive_path" -C "$workdir"
 
-  extracted_binary="${workdir}/${BINARY}"
-  [ -f "$extracted_binary" ] || err "archive did not contain expected binary: ${BINARY}"
+  for binary in $BINARIES; do
+    [ -f "${workdir}/${binary}" ] || err "archive did not contain expected binary: ${binary}"
+  done
 
-  # Install with sudo if PREFIX isn't writable, but only prompt when we're
-  # interactive. Non-interactive (`curl | sh`) just falls through to install
-  # and surfaces a clear permission error.
+  # Install directly when PREFIX is writable; otherwise use sudo when it is
+  # available. Users without sudo can choose a user-owned directory with
+  # PREFIX=$HOME/.local/bin.
   install_dir="$PREFIX"
-  log "installing to ${install_dir}/${BINARY}"
+  log "installing to ${install_dir}"
+  install_binaries() {
+    for binary in $BINARIES; do
+      install -m 0755 "${workdir}/${binary}" "${install_dir}/${binary}"
+    done
+  }
+  sudo_install_binaries() {
+    for binary in $BINARIES; do
+      sudo install -m 0755 "${workdir}/${binary}" "${install_dir}/${binary}"
+    done
+  }
+
+  if [ ! -d "$install_dir" ]; then
+    if ! mkdir -p "$install_dir" 2>/dev/null; then
+      command -v sudo >/dev/null 2>&1 \
+        || err "cannot create ${install_dir} and sudo is unavailable. Re-run with PREFIX=\$HOME/.local/bin"
+      log "elevating with sudo (target directory does not exist)"
+      sudo mkdir -p "$install_dir"
+    fi
+  fi
+
   if [ -w "$install_dir" ] || [ -w "$(dirname "$install_dir")" ]; then
-    install -m 0755 "$extracted_binary" "${install_dir}/${BINARY}"
+    install_binaries
   elif command -v sudo >/dev/null 2>&1; then
     log "elevating with sudo (target not writable by current user)"
-    sudo install -m 0755 "$extracted_binary" "${install_dir}/${BINARY}"
+    sudo_install_binaries
   else
     err "cannot write to ${install_dir} and sudo is unavailable. Re-run with PREFIX=\$HOME/.local/bin"
   fi
 
-  log "installed: ${install_dir}/${BINARY}"
-  log "verify with: ${BINARY} --version"
+  log "installed: ${install_dir}/klyne"
+  log "installed: ${install_dir}/klyne-hook"
+  log "next: ${install_dir}/klyne mcp install"
+  log "then: ${install_dir}/klyne"
 }
 
 main "$@"

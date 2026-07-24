@@ -1,6 +1,7 @@
 # CI workflow.
 #
-# Runs on every push to `main` and every pull request targeting `main`.
+# Runs on the current default branch (`init`) and remains ready for the
+# planned rename to `main`.
 # Provides the test/lint signal that's missing from a public OSS-Go-CLI
 # repo by default — release.yml handles tagging only.
 #
@@ -18,9 +19,9 @@ name: ci
 
 on:
   push:
-    branches: [main]
+    branches: [init, main]
   pull_request:
-    branches: [main]
+    branches: [init, main]
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -66,6 +67,8 @@ jobs:
       - uses: golangci/golangci-lint-action@v6
         with:
           version: v1.62.2
+      - name: installer smoke test
+        run: sh scripts/install-test.sh
 
   ui:
     name: ui check + test + build
