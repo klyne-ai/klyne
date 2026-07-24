@@ -1,7 +1,7 @@
 # GoReleaser configuration for klyne.
 #
 # Produces cross-platform binaries (darwin/linux/windows × amd64/arm64),
-# archives, sha256 checksums, a GitHub release, and a Homebrew tap formula.
+# archives, sha256 checksums, a GitHub release, and a Homebrew tap cask.
 #
 # Local testing (no publish): `make release-snapshot` (wraps
 # `goreleaser release --snapshot --clean`). Real releases run from
@@ -21,6 +21,9 @@
 version: 2
 
 project_name: klyne
+
+env:
+  - GOTOOLCHAIN=auto
 
 before:
   hooks:
@@ -95,6 +98,19 @@ checksum:
   name_template: "checksums.txt"
   algorithm: sha256
 
+# Sign the checksum manifest with keyless Sigstore in GitHub Actions. The
+# manifest covers every platform archive, so users can verify one signature
+# and then verify the exact archive they downloaded.
+signs:
+  - cmd: cosign
+    signature: "${artifact}.sigstore.json"
+    args:
+      - "sign-blob"
+      - "--bundle=${signature}"
+      - "${artifact}"
+      - "--yes"
+    artifacts: checksum
+
 snapshot:
   version_template: "{{ incpatch .Version }}-snapshot"
 
@@ -118,13 +134,16 @@ release:
   prerelease: auto
   name_template: "klyne {{ .Tag }}"
 
-# Homebrew tap publishing.
-# Skipped automatically for `--snapshot` runs (see top-level `snapshot:` block
-# plus the `skip_upload` field below, which honors the snapshot flag).
-brews:
+# Homebrew tap publishing. GoReleaser deprecated the old `brews` pipe in
+# v2.16; casks are now the supported way to distribute pre-built binaries.
+# Skipped automatically for `--snapshot` runs.
+homebrew_casks:
   - name: klyne
     ids:
       - klyne
+    binaries:
+      - klyne
+      - klyne-hook
     repository:
       owner: klyne-ai
       name: homebrew-tap
@@ -134,10 +153,5 @@ brews:
       email: release@klyne.ai
     commit_msg_template: "chore(brew): klyne {{ .Tag }}"
     homepage: "https://github.com/klyne-ai/klyne"
-    description: "Local-first session rescue layer for Claude Code and Codex."
-    license: "MIT"
+    description: "Local-first worklog for developers using AI."
     skip_upload: auto
-    test: |
-      system "#{bin}/klyne", "--version"
-    install: |
-      bin.install "klyne"

@@ -1,8 +1,8 @@
 # Release workflow.
 #
-# Triggers on `v*.*.*` tag pushes (e.g. `v0.5.0`). Builds cross-platform
-# binaries, publishes a GitHub release, and pushes a formula to
-# `klyne-ai/homebrew-tap`.
+# Tag pushes publish a GitHub release and Homebrew cask. A manual run builds
+# the same artifacts as a snapshot without publishing, which gives maintainers
+# a safe preflight before creating the first public tag.
 #
 # Required secrets:
 #   - GITHUB_TOKEN              auto-provided by Actions; scoped to this repo.
@@ -19,12 +19,15 @@
 name: release
 
 on:
+  workflow_dispatch:
   push:
     tags:
       - "v*.*.*"
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 concurrency:
   group: release-${{ github.ref }}
@@ -34,6 +37,8 @@ jobs:
   goreleaser:
     name: goreleaser
     runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: local
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -45,12 +50,53 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          # Match the Go toolchain declared in go.mod (currently go 1.25).
-          go-version-file: go.mod
+          # Match go.mod's toolchain directive exactly so GoReleaser cannot
+          # mix compiler and standard-library patch versions via the cache.
+          go-version: "1.25.3"
           cache: true
 
-      - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Build embedded dashboard
+        working-directory: ui
+        run: |
+          npm ci
+          npm run build
+          test -s build/index.html
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v4.1.2
+
+      - name: Build release snapshot
+        if: github.event_name == 'workflow_dispatch'
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --snapshot --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload snapshot artifacts
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: klyne-release-snapshot
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/checksums.txt
+            dist/checksums.txt.sigstore.json
+          if-no-files-found: error
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser
           version: "~> v2"
@@ -58,3 +104,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+
+      - name: Attest release archives
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/checksums.txt
+            dist/checksums.txt.sigstore.json

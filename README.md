@@ -1,8 +1,8 @@
 # klyne
 
-**The local productivity layer for engineers who code with AI.**
+**A local-first worklog for developers using AI.**
 
-klyne installs a one-line hook in Claude Code, Codex CLI, and Cursor so the assistant ends each useful reply with a `KLYNE_SUMMARY` line. klyne captures those summaries into local SQLite and turns them into a worklog, productivity dashboard, runbooks, and context-rescue tools — without proxying your chats or running an always-on background model. (Optional prose-synthesis steps spawn a local `claude` only when you click them — see [Privacy](#privacy-model).)
+Klyne shows what you worked on yesterday or over the week across Claude Code, Codex, Cursor, projects, and branches. It captures concise `KLYNE_SUMMARY` lines into local SQLite and turns them into a worklog, productivity dashboard, runbooks, and context-rescue tools — without proxying your chats or running an always-on background model. (Optional prose-synthesis steps spawn a local `claude` only when you click them — see [Privacy](#privacy-model).)
 
 [Install](#install-in-60-seconds) | [Dashboard](#dashboard) | [How it works](#how-it-works) | [Privacy](#privacy-model) | [Contributing](#contributing)
 
@@ -75,14 +75,24 @@ The prose comes from the assistant's own `KLYNE_SUMMARY:` line. klyne does not c
 
 ## Install in 60 seconds
 
-```bash
-git clone https://github.com/klyne-ai/klyne
-cd klyne
-make build
+Install the latest macOS or Linux release:
 
-./bin/klyne mcp install
-./bin/klyne config set plan max-5x    # optional: pro / max-5x / max-20x / team
-./bin/klyne
+```bash
+curl -fsSL https://raw.githubusercontent.com/klyne-ai/klyne/HEAD/scripts/install.sh | sh
+```
+
+Or install with Homebrew after the v0.1 tap is published:
+
+```bash
+brew install --cask klyne-ai/tap/klyne
+```
+
+Then connect your AI coding tools and start the local dashboard:
+
+```bash
+klyne mcp install
+klyne config set plan max-5x    # optional: pro / max-5x / max-20x / team
+klyne
 ```
 
 Open `http://127.0.0.1:7878`, then finish one Claude Code, Codex CLI, or Cursor session. The first useful row appears after the session writes transcript data (Claude / Codex) or fires `afterAgentResponse` (Cursor).
@@ -136,10 +146,11 @@ If you installed klyne before this version, the installer also migrates the lega
 <details>
 <summary>Requirements and package status</summary>
 
-- Requires Go 1.25+. The Makefile uses `GOTOOLCHAIN=auto`, so older Go installations can fetch the required toolchain.
-- Builds two binaries: `klyne` and `klyne-hook`.
+- The packaged release needs no Go or Node installation.
+- Source builds require Go 1.25+ and Node 20+. The Makefile uses `GOTOOLCHAIN=auto`, so older Go installations can fetch the required toolchain.
+- Release archives and the Homebrew cask install both `klyne` and `klyne-hook`.
 - Codex hook support requires codex-cli 0.133 or newer (older codex builds use the deprecated `codex_hooks` feature flag; the installer migrates it automatically).
-- Homebrew tap and one-line installer are planned for v0.1.
+- Release archives include SHA-256 checksums, a keyless Sigstore signature, and GitHub build-provenance attestations. See [docs/RELEASING.md](docs/RELEASING.md) for verification.
 
 </details>
 

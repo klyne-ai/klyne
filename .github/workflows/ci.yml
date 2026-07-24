@@ -1,6 +1,7 @@
 # CI workflow.
 #
-# Runs on every push to `main` and every pull request targeting `main`.
+# Runs on the current default branch (`init`) and remains ready for the
+# planned rename to `main`.
 # Provides the test/lint signal that's missing from a public OSS-Go-CLI
 # repo by default — release.yml handles tagging only.
 #
@@ -18,9 +19,9 @@ name: ci
 
 on:
   push:
-    branches: [main]
+    branches: [init, main]
   pull_request:
-    branches: [main]
+    branches: [init, main]
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -34,13 +35,26 @@ jobs:
     name: go test + vet + lint
     runs-on: ubuntu-24.04
     env:
-      GOTOOLCHAIN: auto
+      # Pin the compiler and standard library to the same patch release.
+      # Mixing setup-go's go directive (1.25.0) with go.mod's toolchain
+      # directive (1.25.3) can poison the shared build cache.
+      GOTOOLCHAIN: local
     steps:
       - uses: actions/checkout@v4
+        with:
+          # golangci-lint compares against the PR base (or previous pushed
+          # commit), so both revisions must be available locally.
+          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: "1.25.3"
           cache: true
+      - name: configure test git identity
+        # Productivity integration tests filter commits to the configured
+        # user identity. Fresh GitHub runners do not have one by default.
+        run: |
+          git config --global user.name "Klyne CI"
+          git config --global user.email "dev@example.com"
       # The embed.FS at module root needs ui/build/ to exist before any
       # Go compile step. Create an empty stub so go vet/test compile.
       # Real builds (release.yml) replace this with the actual UI bundle.
@@ -48,6 +62,11 @@ jobs:
         run: mkdir -p ui/build && echo '<!doctype html>' > ui/build/index.html
       - name: go vet
         run: go vet ./...
+      - name: store performance proxy
+        # Keep the wall-clock budget meaningful by running it without the
+        # race detector. The full race suite below still exercises the same
+        # code path, but treats its heavily instrumented timing as diagnostic.
+        run: go test ./internal/store -run '^TestBulkInsert_5K_PerformanceProxy$' -count=1
       - name: go test -race
         # -coverprofile emits a profile so reviewers can pinpoint which
         # branches a PR did/didn't cover. -covermode=atomic is required
@@ -63,9 +82,14 @@ jobs:
           name: go-coverage
           path: coverage.out
           retention-days: 14
-      - uses: golangci/golangci-lint-action@v6
+      - uses: golangci/golangci-lint-action@v9
         with:
-          version: v1.62.2
+          version: v2.12.2
+          # The repository has a pre-existing lint backlog. Gate only issues
+          # introduced by this change until that backlog is cleaned up.
+          args: --new-from-rev=${{ github.event.pull_request.base.sha || github.event.before }}
+      - name: installer smoke test
+        run: sh scripts/install-test.sh
 
   ui:
     name: ui check + test + build
@@ -82,6 +106,10 @@ jobs:
           cache-dependency-path: ui/package-lock.json
       - name: npm ci
         run: npm ci
+      - name: svelte-kit sync
+        # svelte-check extends .svelte-kit/tsconfig.json, which is generated
+        # locally by the dev/build commands but does not exist after checkout.
+        run: npx svelte-kit sync
       - name: svelte-check
         run: npx svelte-check --tsconfig ./tsconfig.json
       - name: vitest
@@ -94,12 +122,12 @@ jobs:
     needs: [go, ui]
     runs-on: ubuntu-24.04
     env:
-      GOTOOLCHAIN: auto
+      GOTOOLCHAIN: local
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: "1.25.3"
           cache: true
       - uses: actions/setup-node@v4
         with:

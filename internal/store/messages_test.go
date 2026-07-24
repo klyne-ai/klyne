@@ -535,16 +535,13 @@ WHERE id = 'bulk-sess'`,
 	elapsed := time.Since(start)
 	t.Logf("BulkInsert 5000 messages: %v", elapsed)
 
-	// The spec budget is <1 s on a dev laptop without the race detector.
-	// The -race flag adds 5-20× overhead due to shadow memory tracking;
-	// we allow 10 s under race so the test remains informative rather than
-	// a false negative.  W16 will run the authoritative benchmark without -race.
-	limit := time.Second
+	// The spec budget is <1 s without the race detector. Race instrumentation
+	// adds machine-dependent shadow-memory overhead, so its timing remains
+	// diagnostic while CI enforces this budget in a dedicated non-race step.
 	if raceEnabled {
-		limit = 10 * time.Second
-	}
-	if elapsed > limit {
-		t.Errorf("bulk insert took %v; want < %v (performance proxy, race=%v)", elapsed, limit, raceEnabled)
+		t.Log("performance budget is informational under the race detector")
+	} else if elapsed > time.Second {
+		t.Errorf("bulk insert took %v; want < %v (performance proxy)", elapsed, time.Second)
 	}
 
 	// Verify row count.

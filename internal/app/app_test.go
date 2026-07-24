@@ -20,7 +20,6 @@ import (
 	"github.com/klyne-ai/klyne/internal/connectors"
 )
 
-
 // newTestConfig returns a *config.Config rooted at t.TempDir(): the DB
 // lives in <tempdir>/klyne.db and connectors point at empty
 // subdirectories so Watch returns no events. Browser is suppressed.
@@ -229,13 +228,23 @@ func TestApp_AppendMounter(t *testing.T) {
 	a.AppendMounter(nil) // nil tolerated
 
 	ctx, cancel := context.WithCancel(context.Background())
-	go func() { _ = a.Start(ctx) }()
+	startErr := make(chan error, 1)
+	go func() { startErr <- a.Start(ctx) }()
+	defer func() {
+		cancel()
+		select {
+		case err := <-startErr:
+			if err != nil && !errors.Is(err, context.Canceled) {
+				t.Errorf("Start returned %v", err)
+			}
+		case <-time.After(3 * time.Second):
+			t.Error("Start did not return within 3s after cancel")
+		}
+	}()
 
 	if !waitForAddr(a, 2*time.Second) {
-		cancel()
 		t.Fatal("server did not bind")
 	}
-	defer cancel()
 
 	resp, err := http.Get("http://" + a.Addr() + "/__ping")
 	if err != nil {
@@ -260,13 +269,23 @@ func TestApp_EmbeddedUI_Served(t *testing.T) {
 	a.SuppressBrowser = true
 
 	ctx, cancel := context.WithCancel(context.Background())
-	go func() { _ = a.Start(ctx) }()
+	startErr := make(chan error, 1)
+	go func() { startErr <- a.Start(ctx) }()
+	defer func() {
+		cancel()
+		select {
+		case err := <-startErr:
+			if err != nil && !errors.Is(err, context.Canceled) {
+				t.Errorf("Start returned %v", err)
+			}
+		case <-time.After(3 * time.Second):
+			t.Error("Start did not return within 3s after cancel")
+		}
+	}()
 
 	if !waitForAddr(a, 2*time.Second) {
-		cancel()
 		t.Fatal("server did not bind")
 	}
-	defer cancel()
 
 	resp, err := http.Get("http://" + a.Addr() + "/")
 	if err != nil {
@@ -290,12 +309,22 @@ func TestApp_LoopbackOnly(t *testing.T) {
 	a.SuppressBrowser = true
 
 	ctx, cancel := context.WithCancel(context.Background())
-	go func() { _ = a.Start(ctx) }()
-	if !waitForAddr(a, 2*time.Second) {
+	startErr := make(chan error, 1)
+	go func() { startErr <- a.Start(ctx) }()
+	defer func() {
 		cancel()
+		select {
+		case err := <-startErr:
+			if err != nil && !errors.Is(err, context.Canceled) {
+				t.Errorf("Start returned %v", err)
+			}
+		case <-time.After(3 * time.Second):
+			t.Error("Start did not return within 3s after cancel")
+		}
+	}()
+	if !waitForAddr(a, 2*time.Second) {
 		t.Fatal("server did not bind")
 	}
-	defer cancel()
 
 	// 127.0.0.1 must be allowed.
 	resp, err := http.Get("http://" + a.Addr() + "/healthz")
