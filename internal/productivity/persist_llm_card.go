@@ -81,12 +81,14 @@ func PersistLLMCompiledCard(
 	if !matched {
 		c := cloneCard(card)
 		stub := Service{
-			Repo:        card.Service,
-			ProjectPath: projectPath,
-			Branches:    []Branch{},
-			Risks:       []RiskSignal{},
-			MergedPRs:   []MergedPR{},
-			WhatWasDone: &c,
+			Repo:         card.Service,
+			ProjectPath:  projectPath,
+			Branches:     []Branch{},
+			Risks:        []RiskSignal{},
+			MergedPRs:    []MergedPR{},
+			PullRequests: []PullRequest{},
+			OpenItems:    []OpenWorkItem{},
+			WhatWasDone:  &c,
 		}
 		rep.Services = append(rep.Services, stub)
 	}
@@ -135,6 +137,10 @@ func cloneCard(c WhatWasDoneCard) WhatWasDoneCard {
 	out := c
 	if c.Tier2.Details != nil {
 		out.Tier2.Details = append([]WWDDetail(nil), c.Tier2.Details...)
+		for i := range out.Tier2.Details {
+			out.Tier2.Details[i].Evidence = append([]string(nil), c.Tier2.Details[i].Evidence...)
+			out.Tier2.Details[i].CLIs = append([]string(nil), c.Tier2.Details[i].CLIs...)
+		}
 	}
 	if c.Tier1.PillCounts != nil {
 		out.Tier1.PillCounts = make(map[string]int, len(c.Tier1.PillCounts))
@@ -144,6 +150,22 @@ func cloneCard(c WhatWasDoneCard) WhatWasDoneCard {
 	}
 	if c.Tier1.TopEvidence != nil {
 		out.Tier1.TopEvidence = append([]string(nil), c.Tier1.TopEvidence...)
+	}
+	if c.Narrative != nil {
+		narrative := *c.Narrative
+		narrative.Cards = append([]WWDCard(nil), c.Narrative.Cards...)
+		for i := range narrative.Cards {
+			narrative.Cards[i].Refs = append([]WWDRef(nil), c.Narrative.Cards[i].Refs...)
+			narrative.Cards[i].CLIs = append([]string(nil), c.Narrative.Cards[i].CLIs...)
+		}
+		out.Narrative = &narrative
+	}
+	if c.OpenItems != nil {
+		out.OpenItems = append([]OpenWorkItem(nil), c.OpenItems...)
+		for i := range out.OpenItems {
+			out.OpenItems[i].CLIs = append([]string(nil), c.OpenItems[i].CLIs...)
+			out.OpenItems[i].Refs = append([]WWDRef(nil), c.OpenItems[i].Refs...)
+		}
 	}
 	return out
 }

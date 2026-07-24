@@ -206,6 +206,51 @@ func TestBuildFloor_KindClassification(t *testing.T) {
 	}
 }
 
+func TestBuildFloor_ReconcilesOutcomeTransitionsAndCLIProvenance(t *testing.T) {
+	db := openFloorTestDB(t)
+	project := "/p/mixed"
+	started := time.Date(2026, 7, 24, 10, 0, 0, 0, time.Local)
+	insert := func(session string, at time.Time, cli, summary string) {
+		t.Helper()
+		if _, err := db.Exec(`INSERT INTO stop_summaries
+			(session_id, ts, project_path, cli, last_user, recap_visible, ai_drafted_summary)
+			VALUES (?, ?, ?, ?, 'work', 1, ?)`,
+			session, at.UnixMilli(), project, cli, summary,
+		); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+	insert("codex-open", started, "codex", "CLI-700 implementation is in progress and pending review")
+	insert("claude-ship", started.Add(time.Hour), "claude", "Shipped CLI-700 in PR #88")
+	insert("codex-followup", started.Add(2*time.Hour), "codex", "CLI-700 changes requested; follow-up is blocked")
+
+	details, err := BuildFloorFromStopSummaries(context.Background(), db, project, "2026-07-24")
+	if err != nil {
+		t.Fatalf("build floor: %v", err)
+	}
+	if len(details) != 2 {
+		t.Fatalf("details = %+v, want shipped outcome plus later blocked outcome", details)
+	}
+	byKind := map[string]L1FloorDetail{}
+	for _, detail := range details {
+		byKind[detail.Kind] = detail
+	}
+	shipped, ok := byKind["SHIPPED"]
+	if !ok {
+		t.Fatalf("shipped outcome missing: %+v", details)
+	}
+	if strings.Join(shipped.CLIs, ",") != "claude" {
+		t.Fatalf("shipped CLI provenance = %v, want claude", shipped.CLIs)
+	}
+	open, ok := byKind["IN_PROGRESS"]
+	if !ok {
+		t.Fatalf("later changes-requested outcome missing: %+v", details)
+	}
+	if strings.Join(open.CLIs, ",") != "codex" {
+		t.Fatalf("open outcome CLI provenance = %v, want codex", open.CLIs)
+	}
+}
+
 func TestMergeFloorIntoCard_AddsMissingTickets(t *testing.T) {
 	llm := &WhatWasDoneCard{
 		Service:     "ops-app",

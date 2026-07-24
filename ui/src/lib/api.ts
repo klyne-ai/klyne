@@ -785,6 +785,8 @@ export interface WWDDetail {
   evidence: string[];
   /** Originating stop_summary session id — the worklog drill-in target. */
   session_id: string;
+  clis?: string[];
+  day?: string;
 }
 
 /**
@@ -812,6 +814,7 @@ export interface WWDTier1 {
  */
 export interface WhatWasDoneCard {
   service: string;
+  day?: string;
   tier1: WWDTier1;
   tier2: {
     /**
@@ -829,6 +832,7 @@ export interface WhatWasDoneCard {
    * Go fallback (cold start / legacy days).
    */
   llm_compiled: boolean;
+  open_items?: ProductivityOpenItem[];
   /**
    * V2 narrative payload (2026-05-27 redesign). When present the
    * dashboard prefers this over tier1/tier2 — stat tiles, summary
@@ -857,6 +861,7 @@ export interface WWDNarrative {
 
 export interface WWDStats {
   shipped: number;
+  major?: number;
   fixed: number;
   decisions: number;
   investigated: number;
@@ -873,11 +878,26 @@ export interface WWDNarrativeCard {
   body: string;
   /** Typed reference tokens drawn LITERALLY from the source rows. */
   refs?: WWDRef[];
+  clis?: string[];
+  day?: string;
 }
 
 export interface WWDRef {
   type: 'file' | 'branch' | 'pr' | 'commit' | 'ticket' | 'test' | 'session';
   text: string;
+  url?: string;
+  verified?: boolean;
+  pr_state?: string;
+  review_decision?: string;
+}
+export interface ProductivityOpenItem {
+  key: string;
+  status: 'pending' | 'in_progress' | 'in_review' | 'blocked' | 'ready_to_merge';
+  title: string;
+  ticket_id?: string;
+  source: 'summary' | 'git' | 'pr';
+  clis?: string[];
+  refs?: WWDRef[];
 }
 export interface ProductivityService {
   repo: string;
@@ -920,6 +940,9 @@ export interface ProductivityService {
    * Empty when gh/auth/network is unavailable.
    */
   merged_prs: MergedPR[];
+  pull_requests: PullRequest[];
+  pull_requests_as_of: string;
+  open_items: ProductivityOpenItem[];
   /**
    * When the merged-PR data was fetched (cache timestamp, RFC3339).
    * The zero value ("0001-01-01T00:00:00Z") means no PR data.
@@ -941,17 +964,34 @@ export interface ProductivityService {
 export interface MergedPR {
   number: number;
   title: string;
+  url?: string;
   /** PR head branch name. */
   head_ref: string;
+  review_decision?: string;
+  author?: string;
   /** When the PR merged (RFC3339). */
   merged_at: string;
   /** When the PR was opened (RFC3339). */
   opened_at: string;
+  updated_at?: string;
   /**
    * Minutes from opened_at → merged_at (PR open → merge cycle). 0
    * when openedAt is unknown.
    */
   time_to_ship_minutes: number;
+}
+export interface PullRequest {
+  number: number;
+  title: string;
+  url: string;
+  head_ref: string;
+  state: string;
+  review_decision?: string;
+  author?: string;
+  is_draft: boolean;
+  created_at: string;
+  updated_at: string;
+  merged_at?: string;
 }
 /**
  * One gap-capped active wall-clock sub-interval of a session. The union

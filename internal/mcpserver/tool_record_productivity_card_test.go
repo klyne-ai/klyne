@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/klyne-ai/klyne/internal/productivity"
 	"github.com/klyne-ai/klyne/internal/store"
@@ -72,6 +73,86 @@ func TestHandleRecordProductivityCard_Persists(t *testing.T) {
 	}
 	if svc.WhatWasDone.Tier1.PillCounts["shipped"] != 1 {
 		t.Errorf("PillCounts[shipped] = %d, want 1", svc.WhatWasDone.Tier1.PillCounts["shipped"])
+	}
+}
+
+func TestHandleRecordProductivityCard_ReconcilesClaudeAndCodexSummaries(t *testing.T) {
+	withFakeHome(t)
+	db := withBootstrapDB(t)
+	const (
+		project = "/p/mixed"
+		day     = "2026-07-24"
+	)
+	at := time.Date(2026, 7, 24, 10, 0, 0, 0, time.Local)
+	seed := func(session, cli, summary string, ts time.Time) {
+		t.Helper()
+		if err := store.UpsertStopSummaryWithWorklog(context.Background(), db,
+			store.StopSummary{
+				SessionID: session, Ts: ts.UnixMilli(), ProjectPath: project,
+				CLI: cli, Summary: summary, LastUser: "work",
+			},
+			store.WorklogColumns{
+				RecapVisible: 1, Importance: 5, DraftState: "accepted",
+				AIDraftedSummary: summary,
+			},
+		); err != nil {
+			t.Fatalf("seed %s summary: %v", cli, err)
+		}
+	}
+	seed("codex-open", "codex", "CLI-801 implementation remains in progress and is pending review.", at)
+	seed("claude-fix", "claude", "Fixed CLI-802 login regression in auth.go.", at.Add(time.Hour))
+	seed("codex-deferred", "codex", "CLI-803 follow-up was deferred and not picked.", at.Add(2*time.Hour))
+
+	in := RecordProductivityCardInput{
+		ProjectPath: project,
+		Day:         day,
+		Service:     "mixed",
+		Cards: []store.WWDCard{
+			{
+				Kind: "IN_PROGRESS", TicketID: "CLI-801", Title: "Review remains pending",
+				Body: "The implementation is complete locally, but review is still pending.",
+			},
+			{
+				Kind: "FIXED", TicketID: "CLI-802", Title: "Login validation regression",
+				Body: "The login validation regression was corrected in `auth.go`.",
+			},
+		},
+	}
+	if _, err := handleRecordProductivityCard(context.Background(), db, in); err != nil {
+		t.Fatalf("record narrative card: %v", err)
+	}
+
+	snap, found, err := store.GetDailyProductivitySnapshot(context.Background(), db, project, day)
+	if err != nil || !found {
+		t.Fatalf("get snapshot: found=%v err=%v", found, err)
+	}
+	var rep productivity.Report
+	if err := json.Unmarshal([]byte(snap.PayloadJSON), &rep); err != nil {
+		t.Fatalf("decode snapshot: %v", err)
+	}
+	cards := rep.Services[0].WhatWasDone.Narrative.Cards
+	if len(cards) != 3 {
+		t.Fatalf("cards = %+v, want generated outcomes plus deterministic floor backfill", cards)
+	}
+	cliByTicket := map[string][]string{}
+	for _, card := range cards {
+		cliByTicket[card.TicketID] = card.CLIs
+		if card.Day != day {
+			t.Fatalf("card day = %q, want %s", card.Day, day)
+		}
+	}
+	if strings.Join(cliByTicket["CLI-801"], ",") != "codex" {
+		t.Fatalf("CLI-801 attribution = %v, want codex", cliByTicket["CLI-801"])
+	}
+	if strings.Join(cliByTicket["CLI-802"], ",") != "claude" {
+		t.Fatalf("CLI-802 attribution = %v, want claude", cliByTicket["CLI-802"])
+	}
+	if strings.Join(cliByTicket["CLI-803"], ",") != "codex" {
+		t.Fatalf("CLI-803 backfill attribution = %v, want codex", cliByTicket["CLI-803"])
+	}
+	if rep.Services[0].WhatWasDone.Narrative.Stats.InProgress != 2 ||
+		rep.Services[0].WhatWasDone.Narrative.Stats.Fixed != 1 {
+		t.Fatalf("stats = %+v, want two open and one fixed", rep.Services[0].WhatWasDone.Narrative.Stats)
 	}
 }
 

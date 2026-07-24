@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/klyne-ai/klyne/internal/api"
+	"github.com/klyne-ai/klyne/internal/productivity"
 	"github.com/klyne-ai/klyne/internal/store"
 )
 
@@ -79,7 +80,19 @@ func TestCompileStart_LaunchesJobAndStatusReflectsIt(t *testing.T) {
 	day := dayForTs(ts)
 	seedStopSummary(t, db, proj, "s1", ts, "CLI-1452 did the work")
 
-	h := newCompileHandler(db, func(context.Context, string, string, string) (claudeRunResult, error) {
+	h := newCompileHandler(db, func(ctx context.Context, projectPath, compileDay, _ string) (claudeRunResult, error) {
+		err := productivity.PersistLLMCompiledCard(ctx, db, projectPath, compileDay, productivity.WhatWasDoneCard{
+			Service: "known",
+			Narrative: &productivity.WWDNarrative{
+				Cards: []productivity.WWDCard{{
+					Kind: "MAJOR", TicketID: "CLI-1452", Title: "Work remains open",
+					Body: "The compiler persisted this reconciled test card.",
+				}},
+			},
+		})
+		if err != nil {
+			return claudeRunResult{}, err
+		}
 		return claudeRunResult{Output: "ok", Model: "stub"}, nil
 	})
 	srv := newCompileServer(t, h)
@@ -114,6 +127,46 @@ func TestCompileStart_LaunchesJobAndStatusReflectsIt(t *testing.T) {
 	}
 	if final.Status != "done" {
 		t.Errorf("final job Status = %q, want done", final.Status)
+	}
+}
+
+func TestCompileStart_FailsWhenAgentDoesNotPersistCard(t *testing.T) {
+	t.Parallel()
+	db := newReflectTestStore(t)
+	const proj = "/proj/known"
+	ts := int64(1_716_700_000_000)
+	day := dayForTs(ts)
+	seedStopSummary(t, db, proj, "s1", ts, "CLI-1452 remains in progress")
+
+	h := newCompileHandler(db, func(context.Context, string, string, string) (claudeRunResult, error) {
+		return claudeRunResult{Output: "process exited successfully", Model: "stub"}, nil
+	})
+	srv := newCompileServer(t, h)
+	resp, rb := postStart(t, srv, map[string]string{"day": day})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("start status = %d, want 200; body=%s", resp.StatusCode, rb)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	var final CompileJob
+	for time.Now().Before(deadline) {
+		sr, err := http.Get(srv.URL + api.RouteProductivityCompileStatus + "?day=" + day)
+		if err != nil {
+			t.Fatalf("GET status: %v", err)
+		}
+		srb, _ := io.ReadAll(sr.Body)
+		sr.Body.Close()
+		_ = json.Unmarshal(srb, &final)
+		if final.Status != "" && final.Status != "running" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if final.Status != "failed" {
+		t.Fatalf("final status = %q, want failed", final.Status)
+	}
+	if len(final.Services) != 1 || !bytes.Contains([]byte(final.Services[0].Error), []byte("without persisting")) {
+		t.Fatalf("service error = %+v, want persistence postcondition failure", final.Services)
 	}
 }
 

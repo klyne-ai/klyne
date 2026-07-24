@@ -2,13 +2,13 @@
 description: Synthesize a narrative What-was-done card for one (project, day, service) from raw stop_summaries (LLM pass 2 — v2 narrative format)
 ---
 
-Synthesize the **narrative "What was done" card** the productivity dashboard shows for one service on one day. The output is the user's standup digest — they read this when they reload the page. Quality of prose matters more than completeness; coverage of every distinct ticket matters more than chronological exhaustiveness.
+Synthesize the **narrative "What was done" card** the productivity dashboard shows for one service on one day. The output is the user's standup digest — they read this when they reload the page. Preserve every distinct completed, unfinished, blocked, deferred, and review-stage outcome; concise prose matters more than chronological exhaustiveness.
 
 Your output goes to `services[].what_was_done.narrative` on `GET /api/productivity`. The dashboard renders it as:
 
   - a service-level summary paragraph at the top
-  - four stat tiles (features shipped / bugs fixed / decisions / investigated)
-  - sectioned per-ticket cards (Features shipped → Bugs fixed → Decisions → Investigated · no fix landed)
+  - five stat tiles (features shipped / bugs fixed / decisions / investigated / open work)
+  - sectioned per-ticket cards (Features shipped → Major work → Bugs fixed → Decisions → Investigated · no fix landed → In progress)
   - an optional "open question for tomorrow" line
 
 **Reference example of the target quality**: see the user's hand-edited card from 2026-05-26 — three SHIPPED tickets with 2-4 sentence narrative bodies, two BUG FIX cards under the same ticket (TICKET-1452 shipped a banner AND had a dead-code revert), one INVESTIGATED with no fix landed, plus a service summary and a followup. Reproduce that prose quality.
@@ -35,13 +35,13 @@ Your output goes to `services[].what_was_done.narrative` on `GET /api/productivi
 
 5. **Group the day's work by (ticket, outcome).** A "ticket" is a CLI-NNNN id appearing in `ai_drafted_summary` or `last_user`. The same ticket may produce MULTIPLE cards under different kinds — that's correct. Example: TICKET-1452 with a SHIPPED card for the banner ship AND a FIXED card for the dead-code revert. Don't collapse different outcomes of the same ticket into one card.
 
-   Classification rules (pick the strongest signal across all the ticket's turns):
+   Classification rules (pick the strongest signal for each outcome; do not let a completed outcome erase a later unfinished or review-stage outcome):
    - **SHIPPED** — work culminated in a commit + push and/or a PR opened. The commit lands user-visible code.
    - **FIXED** — a bug or regression was resolved. The card's body must name the symptom AND the resolution.
    - **DECISION** — a process / architecture / library choice was recorded. Prefix the title with the choice itself.
    - **INVESTIGATED** — read-through / audit that produced understanding but no code landed. No SHIPPED card for the same ticket.
-   - **MAJOR** — substantial body of in-progress work that doesn't fit SHIPPED (e.g. a multi-turn refactor that hasn't landed yet).
-   - **IN_PROGRESS** — work explicitly carried forward.
+   - **MAJOR** — substantial body of in-progress work that doesn't fit SHIPPED (e.g. a multi-turn refactor that hasn't landed yet). MAJOR is open work, not shipped work.
+   - **IN_PROGRESS** — work explicitly carried forward, blocked, waiting on review, changes requested, deferred, not picked, or not started.
 
    Untickatable work (an investigation that doesn't name a ticket id) gets a card with `ticket_id` omitted. Don't force a synthetic id.
 
@@ -84,7 +84,7 @@ Your output goes to `services[].what_was_done.narrative` on `GET /api/productivi
 
    Don't just list the tickets — synthesize what the day was ABOUT.
 
-8. **Optionally write `followup`** (1 sentence, ≤300 chars). Use only when the source data flagged an open question / edge case worth remembering. Example: "Open question for tomorrow — TICKET-1452 PR #432 has a UX edge case: after clicking 'Set as Follow-up' the banner state and payment notice hide correctly, but no confirmation that the reason dropdown has visually updated. Worth a quick smoke test on prod data before merge."
+8. **Optionally write `followup`** (1 sentence, ≤300 chars). Use only when the source data flagged an open question / edge case worth remembering. Never use `followup` as a substitute for an IN_PROGRESS or MAJOR card: pending work must remain a structured card so it can be reconciled into the dashboard's open-work queue. Example: "Open question for tomorrow — TICKET-1452 PR #432 has a UX edge case: after clicking 'Set as Follow-up' the banner state and payment notice hide correctly, but no confirmation that the reason dropdown has visually updated. Worth a quick smoke test on prod data before merge."
 
    If nothing genuinely deserves a followup, omit the field.
 
@@ -102,11 +102,14 @@ Your output goes to `services[].what_was_done.narrative` on `GET /api/productivi
    - Body > 1200 chars or title > 160 chars.
    - Card count > 20.
 
+   The host reconciles the submitted payload with the source summaries before saving it. It assigns the originating CLI (`claude` or `codex`), rejects unsupported ticket/outcome pairs, and later verifies PR references against GitHub when that enrichment is available.
+
 10. **Report back** to the user: "Wrote {N} narrative cards for {service} on {day}: {ticket_a}, {ticket_b}, …". The dashboard will surface them on the next reload.
 
 ## Quality rubric (re-read before you write the JSON)
 
 - Every distinct CLI-NNNN ticket touched today MUST appear in at least one card. If the proposer returned work on 5 tickets, you write at least 5 cards (more if some tickets had a SHIPPED + a FIXED outcome).
+- Every explicit unfinished, blocked, deferred, not-picked, draft-PR, or review-stage item MUST remain visible as MAJOR or IN_PROGRESS. Do not report it as shipped merely because the same ticket also had a completed outcome.
 - Titles describe OUTCOMES, not verbs. A title like "Cancelled bill detection mid-edit" is what the user remembers; "Implemented TICKET-1340 fix" is what the AI remembers.
 - Bodies read like sentences in a paragraph, not bullet points. The reader is a teammate at standup who knows the codebase but not what you did today.
 - Refs are typed because the UI styles each type — don't lump everything into a generic "evidence" list.

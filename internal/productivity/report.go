@@ -147,6 +147,8 @@ func BuildReport(ctx context.Context, in ReportInput, refl ReflectionLookup) (Re
 			svc.MinutesByCLI = map[string]int{}
 		}
 		svc.MergedPRs = []MergedPR{}
+		svc.PullRequests = []PullRequest{}
+		svc.OpenItems = []OpenWorkItem{}
 
 		// Salience ordering (§7.1 rule 5) applied across the merged
 		// branch set so the highest-impact worktree leads.

@@ -148,6 +148,13 @@ type Service struct {
 	// data is available. MergedPRs is always emitted as [] not null.
 	MergedPRs     []MergedPR `json:"merged_prs"`
 	MergedPRsAsOf time.Time  `json:"merged_prs_as_of"`
+	// PullRequests is the current, relevant GitHub PR state for this
+	// service. Unlike MergedPRs, it includes open/draft/review-stage PRs and
+	// is filtered to PRs associated with the user's local branches, tickets,
+	// or explicit What-was-done references.
+	PullRequests     []PullRequest  `json:"pull_requests"`
+	PullRequestsAsOf time.Time      `json:"pull_requests_as_of"`
+	OpenItems        []OpenWorkItem `json:"open_items"`
 	// GitFetchedAt is when `git fetch` last refreshed the local
 	// mirror of origin for this repo (FETCH_HEAD mtime). The
 	// dashboard piggybacks on the merged-PR cache TTL to auto-refresh
@@ -185,10 +192,31 @@ type Service struct {
 type MergedPR struct {
 	Number            int       `json:"number"`
 	Title             string    `json:"title"`
+	URL               string    `json:"url,omitempty"`
 	HeadRef           string    `json:"head_ref"`
+	ReviewDecision    string    `json:"review_decision,omitempty"`
+	Author            string    `json:"author,omitempty"`
 	MergedAt          time.Time `json:"merged_at"`
 	OpenedAt          time.Time `json:"opened_at"`
+	UpdatedAt         time.Time `json:"updated_at,omitempty"`
 	TimeToShipMinutes int       `json:"time_to_ship_minutes"`
+}
+
+// PullRequest is one GitHub PR associated with a service's local branches or
+// What-was-done references. State is OPEN/MERGED/CLOSED; ReviewDecision is
+// GitHub's reviewDecision value when available.
+type PullRequest struct {
+	Number         int       `json:"number"`
+	Title          string    `json:"title"`
+	URL            string    `json:"url"`
+	HeadRef        string    `json:"head_ref"`
+	State          string    `json:"state"`
+	ReviewDecision string    `json:"review_decision,omitempty"`
+	Author         string    `json:"author,omitempty"`
+	IsDraft        bool      `json:"is_draft"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+	MergedAt       time.Time `json:"merged_at,omitempty"`
 }
 
 // SessionStat is the per-session proof-of-work breakdown (Change 2): the
@@ -235,6 +263,8 @@ type WWDDetail struct {
 	Text      string   `json:"text"`
 	Evidence  []string `json:"evidence"`
 	SessionID string   `json:"session_id,omitempty"`
+	CLIs      []string `json:"clis,omitempty"`
+	Day       string   `json:"day,omitempty"`
 }
 
 // WWDTier1 is the deterministically-computed headline row of a service's
@@ -275,11 +305,13 @@ type WWDTier1 struct {
 // authored vs deterministic templated.
 type WhatWasDoneCard struct {
 	Service string   `json:"service"`
+	Day     string   `json:"day,omitempty"`
 	Tier1   WWDTier1 `json:"tier1"`
 	Tier2   struct {
 		Details []WWDDetail `json:"details"`
 	} `json:"tier2"`
-	LLMCompiled bool `json:"llm_compiled"`
+	LLMCompiled bool           `json:"llm_compiled"`
+	OpenItems   []OpenWorkItem `json:"open_items,omitempty"`
 	// Narrative (v2 — 2026-05-27): when the writer used the new
 	// productivity-sync schema, these fields drive a richer dashboard
 	// layout with a service summary paragraph, stat tiles, and per-
@@ -293,15 +325,16 @@ type WhatWasDoneCard struct {
 // SHIPPED and FIXED. The body field is markdown prose; refs are typed
 // tokens the UI styles by Type.
 type WWDNarrative struct {
-	Summary  string      `json:"summary,omitempty"`  // 1-2 sentence service-level paragraph
-	Stats    WWDStats    `json:"stats"`              // derived per-kind counts shown as tiles
-	Cards    []WWDCard   `json:"cards"`              // narrative cards
-	Followup string      `json:"followup,omitempty"` // optional "open question for tomorrow"
+	Summary  string    `json:"summary,omitempty"`  // 1-2 sentence service-level paragraph
+	Stats    WWDStats  `json:"stats"`              // derived per-kind counts shown as tiles
+	Cards    []WWDCard `json:"cards"`              // narrative cards
+	Followup string    `json:"followup,omitempty"` // optional "open question for tomorrow"
 }
 
 // WWDStats mirrors store.WWDStats — per-kind counts as stat tiles.
 type WWDStats struct {
 	Shipped      int `json:"shipped"`
+	Major        int `json:"major,omitempty"`
 	Fixed        int `json:"fixed"`
 	Decisions    int `json:"decisions"`
 	Investigated int `json:"investigated"`
@@ -315,12 +348,30 @@ type WWDCard struct {
 	Title    string   `json:"title"`
 	Body     string   `json:"body"`
 	Refs     []WWDRef `json:"refs,omitempty"`
+	CLIs     []string `json:"clis,omitempty"`
+	Day      string   `json:"day,omitempty"`
 }
 
 // WWDRef mirrors store.WWDRef — one typed reference token.
 type WWDRef struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
+	Type           string `json:"type"`
+	Text           string `json:"text"`
+	URL            string `json:"url,omitempty"`
+	Verified       bool   `json:"verified,omitempty"`
+	PRState        string `json:"pr_state,omitempty"`
+	ReviewDecision string `json:"review_decision,omitempty"`
+}
+
+// OpenWorkItem is an actionable, not-yet-complete item derived from the
+// reconciled narrative, git state, or an associated open PR.
+type OpenWorkItem struct {
+	Key      string   `json:"key"`
+	Status   string   `json:"status"` // pending | in_progress | in_review | blocked | ready_to_merge
+	Title    string   `json:"title"`
+	TicketID string   `json:"ticket_id,omitempty"`
+	Source   string   `json:"source"` // summary | git | pr
+	CLIs     []string `json:"clis,omitempty"`
+	Refs     []WWDRef `json:"refs,omitempty"`
 }
 
 // ReflectionGroup is one worklog_reflections row in the

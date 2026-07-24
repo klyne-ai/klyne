@@ -2,10 +2,13 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/klyne-ai/klyne/internal/productivity"
 	"github.com/klyne-ai/klyne/internal/store"
 )
 
@@ -189,6 +192,13 @@ func (r *CompileJobRegistry) runServices(jobCtx context.Context, job *CompileJob
 		ctx, cancel := context.WithTimeout(jobCtx, r.perServiceTimeout)
 		start := time.Now()
 		res, runErr := r.runCmd(ctx, path, job.Day, job.Model)
+		if runErr == nil && r.db != nil {
+			verifyCtx, verifyCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			if err := verifyCompiledCardPersisted(verifyCtx, r.db, path, job.Day, start.UnixMilli()); err != nil {
+				runErr = err
+			}
+			verifyCancel()
+		}
 		dur := time.Since(start).Milliseconds()
 		timedOut := ctx.Err() == context.DeadlineExceeded
 		cancel()
@@ -247,6 +257,33 @@ func (r *CompileJobRegistry) runServices(jobCtx context.Context, job *CompileJob
 		job.FinishedAt = time.Now().UnixMilli()
 	}
 	r.mu.Unlock()
+}
+
+// verifyCompiledCardPersisted enforces the compile job's real postcondition:
+// a successful agent process must have written a fresh llm_compiled card.
+func verifyCompiledCardPersisted(
+	ctx context.Context, db *store.DB, projectPath, day string, startedAt int64,
+) error {
+	snap, ok, err := store.GetDailyProductivitySnapshot(ctx, db, projectPath, day)
+	if err != nil {
+		return fmt.Errorf("compile postcondition: read snapshot: %w", err)
+	}
+	if !ok || strings.TrimSpace(snap.PayloadJSON) == "" {
+		return fmt.Errorf("compile postcondition: agent exited without persisting a productivity card")
+	}
+	if snap.UpdatedAt < startedAt {
+		return fmt.Errorf("compile postcondition: productivity card was not refreshed by this run")
+	}
+	var rep productivity.Report
+	if err := json.Unmarshal([]byte(snap.PayloadJSON), &rep); err != nil {
+		return fmt.Errorf("compile postcondition: decode snapshot: %w", err)
+	}
+	for _, svc := range rep.Services {
+		if svc.WhatWasDone != nil && svc.WhatWasDone.LLMCompiled {
+			return nil
+		}
+	}
+	return fmt.Errorf("compile postcondition: persisted snapshot contains no llm_compiled card")
 }
 
 // setService mutates one service state under the lock.

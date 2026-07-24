@@ -6,10 +6,10 @@
 // fewer details than the day actually contains. The fix is to compute
 // a DETERMINISTIC floor directly from L1 stop_summaries: regex-extract
 // the day's CLI ticket ids, commit SHAs, PR refs, and feature branches
-// from each turn's ai_drafted_summary, group by ticket, and emit one
-// WWDDetail per distinct ticket. The dashboard merges this floor with
-// the LLM-authored card so every ticket the user touched today appears
-// on the panel, even when the LLM under-collapsed.
+// from each turn's ai_drafted_summary, group by ticket and outcome, and
+// emit one WWDDetail per distinct state. The dashboard merges this floor
+// with the LLM-authored card so completed and unfinished outcomes both
+// appear even when the LLM under-collapsed.
 //
 // Hard determinism boundary (spec §7.1): NO LLM, NO network. Pure
 // SQLite read + regex.
@@ -18,6 +18,7 @@ package productivity
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"regexp"
 	"sort"
 	"strings"
@@ -35,6 +36,8 @@ type L1FloorDetail struct {
 	Text      string
 	Evidence  []string
 	SessionID string
+	CLIs      []string
+	TS        int64
 	// TicketID is the grouping key — usually a CLI-NNNN match. Empty when
 	// the detail was grouped by feature-branch fallback.
 	TicketID string
@@ -54,6 +57,8 @@ var (
 		re   *regexp.Regexp
 		kind string
 	}{
+		{regexp.MustCompile(`(?i)\b(blocked|blocking|waiting\s+on|cannot\s+proceed|can't\s+proceed|changes\s+requested)\b`), "IN_PROGRESS"},
+		{regexp.MustCompile(`(?i)\b(pending|deferred|not\s+picked|not\s+started|not\s+done|todo|to-do|follow[- ]?up)\b`), "IN_PROGRESS"},
 		{regexp.MustCompile(`(?i)\b(shipped|landed|pushed|merged|opened\s+PR|wrote|wired|implemented|deployed)\b`), "SHIPPED"},
 		{regexp.MustCompile(`(?i)\b(fixed|resolved|repaired|restored|corrected|patched)\b`), "FIXED"},
 		{regexp.MustCompile(`(?i)\b(decided|adopted|chose|switched\s+to|recommended|agreed)\b`), "DECISION"},
@@ -63,8 +68,8 @@ var (
 )
 
 // BuildFloorFromStopSummaries scans the day's stop_summaries for
-// projectPath and emits one L1FloorDetail per distinct ticket id (or
-// feature branch fallback) — the deterministic coverage floor for the
+// projectPath and emits one L1FloorDetail per distinct ticket/outcome (or
+// feature branch/outcome fallback) — the deterministic coverage floor for the
 // dashboard's per-service "What was done" card. The result is sorted
 // ASC by When so the dashboard's newest-first composer interleaves it
 // correctly with any LLM-authored details.
@@ -159,8 +164,8 @@ func BuildFloorFromStopSummaries(
 	ctx context.Context, db dbReader, projectPath, dayStr string,
 ) ([]L1FloorDetail, error) {
 	const q = `
-SELECT session_id, ts, COALESCE(ai_drafted_summary,''), COALESCE(last_bash,''),
-       COALESCE(last_user,'')
+	SELECT session_id, ts, COALESCE(cli,''), COALESCE(ai_drafted_summary,''),
+	       COALESCE(last_bash,''), COALESCE(last_user,''), COALESCE(files_json,'[]')
   FROM stop_summaries
  WHERE project_path = ?
    AND date(ts / 1000, 'unixepoch', 'localtime') = ?
@@ -174,35 +179,42 @@ SELECT session_id, ts, COALESCE(ai_drafted_summary,''), COALESCE(last_bash,''),
 	type pendingTurn struct {
 		sessionID string
 		ts        int64
+		cli       string
 		summary   string
 		bash      string
 		lastUser  string
+		kind      string
+		files     []string
 	}
 	var turns []pendingTurn
 	for rows.Next() {
 		var t pendingTurn
-		if err := rows.Scan(&t.sessionID, &t.ts, &t.summary, &t.bash, &t.lastUser); err != nil {
+		var filesJSON string
+		if err := rows.Scan(&t.sessionID, &t.ts, &t.cli, &t.summary, &t.bash, &t.lastUser, &filesJSON); err != nil {
 			return nil, err
 		}
+		_ = json.Unmarshal([]byte(filesJSON), &t.files)
 		t.summary = strings.TrimSpace(t.summary)
 		if !floorTurnAdmitted(t.summary, t.lastUser) {
 			continue
 		}
+		t.cli = strings.ToLower(strings.TrimSpace(t.cli))
+		t.kind = classifyFloorKind(t.summary)
 		turns = append(turns, t)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 
-	// Group by ticket id first (the user-facing unit of work), then by
-	// feature-branch name (when no ticket id appears), and finally by
-	// session-id (the catch-all so investigation-style turns still get
-	// surfaced under SOME group).
+	// Group by outcome as well as ticket/branch/session. A ticket can move
+	// from IN_PROGRESS to SHIPPED or carry both SHIPPED and FIXED outcomes;
+	// ticket-only grouping collapsed those distinct states.
 	type bucket struct {
 		key         string
 		ticket      string
 		branch      string
-		earliestTS  int64
+		latestTS    int64
+		kind        string
 		turns       []pendingTurn
 		evidenceSet map[string]bool
 	}
@@ -213,13 +225,14 @@ SELECT session_id, ts, COALESCE(ai_drafted_summary,''), COALESCE(last_bash,''),
 		if !ok {
 			b = &bucket{
 				key: key, ticket: ticket, branch: branch,
-				earliestTS: t.ts, evidenceSet: map[string]bool{},
+				latestTS: t.ts, kind: t.kind,
+				evidenceSet: map[string]bool{},
 			}
 			buckets[key] = b
 			order = append(order, key)
 		}
-		if t.ts < b.earliestTS {
-			b.earliestTS = t.ts
+		if t.ts > b.latestTS {
+			b.latestTS = t.ts
 		}
 		b.turns = append(b.turns, t)
 	}
@@ -231,14 +244,14 @@ SELECT session_id, ts, COALESCE(ai_drafted_summary,''), COALESCE(last_bash,''),
 			// buckets — the dashboard wants per-ticket coverage even when
 			// the user multitasks across tickets in one turn.
 			for _, tk := range tickets {
-				addToBucket("ticket:"+tk, tk, "", t)
+				addToBucket("ticket:"+tk+"\x1fkind:"+t.kind, tk, "", t)
 			}
 			continue
 		}
 		branches := uniqStrings(floorFeatureBranchRe.FindAllString(t.summary, -1))
 		if len(branches) > 0 {
 			for _, br := range branches {
-				addToBucket("branch:"+br, "", br, t)
+				addToBucket("branch:"+br+"\x1fkind:"+t.kind, "", br, t)
 			}
 			continue
 		}
@@ -246,7 +259,7 @@ SELECT session_id, ts, COALESCE(ai_drafted_summary,''), COALESCE(last_bash,''),
 		// summarised without a ticket reference. Multiple summary-only
 		// turns from the same session collapse into one bucket so a
 		// chatty session doesn't produce one detail per turn.
-		addToBucket("session:"+t.sessionID, "", "", t)
+		addToBucket("session:"+t.sessionID+"\x1fkind:"+t.kind, "", "", t)
 	}
 
 	out := make([]L1FloorDetail, 0, len(order))
@@ -255,7 +268,9 @@ SELECT session_id, ts, COALESCE(ai_drafted_summary,''), COALESCE(last_bash,''),
 		detail := L1FloorDetail{
 			TicketID:  b.ticket,
 			SessionID: b.turns[0].sessionID,
-			When:      time.UnixMilli(b.earliestTS).Local().Format("15:04"),
+			When:      time.UnixMilli(b.latestTS).Local().Format("15:04"),
+			Kind:      b.kind,
+			TS:        b.latestTS,
 		}
 		// Compose evidence: ticket id first (when present), then every
 		// commit SHA / PR ref / feature branch / file path / session_id
@@ -274,17 +289,11 @@ SELECT session_id, ts, COALESCE(ai_drafted_summary,''), COALESCE(last_bash,''),
 		if b.branch != "" {
 			add(b.branch)
 		}
-		// Pick the longest summary across the bucket's turns as the
-		// representative text (the long-form is usually the most
-		// descriptive). Kind is the STRONGEST classification across
-		// every turn in the bucket — a CLI-NNNN that started as an
-		// INVESTIGATED probe and ended in a SHIPPED commit must surface
-		// as SHIPPED (the user shipped it, the investigation was the
-		// preamble).
+		// Pick the longest summary within this outcome bucket as the
+		// representative text and preserve every contributing CLI.
 		repText := ""
 		repSession := b.turns[0].sessionID
-		strongestKindRank := len(kindStrengthOrder) // weaker than any real kind
-		bucketKind := "MAJOR"
+		cliSet := map[string]bool{}
 		for _, t := range b.turns {
 			for _, sha := range floorCommitShaRe.FindAllString(t.summary, -1) {
 				add(sha)
@@ -297,19 +306,23 @@ SELECT session_id, ts, COALESCE(ai_drafted_summary,''), COALESCE(last_bash,''),
 			for _, br := range floorFeatureBranchRe.FindAllString(t.summary, -1) {
 				add(br)
 			}
+			for _, file := range t.files {
+				add(file)
+			}
 			add(t.sessionID)
+			if t.cli != "" {
+				cliSet[t.cli] = true
+			}
 			if len(t.summary) > len(repText) {
 				repText = t.summary
 				repSession = t.sessionID
 			}
-			k := classifyFloorKind(t.summary)
-			if r, ok := kindStrengthRank[k]; ok && r < strongestKindRank {
-				strongestKindRank = r
-				bucketKind = k
-			}
 		}
 		detail.SessionID = repSession
-		detail.Kind = bucketKind
+		for cli := range cliSet {
+			detail.CLIs = append(detail.CLIs, cli)
+		}
+		sort.Strings(detail.CLIs)
 		detail.Text = floorTruncateText(repText, 200)
 		if len(detail.Evidence) == 0 || strings.TrimSpace(detail.Text) == "" {
 			continue
@@ -324,6 +337,7 @@ SELECT session_id, ts, COALESCE(ai_drafted_summary,''), COALESCE(last_bash,''),
 	// only the first occurrence. This avoids the dashboard showing the
 	// same prose twice under different ticket pills.
 	out = dedupeFloorBySessionAndText(out)
+	out = suppressSupersededOpenFloor(out)
 
 	// Stable sort: earlier When first, then ticket alphabetical for
 	// determinism. Callers (ComposeWWD-style mergers) re-sort by §1.2 kind
@@ -335,6 +349,41 @@ SELECT session_id, ts, COALESCE(ai_drafted_summary,''), COALESCE(last_bash,''),
 		return out[i].TicketID < out[j].TicketID
 	})
 	return out, nil
+}
+
+// suppressSupersededOpenFloor removes an older open-state outcome after the
+// same ticket reaches a later terminal outcome. A later open turn is retained
+// because it represents follow-up work after the ship/fix.
+func suppressSupersededOpenFloor(in []L1FloorDetail) []L1FloorDetail {
+	merged := append([]L1FloorDetail(nil), in...)
+	latestTerminal := map[string]int{}
+	for i, d := range merged {
+		if d.TicketID == "" {
+			continue
+		}
+		switch d.Kind {
+		case "SHIPPED", "FIXED", "DECISION":
+			current, found := latestTerminal[d.TicketID]
+			if !found || d.TS > merged[current].TS {
+				latestTerminal[d.TicketID] = i
+			}
+		}
+	}
+	out := make([]L1FloorDetail, 0, len(in))
+	for i, d := range merged {
+		if terminalIndex, found := latestTerminal[d.TicketID]; found && d.TS <= merged[terminalIndex].TS {
+			switch d.Kind {
+			case "MAJOR", "IN_PROGRESS", "INVESTIGATED":
+				// Preserve contribution provenance on the terminal outcome even
+				// though the stale open-state row itself is removed.
+				merged[terminalIndex].CLIs = unionStrings(merged[terminalIndex].CLIs, d.CLIs)
+				merged[terminalIndex].Evidence = unionStrings(merged[terminalIndex].Evidence, d.Evidence)
+				continue
+			}
+		}
+		out = append(out, merged[i])
+	}
+	return out
 }
 
 // dedupeFloorBySessionAndText drops entries whose (SessionID, Text)
@@ -419,9 +468,15 @@ func mergeFloorIntoNarrative(service string, llmCard *WhatWasDoneCard, floor []L
 	out.Narrative = &nv
 
 	covered := map[string]bool{}
-	for _, c := range nv.Cards {
+	for i := range nv.Cards {
+		c := &nv.Cards[i]
 		if c.TicketID != "" {
-			covered[c.TicketID] = true
+			covered[c.TicketID+"\x1f"+c.Kind] = true
+			for _, f := range floor {
+				if f.TicketID == c.TicketID && f.Kind == c.Kind {
+					c.CLIs = unionStrings(c.CLIs, f.CLIs)
+				}
+			}
 		}
 	}
 	added := 0
@@ -433,7 +488,8 @@ func mergeFloorIntoNarrative(service string, llmCard *WhatWasDoneCard, floor []L
 		if f.TicketID == "" {
 			continue
 		}
-		if covered[f.TicketID] {
+		outcomeKey := f.TicketID + "\x1f" + f.Kind
+		if covered[outcomeKey] {
 			continue
 		}
 		nv.Cards = append(nv.Cards, WWDCard{
@@ -442,8 +498,9 @@ func mergeFloorIntoNarrative(service string, llmCard *WhatWasDoneCard, floor []L
 			Title:    floorTruncateText(f.Text, 120),
 			Body:     f.Text,
 			Refs:     floorRefsToTyped(f.Evidence),
+			CLIs:     append([]string(nil), f.CLIs...),
 		})
-		covered[f.TicketID] = true
+		covered[outcomeKey] = true
 		added++
 	}
 	if added == 0 {
@@ -455,8 +512,10 @@ func mergeFloorIntoNarrative(service string, llmCard *WhatWasDoneCard, floor []L
 	stats := WWDStats{}
 	for _, c := range nv.Cards {
 		switch c.Kind {
-		case "SHIPPED", "MAJOR":
+		case "SHIPPED":
 			stats.Shipped++
+		case "MAJOR":
+			stats.Major++
 		case "FIXED":
 			stats.Fixed++
 		case "DECISION":
@@ -535,24 +594,10 @@ func isToolOnlySummary(summary string) bool {
 	return false
 }
 
-// kindStrengthOrder ranks WWD kinds by "strongest evidence of completed
-// work" — the bucket-level kind picks the lowest rank seen across its
-// turns. SHIPPED outranks every other kind; IN_PROGRESS is the weakest
-// real signal; MAJOR is the catch-all default.
-var kindStrengthOrder = []string{"SHIPPED", "FIXED", "DECISION", "MAJOR", "INVESTIGATED", "IN_PROGRESS"}
-
-var kindStrengthRank = func() map[string]int {
-	out := make(map[string]int, len(kindStrengthOrder))
-	for i, k := range kindStrengthOrder {
-		out[k] = i
-	}
-	return out
-}()
-
-// classifyFloorKind picks the strongest applicable §1.1 kind enum from a
-// turn's AI summary. First match wins per the priority order in
-// floorVerbPatterns (SHIPPED → FIXED → DECISION → INVESTIGATED →
-// IN_PROGRESS). Falls back to MAJOR when nothing matches.
+// classifyFloorKind picks the applicable §1.1 kind enum from a turn's AI
+// summary. Explicit blocked/pending language takes priority so unfinished
+// state cannot be counted as shipped merely because the same sentence also
+// mentions implementation. Falls back to MAJOR when nothing matches.
 func classifyFloorKind(text string) string {
 	for _, p := range floorVerbPatterns {
 		if p.re.MatchString(text) {
@@ -613,6 +658,33 @@ func CardTicketIDs(card *WhatWasDoneCard) map[string]bool {
 	return out
 }
 
+// CardOutcomeKeys returns ticket+kind coverage keys. Unlike CardTicketIDs,
+// this distinguishes an in-progress card from a later shipped/fixed outcome.
+func CardOutcomeKeys(card *WhatWasDoneCard) map[string]bool {
+	out := map[string]bool{}
+	if card == nil {
+		return out
+	}
+	if card.Narrative != nil {
+		for _, c := range card.Narrative.Cards {
+			if c.TicketID != "" {
+				out[c.TicketID+"\x1f"+c.Kind] = true
+			}
+		}
+	}
+	for _, d := range card.Tier2.Details {
+		for _, tk := range floorTicketRe.FindAllString(d.Text, -1) {
+			out[tk+"\x1f"+d.Kind] = true
+		}
+		for _, ev := range d.Evidence {
+			for _, tk := range floorTicketRe.FindAllString(ev, -1) {
+				out[tk+"\x1f"+d.Kind] = true
+			}
+		}
+	}
+	return out
+}
+
 // uniqStrings returns xs with duplicates removed, preserving first-seen
 // order.
 func uniqStrings(xs []string) []string {
@@ -667,13 +739,19 @@ func MergeFloorIntoCard(service string, llmCard *WhatWasDoneCard, floor []L1Floo
 		out.Service = service
 	}
 	covered := map[string]bool{}
-	for _, d := range out.Tier2.Details {
+	for i := range out.Tier2.Details {
+		d := &out.Tier2.Details[i]
 		for _, tk := range floorTicketRe.FindAllString(d.Text, -1) {
-			covered[tk] = true
+			covered[tk+"\x1f"+d.Kind] = true
+			for _, f := range floor {
+				if f.TicketID == tk && f.Kind == d.Kind {
+					d.CLIs = unionStrings(d.CLIs, f.CLIs)
+				}
+			}
 		}
 		for _, ev := range d.Evidence {
 			for _, tk := range floorTicketRe.FindAllString(ev, -1) {
-				covered[tk] = true
+				covered[tk+"\x1f"+d.Kind] = true
 			}
 		}
 	}
@@ -697,7 +775,7 @@ func MergeFloorIntoCard(service string, llmCard *WhatWasDoneCard, floor []L1Floo
 			if dup {
 				continue
 			}
-		} else if covered[f.TicketID] {
+		} else if covered[f.TicketID+"\x1f"+f.Kind] {
 			continue
 		}
 		out.Tier2.Details = append(out.Tier2.Details, WWDDetail{
@@ -706,9 +784,10 @@ func MergeFloorIntoCard(service string, llmCard *WhatWasDoneCard, floor []L1Floo
 			Text:      f.Text,
 			Evidence:  append([]string{}, f.Evidence...),
 			SessionID: f.SessionID,
+			CLIs:      append([]string(nil), f.CLIs...),
 		})
 		if f.TicketID != "" {
-			covered[f.TicketID] = true
+			covered[f.TicketID+"\x1f"+f.Kind] = true
 		}
 		added++
 	}
@@ -737,4 +816,21 @@ func MergeFloorIntoCard(service string, llmCard *WhatWasDoneCard, floor []L1Floo
 		return nil
 	}
 	return &out
+}
+
+func unionStrings(a, b []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(a)+len(b))
+	for _, values := range [][]string{a, b} {
+		for _, value := range values {
+			value = strings.TrimSpace(value)
+			if value == "" || seen[value] {
+				continue
+			}
+			seen[value] = true
+			out = append(out, value)
+		}
+	}
+	sort.Strings(out)
+	return out
 }

@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -41,8 +42,8 @@ const tldrMaxLen = 120
 //   - v2 narrative shape (preferred): service_summary + cards[] with
 //     kind/ticket_id/title/body (markdown prose, ≤1200 chars) and typed
 //     refs[]. The dashboard renders this as stat tiles + per-ticket
-//     cards grouped by section (Features shipped / Bugs fixed /
-//     Decisions / Investigated · no fix landed). Optional followup line
+//     cards grouped by section (Features shipped / Major work / Bugs fixed /
+//     Decisions / Investigated / In progress). Optional followup line
 //     surfaces an open question for tomorrow.
 //
 //   - v1 legacy shape: tier1_tldr + details[] with kind/when:HH:MM/
@@ -133,13 +134,18 @@ func handleRecordProductivityCard(ctx context.Context, db *store.DB, in RecordPr
 			Text:      d.Text,
 			Evidence:  append([]string(nil), d.Evidence...),
 			SessionID: d.SessionID,
+			Day:       dayStr,
 		})
+	}
+	if err := enrichLegacyDetailsFromFloor(ctx, db, projectPath, dayStr, prodDetails); err != nil {
+		return nil, err
 	}
 	tier1 := productivity.BuildMechanicalTier1(prodDetails)
 	tier1.TLDR = tldr
 
 	card := productivity.WhatWasDoneCard{
 		Service:     service,
+		Day:         dayStr,
 		Tier1:       tier1,
 		LLMCompiled: true,
 	}
@@ -156,6 +162,80 @@ func handleRecordProductivityCard(ctx context.Context, db *store.DB, in RecordPr
 		DetailCount: len(prodDetails),
 		ShaCount:    tier1.CommitCount,
 	}, nil
+}
+
+func enrichLegacyDetailsFromFloor(
+	ctx context.Context,
+	db *store.DB,
+	projectPath, dayStr string,
+	details []productivity.WWDDetail,
+) error {
+	floor, err := productivity.BuildFloorFromStopSummaries(ctx, db.Read(), projectPath, dayStr)
+	if err != nil {
+		return fmt.Errorf("record_productivity_card: load source floor: %w", err)
+	}
+	for i := range details {
+		ticket := productivityTicket(details[i].Text + " " + strings.Join(details[i].Evidence, " "))
+		var exact, ticketMatches []productivity.L1FloorDetail
+		for _, source := range floor {
+			if ticket != "" && source.TicketID != ticket {
+				continue
+			}
+			if ticket == "" && source.SessionID != details[i].SessionID {
+				continue
+			}
+			ticketMatches = append(ticketMatches, source)
+			if source.Kind == details[i].Kind {
+				exact = append(exact, source)
+			}
+		}
+		if len(exact) == 0 {
+			exact = ticketMatches
+		}
+		for _, source := range exact {
+			details[i].CLIs = unionCLI(details[i].CLIs, source.CLIs)
+		}
+	}
+	return nil
+}
+
+func productivityTicket(text string) string {
+	for _, token := range strings.Fields(text) {
+		token = strings.Trim(token, ".,:;()[]{}")
+		if strings.HasPrefix(token, "CLI-") && len(token) > len("CLI-") {
+			allDigits := true
+			for _, r := range token[len("CLI-"):] {
+				if r < '0' || r > '9' {
+					allDigits = false
+					break
+				}
+			}
+			if allDigits {
+				return token
+			}
+		}
+	}
+	return ""
+}
+
+func unionCLI(existing, incoming []string) []string {
+	seen := map[string]bool{}
+	for _, cli := range existing {
+		if cli != "" {
+			seen[cli] = true
+		}
+	}
+	for _, cli := range incoming {
+		if cli != "" {
+			seen[cli] = true
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for cli := range seen {
+		out = append(out, cli)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // handleNarrativeCard is the v2 path: validates the narrative card
@@ -189,16 +269,17 @@ func handleNarrativeCard(ctx context.Context, db *store.DB, projectPath, dayStr,
 	}
 
 	// Convert to productivity types and compute stats from card kinds.
-	prodCards := make([]productivity.WWDCard, 0, len(in.Cards))
+	prodCards, err := reconcileNarrativeCardsWithFloor(ctx, db, projectPath, dayStr, in.Cards)
+	if err != nil {
+		return nil, err
+	}
 	stats := productivity.WWDStats{}
-	for _, c := range in.Cards {
-		prodCards = append(prodCards, productivity.WWDCard{
-			Kind: c.Kind, TicketID: c.TicketID, Title: c.Title, Body: c.Body,
-			Refs: copyProdRefs(c.Refs),
-		})
+	for _, c := range prodCards {
 		switch c.Kind {
-		case "SHIPPED", "MAJOR":
+		case "SHIPPED":
 			stats.Shipped++
+		case "MAJOR":
+			stats.Major++
 		case "FIXED":
 			stats.Fixed++
 		case "DECISION":
@@ -219,6 +300,9 @@ func handleNarrativeCard(ctx context.Context, db *store.DB, projectPath, dayStr,
 	}
 	if stats.Shipped > 0 {
 		tier1.PillCounts["shipped"] = stats.Shipped
+	}
+	if stats.Major > 0 {
+		tier1.PillCounts["major"] = stats.Major
 	}
 	if stats.Fixed > 0 {
 		tier1.PillCounts["fixed"] = stats.Fixed
@@ -257,6 +341,7 @@ func handleNarrativeCard(ctx context.Context, db *store.DB, projectPath, dayStr,
 
 	card := productivity.WhatWasDoneCard{
 		Service:     service,
+		Day:         dayStr,
 		Tier1:       tier1,
 		LLMCompiled: true,
 		Narrative: &productivity.WWDNarrative{
@@ -279,6 +364,87 @@ func handleNarrativeCard(ctx context.Context, db *store.DB, projectPath, dayStr,
 		DetailCount: len(prodCards),
 		ShaCount:    tier1.CommitCount,
 	}, nil
+}
+
+// reconcileNarrativeCardsWithFloor verifies generated refs against the
+// persisted summary floor and assigns CLI provenance deterministically.
+// When no floor exists (legacy/manual tool use), validation remains
+// backward-compatible and the cards are accepted without CLI enrichment.
+func reconcileNarrativeCardsWithFloor(
+	ctx context.Context,
+	db *store.DB,
+	projectPath, dayStr string,
+	cards []store.WWDCard,
+) ([]productivity.WWDCard, error) {
+	floor, err := productivity.BuildFloorFromStopSummaries(ctx, db.Read(), projectPath, dayStr)
+	if err != nil {
+		return nil, fmt.Errorf("record_productivity_card: load source floor: %w", err)
+	}
+	out := make([]productivity.WWDCard, 0, len(cards))
+	for i, c := range cards {
+		matches := floor
+		if c.TicketID != "" {
+			matches = nil
+			for _, f := range floor {
+				if f.TicketID == c.TicketID {
+					matches = append(matches, f)
+				}
+			}
+			if len(floor) > 0 && len(matches) == 0 {
+				return nil, fmt.Errorf("record_productivity_card: card %d ticket %q not present in source summaries", i, c.TicketID)
+			}
+		}
+
+		sourceTokens := map[string]bool{}
+		cliSet := map[string]bool{}
+		var sourceText strings.Builder
+		for _, f := range matches {
+			sourceText.WriteString(f.Text)
+			sourceText.WriteByte('\n')
+			for _, ev := range f.Evidence {
+				sourceTokens[strings.TrimSpace(ev)] = true
+			}
+			for _, cli := range f.CLIs {
+				if cli != "" {
+					cliSet[cli] = true
+				}
+			}
+		}
+		if len(floor) > 0 {
+			for j, r := range c.Refs {
+				refText := strings.TrimSpace(r.Text)
+				if !sourceTokens[refText] && !strings.Contains(sourceText.String(), refText) {
+					return nil, fmt.Errorf(
+						"record_productivity_card: card %d ref[%d] %q not present in source summaries",
+						i, j, refText,
+					)
+				}
+			}
+		}
+		clis := make([]string, 0, len(cliSet))
+		for cli := range cliSet {
+			clis = append(clis, cli)
+		}
+		sort.Strings(clis)
+		out = append(out, productivity.WWDCard{
+			Kind: c.Kind, TicketID: c.TicketID, Title: c.Title, Body: c.Body,
+			Refs: copyProdRefs(c.Refs), CLIs: clis, Day: dayStr,
+		})
+	}
+	// Persist the deterministic floor backfill with the generated prose.
+	// Otherwise a compiler that omitted one ticket/outcome would save a fresh
+	// timestamp but remain perpetually pending in compile discovery.
+	candidate := &productivity.WhatWasDoneCard{
+		Narrative: &productivity.WWDNarrative{Cards: out},
+	}
+	reconciled := productivity.MergeFloorIntoCard("", candidate, floor)
+	if reconciled != nil && reconciled.Narrative != nil {
+		out = reconciled.Narrative.Cards
+	}
+	for i := range out {
+		out[i].Day = dayStr
+	}
+	return out, nil
 }
 
 func copyProdRefs(refs []store.WWDRef) []productivity.WWDRef {
