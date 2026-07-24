@@ -129,11 +129,11 @@ type ringEntry struct {
 
 // ring is a fixed-size circular buffer of ringEntries.
 type ring struct {
-	mu      sync.Mutex
-	buf     [ringSize]ringEntry
-	head    int    // index of the next write slot
-	count   int    // number of valid entries (up to ringSize)
-	lastID  uint64 // highest id stored
+	mu     sync.Mutex
+	buf    [ringSize]ringEntry
+	head   int    // index of the next write slot
+	count  int    // number of valid entries (up to ringSize)
+	lastID uint64 // highest id stored
 }
 
 // push appends an event to the ring, overwriting the oldest entry when
@@ -178,8 +178,35 @@ func (rb *ring) since(afterID uint64) []ringEntry {
 
 // subscriber is a single SSE connection's state.
 type subscriber struct {
-	ch     chan Event
-	closed chan struct{} // closed when the subscriber is cancelled
+	mu       sync.Mutex
+	ch       chan Event
+	isClosed bool
+}
+
+// send delivers one event without blocking. The subscriber lock serializes
+// sends with close so a disconnect can never close the channel mid-send.
+func (s *subscriber) send(ev Event) (sent, open bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.isClosed {
+		return false, false
+	}
+	select {
+	case s.ch <- ev:
+		return true, true
+	default:
+		return false, true
+	}
+}
+
+func (s *subscriber) close() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.isClosed {
+		return
+	}
+	s.isClosed = true
+	close(s.ch)
 }
 
 // HubOption is a functional option for NewHub.
@@ -211,12 +238,12 @@ func WithLogger(l *slog.Logger) HubOption {
 type Hub struct {
 	cfg hubConfig
 
-	mu          sync.Mutex
-	subs        map[uint64]*subscriber
-	nextSubID   uint64
+	mu        sync.Mutex
+	subs      map[uint64]*subscriber
+	nextSubID uint64
 
-	seq    atomic.Uint64 // monotonic event sequence number
-	rb     ring
+	seq atomic.Uint64 // monotonic event sequence number
+	rb  ring
 
 	done   chan struct{} // closed by Close()
 	closed atomic.Bool
@@ -278,26 +305,28 @@ func (h *Hub) broadcast(ev Event, _ bool) {
 	h.mu.Unlock()
 
 	for _, s := range subs {
-		select {
-		case s.ch <- ev:
-		default:
+		if sent, open := s.send(ev); open && !sent {
 			h.cfg.logger.Warn("sse hub: subscriber slow, dropping event",
 				slog.String("event", ev.EventName()))
 		}
 	}
 }
 
-// subscribe is the internal registration helper. It returns the writable
-// channel (so callers like SubscribeWithReplay can pre-fill it with missed
-// events), along with a cancel function. The exported Subscribe and
-// SubscribeWithReplay methods narrow the channel to receive-only.
-func (h *Hub) subscribe() (chan Event, func()) {
+// subscribe is the internal registration helper. It returns the subscriber
+// (so replay can use the same close-safe send path as live delivery), along
+// with a cancel function. The exported methods expose only its receive channel.
+func (h *Hub) subscribe() (*subscriber, func()) {
 	h.mu.Lock()
+	if h.closed.Load() {
+		h.mu.Unlock()
+		s := &subscriber{ch: make(chan Event, subChanCap)}
+		s.close()
+		return s, func() {}
+	}
 	id := h.nextSubID
 	h.nextSubID++
 	s := &subscriber{
-		ch:     make(chan Event, subChanCap),
-		closed: make(chan struct{}),
+		ch: make(chan Event, subChanCap),
 	}
 	h.subs[id] = s
 	h.mu.Unlock()
@@ -310,11 +339,10 @@ func (h *Hub) subscribe() (chan Event, func()) {
 		}
 		h.mu.Unlock()
 		if ok {
-			close(s.ch)
-			close(s.closed)
+			s.close()
 		}
 	}
-	return s.ch, cancel
+	return s, cancel
 }
 
 // Subscribe registers a new subscriber and returns:
@@ -325,8 +353,8 @@ func (h *Hub) subscribe() (chan Event, func()) {
 // The caller MUST call cancel (e.g. via defer) to avoid a goroutine/memory
 // leak. The returned channel is closed when cancel is called.
 func (h *Hub) Subscribe() (<-chan Event, func()) {
-	ch, cancel := h.subscribe()
-	return ch, cancel
+	s, cancel := h.subscribe()
+	return s.ch, cancel
 }
 
 // SubscribeWithReplay is like Subscribe but also replays any buffered
@@ -334,20 +362,18 @@ func (h *Hub) Subscribe() (<-chan Event, func()) {
 // before live delivery begins. If the ring has rolled past afterID, only
 // the available suffix is replayed (best-effort).
 func (h *Hub) SubscribeWithReplay(afterID uint64) (<-chan Event, func()) {
-	ch, cancel := h.subscribe()
+	s, cancel := h.subscribe()
 
 	// Replay buffered events. Write to the writable side of the channel
 	// synchronously; drop if the buffer would overflow.
 	missed := h.rb.since(afterID)
 	for _, entry := range missed {
-		select {
-		case ch <- SeqEvent{Seq: entry.id, Inner: entry.event}:
-		default:
+		if sent, open := s.send(SeqEvent{Seq: entry.id, Inner: entry.event}); open && !sent {
 			h.cfg.logger.Warn("sse hub: replay dropped event",
 				slog.Uint64("id", entry.id))
 		}
 	}
-	return ch, cancel
+	return s.ch, cancel
 }
 
 // CurrentSeq returns the most recently assigned sequence number.
@@ -355,7 +381,6 @@ func (h *Hub) SubscribeWithReplay(afterID uint64) (<-chan Event, func()) {
 func (h *Hub) CurrentSeq() uint64 {
 	return h.seq.Load()
 }
-
 
 // Close shuts down the hub: stops the heartbeat goroutine and closes all
 // active subscriber channels so handlers can drain and exit.
@@ -371,7 +396,6 @@ func (h *Hub) Close() {
 	h.mu.Unlock()
 
 	for _, s := range subs {
-		close(s.ch)
-		close(s.closed)
+		s.close()
 	}
 }

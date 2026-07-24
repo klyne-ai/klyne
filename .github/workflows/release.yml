@@ -37,6 +37,8 @@ jobs:
   goreleaser:
     name: goreleaser
     runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: local
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -48,8 +50,9 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          # Match the Go toolchain declared in go.mod (currently go 1.25).
-          go-version-file: go.mod
+          # Match go.mod's toolchain directive exactly so GoReleaser cannot
+          # mix compiler and standard-library patch versions via the cache.
+          go-version: "1.25.3"
           cache: true
 
       - name: Set up Node

@@ -35,7 +35,10 @@ jobs:
     name: go test + vet + lint
     runs-on: ubuntu-24.04
     env:
-      GOTOOLCHAIN: auto
+      # Pin the compiler and standard library to the same patch release.
+      # Mixing setup-go's go directive (1.25.0) with go.mod's toolchain
+      # directive (1.25.3) can poison the shared build cache.
+      GOTOOLCHAIN: local
     steps:
       - uses: actions/checkout@v4
         with:
@@ -44,8 +47,14 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: "1.25.3"
           cache: true
+      - name: configure test git identity
+        # Productivity integration tests filter commits to the configured
+        # user identity. Fresh GitHub runners do not have one by default.
+        run: |
+          git config --global user.name "Klyne CI"
+          git config --global user.email "dev@example.com"
       # The embed.FS at module root needs ui/build/ to exist before any
       # Go compile step. Create an empty stub so go vet/test compile.
       # Real builds (release.yml) replace this with the actual UI bundle.
@@ -113,12 +122,12 @@ jobs:
     needs: [go, ui]
     runs-on: ubuntu-24.04
     env:
-      GOTOOLCHAIN: auto
+      GOTOOLCHAIN: local
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: "1.25.3"
           cache: true
       - uses: actions/setup-node@v4
         with:
