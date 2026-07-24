@@ -51,14 +51,14 @@ import (
 // need are left to the catch-all map for forward-compat.
 type CursorHookInput struct {
 	// Common base — present on every event except workspaceOpen.
-	HookEventName   string   `json:"hook_event_name"`
-	ConversationID  string   `json:"conversation_id"`
-	GenerationID    string   `json:"generation_id"`
-	Model           string   `json:"model"`
-	CursorVersion   string   `json:"cursor_version"`
-	WorkspaceRoots  []string `json:"workspace_roots"`
-	UserEmail       string   `json:"user_email"`
-	TranscriptPath  string   `json:"transcript_path"`
+	HookEventName  string   `json:"hook_event_name"`
+	ConversationID string   `json:"conversation_id"`
+	GenerationID   string   `json:"generation_id"`
+	Model          string   `json:"model"`
+	CursorVersion  string   `json:"cursor_version"`
+	WorkspaceRoots []string `json:"workspace_roots"`
+	UserEmail      string   `json:"user_email"`
+	TranscriptPath string   `json:"transcript_path"`
 
 	// sessionStart-specific.
 	SessionID         string `json:"session_id"`
@@ -78,9 +78,9 @@ type CursorHookInput struct {
 // session emits the same KLYNE_SUMMARY shape ExtractKlyneSummary
 // expects — that lets the same regex/skip handling cover both CLIs.
 const cursorAdditionalContext = "At the end of your reply, on its own line, emit exactly one of:\n" +
-	"  KLYNE_SUMMARY: <a 1-2 sentence, ≤100-word summary of what was done this turn — files touched, decisions, outcomes>\n" +
+	"  KLYNE_SUMMARY: <a 1-2 sentence, ≤100-word factual summary of completed work and any unfinished, blocked, deferred, or review-stage work; include literal ticket, branch, commit, and PR references when present>\n" +
 	"  KLYNE_SUMMARY: skip\n" +
-	"Use `skip` only when the turn was trivial (no edits, no commits, no decisions, no findings). Do not surround the line with code fences or quotes. Do not omit this line."
+	"Use `skip` only when the turn was trivial and created no actionable state (no edits, commits, decisions, findings, pending requests, blockers, or review work). Do not surround the line with code fences or quotes. Do not omit this line."
 
 // CursorHook is the single entry point for every Cursor hook event.
 // Reads the payload from stdin, dispatches by hook_event_name,

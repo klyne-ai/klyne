@@ -38,9 +38,9 @@ const adviseFiveHourCacheMs int64 = 60_000
 // guidance, not a binding mandate, so we lean on a clear, single rule.
 const klyneSummaryInstruction = "At the end of your reply, on its own line, " +
 	"emit exactly one of:\n" +
-	"  KLYNE_SUMMARY: <a 1-2 sentence, ≤100-word summary of what was done this turn — files touched, decisions, outcomes>\n" +
+	"  KLYNE_SUMMARY: <a 1-2 sentence, ≤100-word factual summary of completed work and any unfinished, blocked, deferred, or review-stage work; include literal ticket, branch, commit, and PR references when present>\n" +
 	"  KLYNE_SUMMARY: skip\n" +
-	"Use `skip` only when the turn was trivial (no edits, no commits, no decisions, no findings). " +
+	"Use `skip` only when the turn was trivial and created no actionable state (no edits, commits, decisions, findings, pending requests, blockers, or review work). " +
 	"Do not surround the line with code fences or quotes. " +
 	"Do not omit this line."
 

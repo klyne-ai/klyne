@@ -213,8 +213,16 @@ func (h *ProductivityHandler) Get(w http.ResponseWriter, r *http.Request) {
 	// is the current local FETCH_HEAD mtime — a "live state" fact
 	// that should never have been persisted in per-day snapshots.
 	h.enrichMergedPRs(ctx, &composite, since, until, force)
+	h.enrichPullRequests(ctx, &composite, force)
 	for i := range composite.Services {
 		composite.Services[i].GitFetchedAt = gitFetchedAt(composite.Services[i].ProjectPath)
+		if composite.Services[i].PullRequests == nil {
+			composite.Services[i].PullRequests = []productivity.PullRequest{}
+		}
+		if composite.Services[i].OpenItems == nil {
+			composite.Services[i].OpenItems = []productivity.OpenWorkItem{}
+		}
+		productivity.ReconcileOpenWork(&composite.Services[i])
 	}
 
 	// Pending-entries count: stop_summaries written across every service
@@ -458,6 +466,8 @@ func appendNonGitSummaryServices(
 			Risks:        []productivity.RiskSignal{},
 			MinutesByCLI: map[string]int{},
 			MergedPRs:    []productivity.MergedPR{},
+			PullRequests: []productivity.PullRequest{},
+			OpenItems:    []productivity.OpenWorkItem{},
 			// No git scan backs this service; it is a jsonl-only card.
 			ManualOnly: true,
 		})
@@ -711,7 +721,23 @@ func hydrateWhatWasDone(
 		if serviceKey == "" {
 			serviceKey = basePath(svc.ProjectPath)
 		}
-		if merged := productivity.MergeFloorIntoCard(serviceKey, compiled, floor); merged != nil {
+		mergeBase := compiled
+		if compiled != nil {
+			// The persisted prose predates a new summary. Render the current
+			// deterministic state immediately rather than preserving stale
+			// outcome text until the user runs Compile.
+			mergeBase = nil
+		}
+		if merged := productivity.MergeFloorIntoCard(serviceKey, mergeBase, floor); merged != nil {
+			merged.Day = dayStr
+			for j := range merged.Tier2.Details {
+				merged.Tier2.Details[j].Day = dayStr
+			}
+			if merged.Narrative != nil {
+				for j := range merged.Narrative.Cards {
+					merged.Narrative.Cards[j].Day = dayStr
+				}
+			}
 			// Stale day: force the badge off so pending_compile re-counts it
 			// even when the floor added no NEW ticket (e.g. more work on a
 			// ticket already in the card) — MergeFloorIntoCard only clears the

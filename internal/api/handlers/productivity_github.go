@@ -280,7 +280,7 @@ func queryMergedPRs(
 		"--author", "@me",
 		"--search", "merged:"+lo+".."+hi,
 		"--limit", "60",
-		"--json", "number,title,headRefName,mergedAt,createdAt",
+		"--json", "number,title,url,headRefName,mergedAt,createdAt,updatedAt,reviewDecision,author",
 	)
 	out, err := cmd.Output()
 	if err != nil {
@@ -288,11 +288,17 @@ func queryMergedPRs(
 	}
 
 	var raw []struct {
-		Number      int       `json:"number"`
-		Title       string    `json:"title"`
-		HeadRefName string    `json:"headRefName"`
-		MergedAt    time.Time `json:"mergedAt"`
-		CreatedAt   time.Time `json:"createdAt"`
+		Number         int       `json:"number"`
+		Title          string    `json:"title"`
+		URL            string    `json:"url"`
+		HeadRefName    string    `json:"headRefName"`
+		MergedAt       time.Time `json:"mergedAt"`
+		CreatedAt      time.Time `json:"createdAt"`
+		UpdatedAt      time.Time `json:"updatedAt"`
+		ReviewDecision string    `json:"reviewDecision"`
+		Author         struct {
+			Login string `json:"login"`
+		} `json:"author"`
 	}
 	if err := json.Unmarshal(out, &raw); err != nil {
 		return nil, nil, false
@@ -313,11 +319,15 @@ func queryMergedPRs(
 			continue
 		}
 		pr := productivity.MergedPR{
-			Number:   p.Number,
-			Title:    p.Title,
-			HeadRef:  p.HeadRefName,
-			MergedAt: p.MergedAt,
-			OpenedAt: p.CreatedAt,
+			Number:         p.Number,
+			Title:          p.Title,
+			URL:            p.URL,
+			HeadRef:        p.HeadRefName,
+			ReviewDecision: p.ReviewDecision,
+			Author:         p.Author.Login,
+			MergedAt:       p.MergedAt,
+			OpenedAt:       p.CreatedAt,
+			UpdatedAt:      p.UpdatedAt,
 		}
 		if !p.CreatedAt.IsZero() {
 			if d := pr.MergedAt.Sub(p.CreatedAt); d > 0 {

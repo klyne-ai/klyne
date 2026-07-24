@@ -80,7 +80,7 @@ func projectNeedsCompile(ctx context.Context, db *store.DB, projectPath, dayStr 
 		return true, nil
 	}
 	for _, f := range floor {
-		if f.TicketID != "" && !covered[f.TicketID] {
+		if f.TicketID != "" && !covered[f.TicketID+"\x1f"+f.Kind] {
 			return true, nil
 		}
 	}
@@ -108,8 +108,8 @@ func compiledFloorCoverage(ctx context.Context, db *store.DB, projectPath, daySt
 		}
 		compiled = true
 		compiledAt = snap.UpdatedAt
-		for tk := range productivity.CardTicketIDs(c) {
-			covered[tk] = true
+		for key := range productivity.CardOutcomeKeys(c) {
+			covered[key] = true
 		}
 	}
 	return compiled, compiledAt, covered

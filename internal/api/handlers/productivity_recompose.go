@@ -104,6 +104,12 @@ func RecomposeWhatWasDone(
 		return nil, fmt.Errorf("list reflections: %w", err)
 	}
 	cards := productivity.ComposeWWD(rows)
+	for i := range cards {
+		cards[i].Day = dayStr
+		for j := range cards[i].Tier2.Details {
+			cards[i].Tier2.Details[j].Day = dayStr
+		}
+	}
 
 	if err := persistRecomposedCards(ctx, db, projectPath, dayStr, cards); err != nil {
 		return cards, fmt.Errorf("persist snapshot: %w", err)
@@ -191,12 +197,14 @@ func persistRecomposedCards(
 			continue
 		}
 		stub := productivity.Service{
-			Repo:        key,
-			ProjectPath: projectPath,
-			Branches:    []productivity.Branch{},
-			Risks:       []productivity.RiskSignal{},
-			MergedPRs:   []productivity.MergedPR{},
-			WhatWasDone: cloneCardPtr(*c),
+			Repo:         key,
+			ProjectPath:  projectPath,
+			Branches:     []productivity.Branch{},
+			Risks:        []productivity.RiskSignal{},
+			MergedPRs:    []productivity.MergedPR{},
+			PullRequests: []productivity.PullRequest{},
+			OpenItems:    []productivity.OpenWorkItem{},
+			WhatWasDone:  cloneCardPtr(*c),
 		}
 		rep.Services = append(rep.Services, stub)
 	}

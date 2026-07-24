@@ -91,6 +91,9 @@ SELECT cli, COALESCE(ai_drafted_summary,''), files_json, recap_visible, ts
 		}
 		for _, detail := range service.WhatWasDone.Tier2.Details {
 			if detail.Text == clientSummary {
+				if len(detail.CLIs) != 1 || detail.CLIs[0] != "codex" {
+					t.Fatalf("Codex summary CLI attribution = %v, want [codex]", detail.CLIs)
+				}
 				return
 			}
 		}

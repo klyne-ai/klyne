@@ -87,11 +87,11 @@ var detailWhenRe = regexp.MustCompile(`^[0-2][0-9]:[0-5][0-9]$`)
 // recorder accepts either or both; ValidateWWDPayload picks the right
 // rule set per generation.
 type WWDPayload struct {
-	Service        string      `json:"service"`
-	ServiceSummary string      `json:"service_summary,omitempty"`
-	Stats          *WWDStats   `json:"stats,omitempty"`
-	Cards          []WWDCard   `json:"cards,omitempty"`
-	Followup       string      `json:"followup,omitempty"`
+	Service        string    `json:"service"`
+	ServiceSummary string    `json:"service_summary,omitempty"`
+	Stats          *WWDStats `json:"stats,omitempty"`
+	Cards          []WWDCard `json:"cards,omitempty"`
+	Followup       string    `json:"followup,omitempty"`
 	// Legacy v1 — kept for back-compat. New writers populate Cards.
 	Details []WWDDetail `json:"details,omitempty"`
 }
@@ -102,6 +102,7 @@ type WWDPayload struct {
 // custom phrasing (e.g. lumping MAJOR into "shipped" for UX).
 type WWDStats struct {
 	Shipped      int `json:"shipped"`
+	Major        int `json:"major,omitempty"`
 	Fixed        int `json:"fixed"`
 	Decisions    int `json:"decisions"`
 	Investigated int `json:"investigated"`

@@ -2,7 +2,7 @@
   WhatWasDoneCard — per-service productivity card.
 
   v2 (2026-05-27): when `card.narrative` is present, render the redesigned
-  layout — service summary paragraph + 4 stat tiles + sectioned per-ticket
+  layout — service summary paragraph + 5 stat tiles + sectioned per-ticket
   narrative cards (Features shipped / Bugs fixed / Decisions /
   Investigated · no fix landed) + optional followup line.
 
@@ -28,12 +28,13 @@
   }
   let { card, onOpenEntry, defaultOpen = false }: Props = $props();
 
-  const hasNarrative = $derived(!!card.narrative && card.narrative.cards.length > 0);
+  const hasNarrative = $derived(!!card.narrative);
 
   // --- collapsible state (project + per-section) ------------------------
   // projectOpen drives the outer disclosure. When false the card renders
   // as a single tappable row with inline stats; when true the full
   // narrative body (tiles, summary, sections, followup) renders.
+  // svelte-ignore state_referenced_locally
   let projectOpen = $state(defaultOpen);
   // sectionsOpen is a per-section flag keyed by section.key (shipped,
   // fixed, decisions, …). Sections also default collapsed; the user
@@ -85,7 +86,8 @@
   type NarrativeSection = { key: string; label: string; kinds: WWDKind[]; cards: WWDNarrativeCard[] };
 
   const SECTION_ORDER: readonly { key: string; label: string; kinds: WWDKind[] }[] = [
-    { key: 'shipped',      label: 'Features shipped',             kinds: ['SHIPPED', 'MAJOR'] },
+    { key: 'shipped',      label: 'Features shipped',             kinds: ['SHIPPED'] },
+    { key: 'major',        label: 'Major work',                    kinds: ['MAJOR'] },
     { key: 'fixed',        label: 'Bugs fixed',                   kinds: ['FIXED'] },
     { key: 'decisions',    label: 'Decisions',                    kinds: ['DECISION'] },
     { key: 'investigated', label: 'Investigated · no fix landed', kinds: ['INVESTIGATED'] },
@@ -156,10 +158,11 @@
       <span class="nv-caret" class:open={projectOpen} aria-hidden="true">▸</span>
       <span class="mono nv-service">{card.service}</span>
       {#if card.llm_compiled}
-        <span class="nv-badge mono" title="Card composed by /klyne:productivity-sync">opus · auto</span>
+        <span class="nv-badge mono" title="Card composed and reconciled by /klyne:productivity-sync">AI · reconciled</span>
       {/if}
+      {#if card.day}<span class="nv-day mono dim">{card.day}</span>{/if}
       <span class="grow"></span>
-      <!-- At-a-glance stat strip — always visible (in both collapsed and
+      <!-- At-a-glance stat strip - always visible (in both collapsed and
            expanded states) so a quick scan tells you what's inside. -->
       <span class="nv-head-stats">
         {#if (stats?.shipped ?? 0) > 0}
@@ -174,7 +177,13 @@
         {#if (stats?.investigated ?? 0) > 0}
           <span class="nv-head-stat nv-head-stat-muted mono">{stats?.investigated} investigated</span>
         {/if}
-        {#if !stats || (stats.shipped + stats.fixed + stats.decisions + stats.investigated === 0)}
+        {#if (stats?.major ?? 0) > 0}
+          <span class="nv-head-stat nv-head-stat-info mono">{stats?.major} major</span>
+        {/if}
+        {#if (card.open_items?.length ?? 0) > 0}
+          <span class="nv-head-stat nv-head-stat-warn mono">{card.open_items?.length} open</span>
+        {/if}
+        {#if (!stats || (stats.shipped + (stats.major ?? 0) + stats.fixed + stats.decisions + stats.investigated + (stats.in_progress ?? 0) === 0)) && (card.open_items?.length ?? 0) === 0}
           <span class="nv-head-stat nv-head-stat-muted mono">no activity</span>
         {/if}
       </span>
@@ -198,6 +207,10 @@
           <div class="nv-tile">
             <div class="nv-tile-num">{stats?.investigated ?? 0}</div>
             <div class="nv-tile-label">investigated</div>
+          </div>
+          <div class="nv-tile">
+            <div class="nv-tile-num">{card.open_items?.length ?? 0}</div>
+            <div class="nv-tile-label">open work</div>
           </div>
         </div>
 
@@ -230,13 +243,23 @@
                         {#if c.ticket_id}
                           <span class="nv-card-ticket mono">·  {c.ticket_id}</span>
                         {/if}
+                        {#if c.day}<span class="mono dim nv-card-day">{c.day}</span>{/if}
+                        {#each c.clis ?? [] as cli}
+                          <span class="mono nv-cli nv-cli-{cli}">{cli}</span>
+                        {/each}
                       </header>
                       <h5 class="nv-card-title">{c.title}</h5>
                       <div class="nv-card-prose">{@html renderBody(c.body)}</div>
                       {#if c.refs && c.refs.length > 0}
                         <div class="nv-card-refs">
                           {#each c.refs as r, ri (r.type + '|' + r.text + '|' + ri)}
-                            <span class={refClass(r)}>{r.text}</span>
+                            {#if r.url}
+                              <a class={refClass(r)} href={r.url} target="_blank" rel="noreferrer">
+                                {r.text}{#if r.pr_state}<span class="ref-state">{r.pr_state.toLowerCase()}</span>{/if}
+                              </a>
+                            {:else}
+                              <span class={refClass(r)} class:ref-unverified={r.type === 'pr' && !r.verified}>{r.text}</span>
+                            {/if}
                           {/each}
                         </div>
                       {/if}
@@ -247,6 +270,40 @@
             {/if}
           </section>
         {/each}
+
+        {#if (card.open_items ?? []).length > 0}
+          <section class="nv-open">
+            <header class="nv-open-head">
+              <span>Open work</span>
+              <span class="mono dim">({card.open_items?.length ?? 0})</span>
+            </header>
+            <div class="nv-open-list">
+              {#each card.open_items ?? [] as item (item.key)}
+                <article class="nv-open-item nv-open-{item.status}">
+                  <div class="nv-open-row">
+                    <span class="mono nv-open-status">{item.status.replaceAll('_', ' ')}</span>
+                    {#if item.ticket_id}<span class="mono dim">{item.ticket_id}</span>{/if}
+                    <span class="grow"></span>
+                    {#each item.clis ?? [] as cli}<span class="mono nv-cli nv-cli-{cli}">{cli}</span>{/each}
+                    <span class="mono dim">{item.source}</span>
+                  </div>
+                  <p>{item.title}</p>
+                  {#if (item.refs ?? []).length > 0}
+                    <div class="nv-card-refs">
+                      {#each item.refs ?? [] as r, ri (r.type + '|' + r.text + '|' + ri)}
+                        {#if r.url}
+                          <a class={refClass(r)} href={r.url} target="_blank" rel="noreferrer">{r.text}</a>
+                        {:else}
+                          <span class={refClass(r)}>{r.text}</span>
+                        {/if}
+                      {/each}
+                    </div>
+                  {/if}
+                </article>
+              {/each}
+            </div>
+          </section>
+        {/if}
 
         {#if card.narrative.followup}
           <aside class="nv-followup">
@@ -261,7 +318,7 @@
     <header class="wwd-head">
       <span class="mono wwd-service">{card.service}</span>
       {#if card.llm_compiled}
-        <span class="wwd-sonnet-badge mono" title="Card composed by /klyne:productivity-sync (Sonnet)">sonnet · auto</span>
+        <span class="wwd-sonnet-badge mono" title="Card composed and reconciled by /klyne:productivity-sync">AI · reconciled</span>
       {/if}
       <div class="wwd-pills">
         {#each pillRows as r (r.key)}
@@ -444,19 +501,21 @@
     background: var(--bg-inset);
     font-size: 10.5px;
     line-height: 1.4;
-    letter-spacing: 0.01em;
+    letter-spacing: 0;
     white-space: nowrap;
   }
   .nv-head-stat-ok      { color: var(--ok);     border-color: color-mix(in oklch, var(--ok)     30%, transparent); background: color-mix(in oklch, var(--ok)     8%, var(--bg-inset)); }
   .nv-head-stat-alert   { color: var(--alert);  border-color: color-mix(in oklch, var(--alert)  30%, transparent); background: color-mix(in oklch, var(--alert)  8%, var(--bg-inset)); }
   .nv-head-stat-accent  { color: var(--accent); border-color: color-mix(in oklch, var(--accent) 30%, transparent); background: color-mix(in oklch, var(--accent) 8%, var(--bg-inset)); }
+  .nv-head-stat-info    { color: var(--info); border-color: color-mix(in oklch, var(--info) 30%, transparent); background: color-mix(in oklch, var(--info) 8%, var(--bg-inset)); }
+  .nv-head-stat-warn    { color: var(--warn); border-color: color-mix(in oklch, var(--warn) 30%, transparent); background: color-mix(in oklch, var(--warn) 8%, var(--bg-inset)); }
   .nv-head-stat-muted   { color: var(--fg-muted); }
 
   .nv-service {
     color: var(--fg);
     font-size: 15px;
     font-weight: 600;
-    letter-spacing: 0.01em;
+    letter-spacing: 0;
   }
   .nv-badge {
     display: inline-flex;
@@ -464,15 +523,19 @@
     padding: 1px 7px;
     border-radius: 4px;
     font-size: 10px;
-    letter-spacing: 0.04em;
+    letter-spacing: 0;
     color: var(--accent);
     border: 1px solid color-mix(in oklch, var(--accent) 35%, transparent);
     background: color-mix(in oklch, var(--accent) 8%, var(--bg-card-2));
   }
+  .nv-day {
+    font-size: 10.5px;
+    white-space: nowrap;
+  }
 
   .nv-tiles {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 10px;
   }
   .nv-tile {
@@ -498,7 +561,7 @@
     font-family: var(--font-mono);
     font-size: 10.5px;
     color: var(--fg-muted);
-    letter-spacing: 0.02em;
+    letter-spacing: 0;
   }
 
   .nv-summary {
@@ -529,7 +592,7 @@
     font-size: 10.5px;
     font-weight: 500;
     text-transform: uppercase;
-    letter-spacing: 0.08em;
+    letter-spacing: 0;
     background: transparent;
     border: 1px solid var(--border-hair);
     border-radius: 6px;
@@ -587,7 +650,7 @@
     gap: 4px;
     font-family: var(--font-mono);
     font-size: 10.5px;
-    letter-spacing: 0.05em;
+    letter-spacing: 0;
     text-transform: uppercase;
   }
   .nv-card-kind { font-weight: 600; }
@@ -601,6 +664,27 @@
     color: var(--fg-muted);
     font-weight: 500;
   }
+  .nv-card-day {
+    margin-left: auto;
+    font-size: 10px;
+    text-transform: none;
+    white-space: nowrap;
+  }
+  .nv-cli {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 5px;
+    border: 1px solid var(--border-hair);
+    border-radius: 4px;
+    color: var(--fg-muted);
+    background: var(--bg-inset);
+    font-size: 9.5px;
+    line-height: 1.4;
+    text-transform: lowercase;
+    white-space: nowrap;
+  }
+  .nv-cli-claude { color: var(--accent); }
+  .nv-cli-codex { color: var(--info); }
   .nv-card-title {
     margin: 0;
     font-size: 14px;
@@ -642,6 +726,7 @@
     color: var(--fg-soft);
     background: var(--bg-inset);
     line-height: 1.4;
+    text-decoration: none;
   }
   .ref-file    { color: var(--fg-soft); }
   .ref-branch  { color: var(--info);  border-color: color-mix(in oklch, var(--info)   25%, transparent); background: color-mix(in oklch, var(--info)   6%, var(--bg-inset)); }
@@ -650,6 +735,70 @@
   .ref-ticket  { color: var(--accent); }
   .ref-test    { color: var(--fg-muted); }
   .ref-session { color: var(--fg-dim); }
+  .ref-state {
+    margin-left: 5px;
+    color: var(--fg-muted);
+    font-size: 9px;
+    font-weight: 500;
+  }
+  .ref-unverified {
+    border-style: dashed;
+    color: var(--fg-muted);
+  }
+
+  .nv-open {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    border-top: 1px solid var(--border-hair);
+    padding-top: 12px;
+  }
+  .nv-open-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--fg-soft);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+  .nv-open-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .nv-open-item {
+    border: 1px solid var(--border-hair);
+    border-left: 3px solid var(--warn);
+    border-radius: 6px;
+    background: var(--bg-card);
+    padding: 10px 12px;
+  }
+  .nv-open-blocked { border-left-color: var(--alert); }
+  .nv-open-ready_to_merge { border-left-color: var(--ok); }
+  .nv-open-in_review { border-left-color: var(--accent); }
+  .nv-open-row {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+    font-size: 10px;
+  }
+  .nv-open-status {
+    color: var(--warn);
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+  .nv-open-blocked .nv-open-status { color: var(--alert); }
+  .nv-open-ready_to_merge .nv-open-status { color: var(--ok); }
+  .nv-open-in_review .nv-open-status { color: var(--accent); }
+  .nv-open-item p {
+    margin: 6px 0 0;
+    color: var(--fg-soft);
+    font-size: 12.5px;
+    line-height: 1.45;
+  }
 
   .nv-followup {
     border: 1px solid color-mix(in oklch, var(--warn) 25%, transparent);
@@ -663,7 +812,7 @@
   .nv-followup-label {
     font-family: var(--font-mono);
     font-size: 10px;
-    letter-spacing: 0.06em;
+    letter-spacing: 0;
     text-transform: uppercase;
     color: var(--warn);
   }
@@ -687,7 +836,7 @@
     color: var(--fg);
     font-size: 13px;
     font-weight: 600;
-    letter-spacing: 0.01em;
+    letter-spacing: 0;
   }
   .wwd-sonnet-badge {
     display: inline-flex;
@@ -695,13 +844,13 @@
     padding: 1px 6px;
     border-radius: 4px;
     font-size: 10px;
-    letter-spacing: 0.04em;
+    letter-spacing: 0;
     color: var(--accent);
     border: 1px solid color-mix(in oklch, var(--accent) 35%, transparent);
     background: color-mix(in oklch, var(--accent) 8%, var(--bg-card-2));
   }
   .wwd-pills { display: flex; gap: 6px; flex-wrap: wrap; }
-  .wwd-pill { font-size: 10.5px; letter-spacing: 0.02em; padding: 1px 7px; }
+  .wwd-pill { font-size: 10.5px; letter-spacing: 0; padding: 1px 7px; }
   .grow { flex: 1; }
   .wwd-meta {
     display: inline-flex;
@@ -730,7 +879,7 @@
     border: 1px solid var(--border-hair);
     padding: 1px 6px;
     border-radius: 4px;
-    letter-spacing: 0.01em;
+    letter-spacing: 0;
   }
   .wwd-disclose {
     align-self: flex-start;
@@ -789,7 +938,7 @@
     min-width: 80px;
     text-align: center;
     font-size: 10px;
-    letter-spacing: 0.04em;
+    letter-spacing: 0;
   }
   .wwd-detail-when {
     color: var(--fg-soft);
@@ -814,4 +963,36 @@
     max-width: 28ch;
   }
   .wwd-detail-ev :global(.mono) { font-variant-numeric: tabular-nums; }
+
+  @media (max-width: 820px) {
+    .nv-head {
+      align-items: flex-start;
+      flex-wrap: wrap;
+    }
+    .nv-head-stats {
+      width: 100%;
+      justify-content: flex-start;
+      padding-left: 22px;
+    }
+    .nv-tiles {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .nv-card-head {
+      flex-wrap: wrap;
+    }
+    .nv-card-day {
+      margin-left: 0;
+    }
+    .nv-open-row {
+      flex-wrap: wrap;
+    }
+    .wwd-detail {
+      grid-template-columns: 88px 44px minmax(0, 1fr);
+    }
+    .wwd-detail-ev {
+      grid-column: 3;
+      align-items: flex-start;
+      max-width: none;
+    }
+  }
 </style>
