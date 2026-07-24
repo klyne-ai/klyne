@@ -15,7 +15,10 @@ linters:
     - unused        # Unused code detection
     - gocyclo       # Cyclomatic complexity
     - goconst       # Repeated string literals that should be constants
-    - gofumpt       # Stricter gofmt formatting
 
   # Nothing disabled — every enabled linter is intentional.
   # Add disable entries only with a justifying comment.
+
+formatters:
+  enable:
+    - gofumpt       # Stricter gofmt formatting

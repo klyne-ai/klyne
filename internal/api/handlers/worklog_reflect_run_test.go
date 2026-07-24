@@ -210,9 +210,11 @@ func TestReflectRun_ClientCancelKillsSubprocess(t *testing.T) {
 	const proj = "/proj/known"
 	seedAllowlist(t, db, proj)
 
+	entered := make(chan struct{})
 	observed := make(chan struct{})
 	runner := &stubRunner{
 		fn: func(ctx context.Context, _ string) (claudeRunResult, error) {
+			close(entered)
 			<-ctx.Done() // block until client disconnects / context cancelled
 			close(observed)
 			return claudeRunResult{Output: "partial", Model: "stub"}, ctx.Err()
@@ -240,7 +242,7 @@ func TestReflectRun_ClientCancelKillsSubprocess(t *testing.T) {
 	// Wait a beat so the handler has actually entered runner.fn before
 	// we cancel — otherwise the test races on the goroutine ordering.
 	select {
-	case <-runnerEntered(runner):
+	case <-entered:
 	case <-time.After(2 * time.Second):
 		t.Fatalf("handler never invoked runner")
 	}
@@ -255,22 +257,6 @@ func TestReflectRun_ClientCancelKillsSubprocess(t *testing.T) {
 		t.Fatalf("runner did not observe context cancellation within 2s")
 	}
 	<-errCh // drain
-}
-
-// runnerEntered returns a channel that fires once stubRunner.run has been
-// called at least once. Polls runner.calls every 5ms.
-func runnerEntered(s *stubRunner) <-chan struct{} {
-	ch := make(chan struct{})
-	go func() {
-		for {
-			if len(s.calls) > 0 {
-				close(ch)
-				return
-			}
-			time.Sleep(5 * time.Millisecond)
-		}
-	}()
-	return ch
 }
 
 func TestReflectRun_RejectsMissingBody(t *testing.T) {
