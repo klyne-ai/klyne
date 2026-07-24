@@ -344,3 +344,50 @@ func TestSameOriginOnly_AllowsPostWithNoOrigin(t *testing.T) {
 		t.Errorf("expected 200 for loopback POST with no Origin, got %d", w.Code)
 	}
 }
+
+// TestSameOriginOnly_RejectsNoOriginCrossSiteFetchMetadata verifies that
+// browser requests without Origin are still rejected when Fetch Metadata marks
+// them as cross-site. This covers subresource CSRF probes such as <img src>
+// against side-effecting GET endpoints.
+func TestSameOriginOnly_RejectsNoOriginCrossSiteFetchMetadata(t *testing.T) {
+	t.Parallel()
+
+	router := api.NewRouter(api.Deps{
+		Mounters: []api.RouterMounter{&fakeMount{path: "/ping", status: http.StatusOK}},
+	})
+
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		req := newLoopbackRequest(method, "/ping")
+		req.Host = "127.0.0.1:7878"
+		req.Header.Set("Sec-Fetch-Site", "cross-site")
+
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		if w.Code != http.StatusForbidden {
+			t.Errorf("%s: expected 403 for cross-site Fetch Metadata, got %d", method, w.Code)
+		}
+	}
+}
+
+// TestSameOriginOnly_AllowsNoOriginSameOriginFetchMetadata keeps normal
+// same-origin browser requests working when the browser includes Fetch
+// Metadata but omits Origin.
+func TestSameOriginOnly_AllowsNoOriginSameOriginFetchMetadata(t *testing.T) {
+	t.Parallel()
+
+	router := api.NewRouter(api.Deps{
+		Mounters: []api.RouterMounter{&fakeMount{path: "/ping", status: http.StatusOK}},
+	})
+
+	req := newLoopbackRequest(http.MethodGet, "/ping")
+	req.Host = "127.0.0.1:7878"
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 for same-origin Fetch Metadata, got %d", w.Code)
+	}
+}
