@@ -120,7 +120,8 @@ func loopbackOnly(next http.Handler) http.Handler {
 }
 
 // sameOriginOnly is a chi middleware that guards against CSRF and DNS-rebind
-// attacks by validating the Host and Origin headers on every request.
+// attacks by validating the Host, Fetch Metadata, and Origin headers on every
+// request.
 //
 // Threat model: a rebound domain pointing at 127.0.0.1 bypasses loopbackOnly
 // (which checks RemoteAddr) but can still trigger endpoints from a browser
@@ -138,9 +139,11 @@ func loopbackOnly(next http.Handler) http.Handler {
 //     a. not be "null" (sandboxed iframes / redirects — never trusted), and
 //     b. resolve to a loopback host, and
 //     c. match the request's own Host header host:port, so a page served by
-//        another loopback PORT is rejected (cross-port CSRF).
-//     Requests with NO Origin are allowed (curl, CLI tools, and same-origin
-//     fetches where the browser omits Origin) — they cannot be cross-site.
+//     another loopback PORT is rejected (cross-port CSRF).
+//     Requests with NO Origin are allowed only when they are not identifiable
+//     browser cross-site requests via Sec-Fetch-Site. This preserves curl/CLI
+//     tools (which omit Fetch Metadata) while rejecting image/link/script-style
+//     browser probes that do not carry Origin.
 //
 // This middleware is applied after loopbackOnly so RemoteAddr is already
 // known to be loopback — these are layered defenses.
@@ -165,6 +168,26 @@ func sameOriginOnly(next http.Handler) http.Handler {
 
 		// --- Rule 2: validate Origin (when present) on ALL methods ---
 		origin := strings.TrimSpace(r.Header.Get("Origin"))
+
+		// Browser-only CSRF defense for requests that do not carry Origin.
+		// Cross-site subresource requests (for example <img src=...>) usually
+		// omit Origin but do include Sec-Fetch-Site: cross-site. Treat same-site
+		// as untrusted too because loopback aliases and sibling dev servers are
+		// not the same origin as this daemon.
+		if origin == "" {
+			site := strings.TrimSpace(r.Header.Get("Sec-Fetch-Site"))
+			switch site {
+			case "", "same-origin", "none":
+				// same-origin fetches and user-initiated direct navigations.
+			case "same-site", "cross-site":
+				forbiddenOrigin(w)
+				return
+			default:
+				forbiddenOrigin(w)
+				return
+			}
+		}
+
 		if origin != "" {
 			// "null" Origin is sent by sandboxed iframes / redirects and
 			// must never be trusted.
@@ -242,4 +265,3 @@ func forbiddenOrigin(w http.ResponseWriter) {
 	w.WriteHeader(http.StatusForbidden)
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": "forbidden_origin"})
 }
-
