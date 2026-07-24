@@ -64,6 +64,7 @@ jobs:
           npm ci
           npm run build
           test -s build/index.html
+          printf '%s\n' '# Generated assets are ignored; this file keeps the directory embeddable.' > build/.gitkeep
 
       - name: Install Cosign
         uses: sigstore/cosign-installer@v4.1.2

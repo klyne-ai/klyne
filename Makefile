@@ -57,6 +57,7 @@ build-ui:
 		echo "ui/package.json not found — skipping UI build (W13 wires this)"; \
 		mkdir -p ui/build; \
 	fi
+	@printf '%s\n' '# Generated assets are ignored; this file keeps the directory embeddable.' > ui/build/.gitkeep
 
 # Dev: run backend and frontend in separate terminals.
 # W13 wires real hot-reload; for now this is a placeholder.
